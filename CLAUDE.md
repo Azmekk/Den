@@ -2,7 +2,7 @@
 
 ## Database Migrations
 
-All migration commands use the `migrate/migrate` Docker image. On Windows/Git Bash, prefix with `MSYS_NO_PATHCONV=1` to prevent path mangling.
+All migration commands use the `migrate/migrate` Docker image. Prefix with `MSYS_NO_PATHCONV=1` to prevent Git Bash path mangling.
 
 **Run all up migrations:**
 ```sh
