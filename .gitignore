@@ -1,0 +1,22 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/den
+
+# Node / Bun
+node_modules/
+
+# SvelteKit
+src/web/.svelte-kit/
+src/web/build/
+!src/web/build/.gitkeep
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
