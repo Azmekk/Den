@@ -11,7 +11,10 @@ import (
 
 	"github.com/martinmckenna/den/src"
 	"github.com/martinmckenna/den/src/internal/auth"
+	"github.com/martinmckenna/den/src/internal/channel"
 	"github.com/martinmckenna/den/src/internal/db"
+	"github.com/martinmckenna/den/src/internal/message"
+	"github.com/martinmckenna/den/src/internal/ws"
 
 	_ "github.com/lib/pq"
 )
@@ -48,6 +51,10 @@ func main() {
 
 	queries := db.New(conn)
 	authService := auth.NewService(queries, jwtSecret, openRegistration)
+	channelService := channel.NewService(queries)
+	messageService := message.NewService(queries)
+	hub := ws.NewHub()
+	go hub.Run()
 
 	mux := http.NewServeMux()
 
@@ -60,6 +67,19 @@ func main() {
 	// Protected routes
 	mux.Handle("GET /api/me", authService.RequireAuth(http.HandlerFunc(authService.MeHandler)))
 	mux.Handle("POST /api/change-password", authService.RequireAuth(http.HandlerFunc(authService.ChangePasswordHandler)))
+
+	// Channel CRUD
+	mux.Handle("GET /api/channels", authService.RequireAuth(http.HandlerFunc(channelService.ListHandler)))
+	mux.Handle("GET /api/channels/{id}", authService.RequireAuth(http.HandlerFunc(channelService.GetHandler)))
+	mux.Handle("POST /api/channels", authService.RequireAdmin(http.HandlerFunc(channelService.CreateHandler)))
+	mux.Handle("PUT /api/channels/{id}", authService.RequireAdmin(http.HandlerFunc(channelService.UpdateHandler)))
+	mux.Handle("DELETE /api/channels/{id}", authService.RequireAdmin(http.HandlerFunc(channelService.DeleteHandler)))
+
+	// Message history
+	mux.Handle("GET /api/channels/{id}/messages", authService.RequireAuth(http.HandlerFunc(messageService.GetHistoryHandler)))
+
+	// WebSocket (auth via query param, not middleware)
+	mux.HandleFunc("GET /api/ws", ws.ServeWS(hub, authService, messageService))
 
 	// Static files
 	staticFS, err := fs.Sub(src.StaticFiles, "web/build")
