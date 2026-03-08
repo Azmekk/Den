@@ -22,7 +22,7 @@ A lightweight, self-hostable chat and voice application for small communities (2
 | **Real-time** | WebSockets (native Go `gorilla/websocket`) | For chat message delivery and presence |
 | **Voice** | LiveKit (self-hosted) | Open-source WebRTC SFU; handles voice mixing server-side, reasonable quality, Docker-friendly |
 | **Auth** | bcrypt + JWT (short-lived) + refresh tokens | Simple, no external deps |
-| **Image proxying** | Server-side oEmbed + URL validation | See image section below |
+| **Object storage** | S3-compatible bucket (MinIO, R2, S3) | Emotes, profile pics, uploaded images; config via env vars |
 | **Deployment** | Docker Compose | Single-command self-host; nginx reverse proxy in front |
 
 ---
@@ -53,6 +53,7 @@ CREATE TABLE users (
   username    TEXT NOT NULL UNIQUE,
   password    TEXT NOT NULL,           -- bcrypt hash
   color       TEXT NOT NULL DEFAULT '#5865F2',
+  avatar_filename TEXT,               -- bucket object key (avatars/{uuid}.webp), NULL = no avatar
   is_admin    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -108,7 +109,7 @@ CREATE VIEW pinned_messages AS
 CREATE TABLE custom_emotes (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL UNIQUE,            -- shortcode (alphanumeric + underscores, 2-32 chars)
-  filename    TEXT NOT NULL,                   -- stored filename on disk (uuid.ext)
+  filename    TEXT NOT NULL,                   -- bucket object key (emotes/{uuid}.webp)
   uploaded_by UUID NOT NULL REFERENCES users(id),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -128,6 +129,17 @@ CREATE TABLE message_mentions (
   PRIMARY KEY (message_id, user_id)
 );
 CREATE INDEX message_mentions_user ON message_mentions(user_id);
+
+-- Tracks uploaded media files (for ephemeral upload cleanup)
+CREATE TABLE media_uploads (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  uploader_id UUID NOT NULL REFERENCES users(id),
+  bucket_key  TEXT NOT NULL,              -- e.g. "videos/{uuid}.mp4"
+  media_type  TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
+  expires_at  TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),  -- all inline uploads expire after 24h
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX media_uploads_expires ON media_uploads(expires_at);
 ```
 
 ---
@@ -193,9 +205,29 @@ The GIN index makes the `tsquery` fast. The other indexes make date/author filte
 
 ## Image & Video Embedding
 
-**The approach:** The client never uploads files. Instead, users paste URLs. The backend validates and enriches them.
+**The approach:** Users can upload images directly (when bucket storage is configured) or paste external URLs. The backend validates, converts, and enriches them.
 
-### Flow
+### Media Upload (requires bucket storage)
+
+When bucket storage is configured (`BUCKET_*` env vars set):
+
+1. A paperclip button appears in the message bar (hidden when uploads are disabled). On desktop, users can also drag and drop files onto the message area to upload.
+2. User picks an image (PNG, JPG, GIF, WebP — max 25 MB) or video (MP4, WebM — max 100 MB).
+3. Frontend POSTs the file to `POST /api/upload/image` or `POST /api/upload/video`.
+4. **Images:** Backend validates, converts to WebP (animated GIFs kept as-is), stores in bucket under `images/{uuid}.webp`.
+5. **Videos:** Backend validates format + size, stores as-is (no transcoding) under `videos/{uuid}.{ext}`.
+6. Backend returns the public URL. Frontend inserts it into the message input.
+7. User sends the message as normal — the URL is embedded like any other media URL.
+
+**Ephemeral uploads:** All inline image and video uploads are auto-deleted from the bucket after 24 hours. A background goroutine runs periodically to purge expired uploads. After expiry, the message text retains the URL but the media will no longer load — the frontend shows a "media expired" placeholder. A `media_uploads` table tracks all uploaded files and their expiry.
+
+**Not ephemeral:** Emotes and profile pictures are **permanent** — only inline image/video uploads are ephemeral.
+
+**Profile pictures:** Max 5 MB upload. User can position/crop via a small UI menu before submitting. Server converts the cropped result to 128×128 WebP.
+
+When bucket storage is **not** configured, the paperclip button is hidden. Users can still paste external image/video URLs manually.
+
+### External URL Embeds
 
 1. User pastes a URL into the message box.
 2. Frontend detects the URL pattern and shows a small preview badge before sending.
@@ -208,22 +240,10 @@ The GIN index makes the `tsquery` fast. The other indexes make date/author filte
 | Type | Detection | Render |
 |---|---|---|
 | Direct image URL | Ends in `.jpg/.png/.gif/.webp` | `<img>` tag, max height 400px |
-| Imgur | `imgur.com/...` | Fetch oEmbed, render image |
+| Direct video URL | Ends in `.mp4/.webm` | `<video>` tag, max height 400px |
 | YouTube | `youtube.com/watch` or `youtu.be` | Render iframe embed (user clicks to activate) |
 | Tenor/Giphy | Domain match | Render GIF via their oEmbed API |
 | Generic URL | Anything else | Open Graph title + description card, no media |
-
-### "Upload via Imgur" convenience feature
-
-Add a paperclip/image button in the message bar that:
-1. Opens a native file picker (images only, client-side only — nothing hits your server).
-2. POSTs the selected image directly to the **Imgur API** from the client's browser using their free anonymous upload endpoint.
-3. On success, inserts the returned Imgur URL into the message input.
-4. User sends the message as normal.
-
-This means zero file storage on your server. Imgur handles CDN, hosting, and legal. The only thing you store is the URL string in the message. Users can also just paste Imgur links manually if they prefer.
-
-> **Note:** Imgur's anonymous upload API has rate limits (1,250 uploads/day per client IP, generous for a 50-user instance). No API key required for anonymous uploads, but registering a free Imgur app gives you a client ID and higher limits.
 
 ---
 
@@ -246,24 +266,26 @@ This format is chosen because:
 
 The backend performs this substitution on message create/edit. The frontend never stores raw shortcodes.
 
-### Image Storage
+### Image Storage (bucket)
 
-Emote images are stored on disk under a `data/emotes/` directory. Each image is saved as `{uuid}.{ext}`. The Go backend serves them at `GET /api/emotes/{id}/image` with aggressive cache headers (emote images are immutable — a "change" is a delete + re-upload).
+Emote images are stored in the S3-compatible bucket under `emotes/{uuid}.webp`. Uploaded images (PNG, GIF, WebP) are converted to WebP server-side before storing. Animated GIFs are kept as-is (`emotes/{uuid}.gif`). The Go backend serves them at `GET /api/emotes/{id}/image` which proxies or redirects to the bucket URL, with aggressive cache headers (emote images are immutable — a "change" is a delete + re-upload).
+
+Emote upload is only available when bucket storage is configured. If no bucket is configured, the emote management UI is hidden and upload endpoints return 501.
 
 - **Max file size:** 256 KB
-- **Allowed formats:** PNG, GIF, WebP
+- **Allowed formats:** PNG, GIF, WebP (converted to WebP on upload; animated GIFs kept as GIF)
 - **Max dimensions:** 128×128 (server resizes/rejects on upload)
 
 ### Admin Flow
 
 1. Admin uploads an image + shortcode via a dedicated emote management page (accessible from admin panel or sidebar).
 2. Backend validates name (alphanumeric + underscores, 2–32 chars), checks uniqueness, validates image (size, format, dimensions).
-3. Saves image to disk, inserts row into `custom_emotes`.
+3. Converts to WebP (or keeps as GIF if animated), uploads to bucket under `emotes/{uuid}.webp`, inserts row into `custom_emotes`.
 4. Broadcasts an `emote_list_update` event over WebSocket so all connected clients refresh their cache.
 
 ### Deletion
 
-When an emote is deleted, its image is removed from disk and the DB row is deleted. Existing messages that reference the UUID will render a placeholder (e.g., a small "deleted emote" icon or the text `:unknown:`). The `<emote:uuid>` token remains in the message content — no retroactive message rewriting.
+When an emote is deleted, its image is removed from the bucket and the DB row is deleted. Existing messages that reference the UUID will render a placeholder (e.g., a small "deleted emote" icon or the text `:unknown:`). The `<emote:uuid>` token remains in the message content — no retroactive message rewriting.
 
 ### Client-Side Cache & Rendering
 
@@ -349,6 +371,7 @@ Simple web UI accessible to admins only:
 - **Message cleanup:** View current message count vs. limit. Trigger manual cleanup sweep. Configure auto-cleanup threshold.
 - **Emote management:** Upload/delete custom emotes, view current emote list with previews.
 - **Instance settings:** Toggle open registration, set instance name, set default theme color.
+- **Storage management (when bucket configured):** View current bucket usage (total size of stored files), set a max storage limit via `MAX_BUCKET_STORAGE` env var (default unlimited), browse/delete uploaded files (images, videos, emotes), see file metadata (uploader, upload date, expiry). When the storage limit is reached, new uploads are rejected with a 507 error.
 
 ---
 
@@ -356,7 +379,16 @@ Simple web UI accessible to admins only:
 
 - **Username:** Set on registration, changeable in profile settings. Unique constraint enforced.
 - **Display color:** A color picker in profile settings. Stored as a hex string. Used to colorize the username in chat — the same way IRC clients handled it. No role colors, no server-wide theming per user.
-- No avatars (no file storage). The color + username initial is the avatar (generated CSS circle, like a Google account placeholder).
+- **Profile picture (requires bucket storage):**
+  - Users can upload a profile picture via profile settings.
+  - Max size: 5 MB. Accepted formats: PNG, JPG, WebP.
+  - User can position/crop via a small frontend UI menu before submitting.
+  - Server converts the cropped result to 128×128 WebP on upload.
+  - Stored in bucket under `avatars/{user-uuid}.webp`. The `avatar_filename` column in `users` tracks this.
+  - Profile pictures are **permanent** (not ephemeral).
+  - `GET /api/users/{id}/avatar` serves the image (redirect to bucket URL).
+  - Fallback: CSS circle with username initial + user color (existing behavior, always works even without bucket).
+  - Upload button is hidden in profile settings when bucket storage is not configured.
 
 ---
 
@@ -436,6 +468,61 @@ services:
 
 ---
 
+## Object Storage (Optional)
+
+All uploaded media (emotes, profile pictures, inline images) is stored in an S3-compatible bucket. **Bucket storage is optional** — if the `BUCKET_*` env vars are not set, upload features are simply disabled/hidden in the UI and the app remains fully functional as a text-only chat.
+
+### Environment Variables
+
+All optional — if unset, upload features are disabled:
+
+| Variable | Description | Default |
+|---|---|---|
+| `BUCKET_ENDPOINT` | S3-compatible endpoint URL | — |
+| `BUCKET_NAME` | Bucket name | — |
+| `BUCKET_REGION` | Region | `auto` |
+| `BUCKET_ACCESS_KEY` | Access key | — |
+| `BUCKET_SECRET_KEY` | Secret key | — |
+| `BUCKET_PUBLIC_URL` | Public base URL for serving files | Falls back to endpoint |
+| `MAX_BUCKET_STORAGE` | Max total storage in bucket (e.g. `1GB`, `500MB`) | Unlimited |
+
+### Backend Behavior When Not Configured
+
+- `GET /api/config` returns `{ "uploads_enabled": false }` (frontend uses this to hide upload UI)
+- Emote upload endpoints return 501
+- Profile picture upload returns 501
+- Image upload returns 501
+- Video upload returns 501
+- Text chat, embeds via external URLs, and all other features work normally
+
+### Media Pipeline
+
+All uploads (emotes, profile pics, inline images, videos) go through a validation and storage pipeline:
+
+1. **Validate** — check file size and format
+2. **Resize** if needed (emotes: 128×128, profile pics: 128×128, inline images/videos: no resize)
+3. **Convert to WebP** (images only) — normalizes formats and saves space. Videos are stored as-is (no server-side transcoding — too CPU-heavy for a small instance).
+4. **Store in bucket** — under the appropriate prefix (`emotes/`, `avatars/`, `images/`, `videos/`)
+5. **Track expiry** — inline image and video uploads are inserted into `media_uploads` with a 24h expiry
+
+**Exception:** Animated GIFs are stored as-is (Go's stdlib can't encode animated WebP).
+
+**Ephemeral cleanup job:** A background goroutine runs every hour, queries `media_uploads` for rows where `expires_at < NOW()` (both images and videos), deletes the files from the bucket, and removes the DB rows.
+
+**Permanent vs ephemeral:** Emotes and profile pictures are permanent (no expiry, no cleanup). Only inline image/video uploads are ephemeral (24h).
+
+**Go dependencies:**
+- `golang.org/x/image/webp` for decoding
+- `github.com/chai2010/webp` (or similar) for WebP encoding
+
+**Max upload sizes (pre-conversion):**
+- Emotes: 256 KB (permanent)
+- Profile pics: 5 MB (permanent)
+- Inline images: 25 MB (ephemeral, 24h)
+- Videos: 100 MB (ephemeral, 24h)
+
+---
+
 ## Project Structure
 
 All source code lives under `src/`, which is also the Go module root. The Go backend uses a layered architecture with chi router:
@@ -471,8 +558,6 @@ src/
 │   │   └── app.html
 │   ├── static/
 │   └── bun.lockb
-├── data/
-│   └── emotes/            # Custom emote images (uuid.ext), gitignored
 ├── docs/
 │   ├── plan.md            # This document
 │   └── progress.md        # Updated by Claude after every run
@@ -538,22 +623,35 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Typing indicators
 - [ ] Verify: Two browser tabs can chat in real time
 
-### Run 6 — Custom Emotes
+### Run 6 — Admin Panel
+- [ ] User management (list, toggle admin, reset password, deactivate)
+- [ ] Channel management (create, rename, delete, reorder)
+- [ ] Message cleanup controls (current count, manual sweep, threshold config)
+- [ ] Instance settings (open registration toggle, instance name)
+- [ ] Storage management UI (when bucket configured): current usage, file browser with delete, max storage limit display
+- [ ] Verify: Admin can promote another user who can then access the panel
+
+### Run 7 — Custom Emotes (bucket storage)
 - [ ] Migration for `custom_emotes` table
+- [ ] Backend: bucket service/client setup (S3-compatible, configured via `BUCKET_*` env vars)
+- [ ] Backend: `GET /api/config` endpoint returning `{ "uploads_enabled": true/false }`
 - [ ] Backend: emote CRUD endpoints (`POST /api/emotes` admin-only create with image upload, `DELETE /api/emotes/{id}`, `GET /api/emotes` public list, `GET /api/emotes/{id}/image` serve image)
 - [ ] Backend: image validation on upload (256 KB max, PNG/GIF/WebP, 128×128 max dimensions)
-- [ ] Backend: disk storage under `data/emotes/` with `{uuid}.{ext}` naming
+- [ ] Backend: WebP conversion pipeline — convert uploaded PNG/WebP to WebP, keep animated GIFs as-is
+- [ ] Backend: bucket storage under `emotes/{uuid}.webp` (or `.gif` for animated)
+- [ ] Backend: upload endpoints return 501 when bucket is not configured
 - [ ] Backend: on message create/edit, resolve `:shortcode:` → `<emote:uuid>` tokens before persisting
 - [ ] Backend: escape angle brackets in user content before emote resolution (prevent collisions)
 - [ ] Backend: WebSocket `emote_list_update` broadcast on emote create/delete
+- [ ] Frontend: check `GET /api/config` to determine if uploads are enabled; hide emote upload UI if not
 - [ ] Frontend: emote store — fetch full list on load, re-fetch on WS `emote_list_update`
 - [ ] Frontend: message renderer parses `<emote:uuid>` tokens → inline `<img>` (line-height sized, larger if message is emote-only)
 - [ ] Frontend: deleted emote fallback (`:unknown:` text or placeholder icon)
 - [ ] Frontend: emote autocomplete popup on `:` + 2 chars — filtered list with image previews, inserts `:shortcode:`
-- [ ] Frontend: emote management page (admin-only) — upload form, list with previews, delete
-- [ ] Verify: Upload emote as admin, send message with `:shortcode:`, renders as image; delete emote, old message shows placeholder
+- [ ] Frontend: emote management page (admin-only, hidden when uploads disabled) — upload form, list with previews, delete
+- [ ] Verify: Upload emote as admin, send message with `:shortcode:`, renders as image; delete emote, old message shows placeholder; disable bucket config → upload UI hidden
 
-### Run 7 — @Mentions, Notifications & Unread
+### Run 8 — @Mentions, Notifications & Unread
 - [ ] Migration for `channel_reads` and `message_mentions` tables
 - [ ] Backend: on message create, resolve `@username` → `<mention:uuid>` tokens before persisting
 - [ ] Backend: extract mentioned user IDs, insert into `message_mentions` table
@@ -570,31 +668,35 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Frontend: on reconnect, fetch `GET /api/channels/unread` to sync offline mentions and unread counts
 - [ ] Verify: Mention a user → they see highlight, badge, and hear sound; go offline, get mentioned, reconnect → badge shows; unread counts track correctly across channel switches
 
-### Run 8 — DMs & Pinned Messages
+### Run 9 — DMs & Pinned Messages
 - [ ] DM pair creation and conversation view
 - [ ] DM delivery over existing WebSocket
 - [ ] Pin/unpin messages (admin or author)
 - [ ] Pinned messages view per channel
 - [ ] Verify: DMs work between two users, pinned messages persist across reload
 
-### Run 9 — Search
+### Run 10 — Search
 - [ ] Backend search endpoint with all filter combinations (text, author, date, date range, channel)
 - [ ] Frontend Command palette (Cmd+K) wired to search endpoint
 - [ ] Verify: Search by text returns correct results, GIN index is being used (`EXPLAIN ANALYZE`)
 
-### Run 10 — Admin Panel
-- [ ] User management (list, toggle admin, reset password, deactivate)
-- [ ] Channel management (create, rename, delete, reorder)
-- [ ] Message cleanup controls (current count, manual sweep, threshold config)
-- [ ] Instance settings (open registration toggle, instance name)
-- [ ] Verify: Admin can promote another user who can then access the panel
-
-### Run 11 — Embeds & Imgur Upload
+### Run 11 — Media Embeds & Media Upload (bucket storage)
 - [ ] Backend URL extractor and oEmbed/OG fetcher with in-memory cache
 - [ ] Embed metadata returned alongside message objects
-- [ ] Frontend embed renderer (image, YouTube iframe, GIF, generic link card)
-- [ ] Imgur client-side upload button (file picker → Imgur API → inserts URL)
-- [ ] Verify: Pasting a YouTube URL renders an embed; Imgur button inserts a working image URL
+- [ ] Frontend embed renderer (image, YouTube iframe, GIF, video, generic link card)
+- [ ] Backend: `POST /api/upload/image` — validate, convert to WebP, store in bucket under `images/{uuid}.webp`, insert into `media_uploads` with 24h expiry (max 25 MB)
+- [ ] Backend: `POST /api/upload/video` — validate format + size (max 100 MB), store as-is in bucket under `videos/{uuid}.{ext}`, insert into `media_uploads` with 24h expiry
+- [ ] Backend: background cleanup goroutine — runs hourly, deletes expired images and videos from bucket + removes `media_uploads` DB rows
+- [ ] Migration: add `media_uploads` table
+- [ ] Frontend: paperclip button in message bar (only shown when uploads enabled via `GET /api/config`) + drag-and-drop onto message area (desktop)
+- [ ] Frontend: video player for uploaded/embedded videos (native `<video>` tag, max height 400px)
+- [ ] Frontend: "media expired" placeholder when image/video URL no longer resolves (both are ephemeral)
+- [ ] Backend: profile picture upload — `POST /api/users/me/avatar`, user crops/positions in frontend, server converts to 128×128 WebP, store under `avatars/{user-uuid}.webp` (permanent, max 5 MB)
+- [ ] Backend: `GET /api/users/{id}/avatar` — redirect to bucket URL
+- [ ] Migration: add `avatar_filename` column to `users` table
+- [ ] Frontend: profile settings — avatar upload with crop/position UI (hidden when uploads disabled), preview, fallback to initial+color circle
+- [ ] Frontend: display avatars in message list and member list (with fallback)
+- [ ] Verify: Upload image via paperclip → appears in message; upload video → plays inline; upload profile pic → displays in chat; after 24h media expires → placeholder shown; disable bucket → upload UI hidden, text chat works normally
 
 ### Run 12 — Voice Channels
 - [ ] LiveKit token minting in Go backend
@@ -616,7 +718,7 @@ Each run should leave the repo in a working, committable state. Never start a ru
 
 ## What's Explicitly Out of Scope
 
-- File uploads of any kind (images go through Imgur or external URLs)
+- Media uploads are limited to profile pics (5 MB), emotes (256 KB), images (25 MB, ephemeral 24h), and videos (100 MB, ephemeral 24h); stored in optional S3-compatible bucket
 - End-to-end encryption
 - Role/permission systems beyond admin/non-admin
 - Screen sharing
