@@ -9,17 +9,20 @@ import (
 	"os"
 	"strings"
 
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+
 	"github.com/martinmckenna/den/src"
 	"github.com/martinmckenna/den/src/internal/auth"
 	"github.com/martinmckenna/den/src/internal/channel"
 	"github.com/martinmckenna/den/src/internal/db"
 	"github.com/martinmckenna/den/src/internal/message"
 	"github.com/martinmckenna/den/src/internal/ws"
-
-	_ "github.com/lib/pq"
 )
 
 func main() {
+	_ = godotenv.Load()
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://den:changeme@localhost:5432/den?sslmode=disable"
