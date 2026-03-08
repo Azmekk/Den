@@ -103,6 +103,31 @@ CREATE TABLE dm_pairs (
 -- The is_pinned flag on messages is sufficient; this view just makes querying easier
 CREATE VIEW pinned_messages AS
   SELECT * FROM messages WHERE is_pinned = TRUE;
+
+-- Custom emotes (admin-uploaded, stored as <emote:uuid> tokens in messages)
+CREATE TABLE custom_emotes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL UNIQUE,            -- shortcode (alphanumeric + underscores, 2-32 chars)
+  filename    TEXT NOT NULL,                   -- stored filename on disk (uuid.ext)
+  uploaded_by UUID NOT NULL REFERENCES users(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Tracks each user's last-read position per channel (for unread counts)
+CREATE TABLE channel_reads (
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id  UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, channel_id)
+);
+
+-- Tracks which users are mentioned in which messages
+CREATE TABLE message_mentions (
+  message_id  UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, user_id)
+);
+CREATE INDEX message_mentions_user ON message_mentions(user_id);
 ```
 
 ---
@@ -202,6 +227,119 @@ This means zero file storage on your server. Imgur handles CDN, hosting, and leg
 
 ---
 
+## Custom Emotes
+
+Custom server emotes work like Discord — admins upload small images and assign them a shortcode. Users type `:shortcode:` in the input, but what gets stored in the database is an **emote token** containing the emote's UUID, not the shortcode text.
+
+### Embedding Format
+
+When a user sends a message containing `:shortcode:`, the backend resolves the shortcode to a UUID and replaces it in the stored message content with an emote token:
+
+```
+<emote:550e8400-e29b-41d4-a716-446655440000>
+```
+
+This format is chosen because:
+- **Rename-safe:** If an admin renames an emote, old messages still render correctly (they reference the UUID, not the name).
+- **Collision-free:** The `<emote:uuid>` pattern cannot appear in normal user text (angle brackets in user content are escaped before emote resolution).
+- **Parseable:** The frontend uses a simple regex (`/<emote:([0-9a-f-]{36})>/g`) to find and render emotes.
+
+The backend performs this substitution on message create/edit. The frontend never stores raw shortcodes.
+
+### Image Storage
+
+Emote images are stored on disk under a `data/emotes/` directory. Each image is saved as `{uuid}.{ext}`. The Go backend serves them at `GET /api/emotes/{id}/image` with aggressive cache headers (emote images are immutable — a "change" is a delete + re-upload).
+
+- **Max file size:** 256 KB
+- **Allowed formats:** PNG, GIF, WebP
+- **Max dimensions:** 128×128 (server resizes/rejects on upload)
+
+### Admin Flow
+
+1. Admin uploads an image + shortcode via a dedicated emote management page (accessible from admin panel or sidebar).
+2. Backend validates name (alphanumeric + underscores, 2–32 chars), checks uniqueness, validates image (size, format, dimensions).
+3. Saves image to disk, inserts row into `custom_emotes`.
+4. Broadcasts an `emote_list_update` event over WebSocket so all connected clients refresh their cache.
+
+### Deletion
+
+When an emote is deleted, its image is removed from disk and the DB row is deleted. Existing messages that reference the UUID will render a placeholder (e.g., a small "deleted emote" icon or the text `:unknown:`). The `<emote:uuid>` token remains in the message content — no retroactive message rewriting.
+
+### Client-Side Cache & Rendering
+
+- On app load, the frontend fetches the full emote list (`GET /api/emotes`) — an array of `{id, name, url}`.
+- This list is cached in a Svelte store and used for both rendering and autocomplete.
+- WS `emote_list_update` events trigger a re-fetch.
+- When rendering a message, the frontend replaces `<emote:uuid>` tokens with inline `<img>` elements (sized to line height for inline flow, larger if the message is emote-only).
+
+### Autocomplete
+
+When a user types `:` followed by 2+ characters in the message input, a popup shows matching emotes (filtered by shortcode as they type, with image previews). Selecting one inserts `:shortcode:` into the input text. The backend resolves this to `<emote:uuid>` on send.
+
+---
+
+## @Mentions, Notifications & Unread Messages
+
+A full notification and unread tracking system. Users can mention others with `@username`. All users — online and offline — receive proper unread counts and mention notifications.
+
+### Mention Parsing & Storage
+
+- In the message input, users type `@username`. On send, the backend resolves `@username` to a **mention token**: `<mention:user-uuid>`.
+- Like emotes, this is rename-safe — if a user changes their username, old mentions still resolve.
+- The backend extracts all mentioned user IDs and stores them in a `message_mentions` join table for efficient querying.
+- The frontend renders `<mention:uuid>` tokens as highlighted, clickable spans showing the current username.
+
+### Database Schema
+
+```sql
+-- Tracks each user's last-read position per channel
+CREATE TABLE channel_reads (
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_id  UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, channel_id)
+);
+
+-- Tracks which users are mentioned in which messages (for badge counts)
+CREATE TABLE message_mentions (
+  message_id  UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, user_id)
+);
+CREATE INDEX message_mentions_user ON message_mentions(user_id);
+```
+
+### Unread Tracking
+
+- **`channel_reads` table:** Stores the last time each user "read" each channel (updated when the user views a channel or scrolls to the bottom).
+- **Unread count:** For any channel, unread = count of messages in that channel with `created_at > channel_reads.last_read_at` for that user.
+- **On connect/reconnect:** The client fetches unread counts for all channels in a single API call (`GET /api/channels/unread`). This returns `[{channel_id, unread_count, mention_count}]`.
+- **Real-time updates:** When a new message arrives via WS for a channel the user is NOT currently viewing, the frontend increments the local unread count. When the user switches to that channel, a `PUT /api/channels/{id}/read` call updates `last_read_at` and resets the count.
+
+### Mention Notifications
+
+- **Online users (connected via WS):**
+  - When a message with mentions is sent, the WS broadcast to mentioned users includes a `mentioned: true` flag.
+  - The frontend shows a **mention badge** (count) on the channel in the sidebar, visually distinct from the regular unread indicator.
+  - A **notification sound** plays if the mentioned user is not currently viewing that channel. Users can mute sounds in their settings (stored in localStorage).
+
+- **Offline users (not connected):**
+  - The `message_mentions` table persists all mentions regardless of online status.
+  - When an offline user reconnects, the `GET /api/channels/unread` endpoint returns mention counts derived from `message_mentions` rows joined against `channel_reads.last_read_at`.
+  - No push notifications (out of scope) — offline users see their mentions when they next open the app.
+
+### Mention Rendering
+
+- Messages mentioning the **current user** are highlighted with a distinct background color (e.g., a subtle yellow/gold tint).
+- The `@username` span is styled as a colored pill/badge (using the mentioned user's display color).
+- Clicking a mention could scroll to that user in the member list (nice-to-have).
+
+### Autocomplete
+
+When a user types `@` in the message input, a popup shows matching users (all users, not just online — filtered as they type). Selecting one inserts `@username` into the input text. The backend resolves this to `<mention:uuid>` on send.
+
+---
+
 ## Admin Panel
 
 Simple web UI accessible to admins only:
@@ -209,6 +347,7 @@ Simple web UI accessible to admins only:
 - **User management:** List users, toggle admin, reset password (generates a temp password), deactivate account.
 - **Channel management:** Create/rename/delete/reorder text and voice channels.
 - **Message cleanup:** View current message count vs. limit. Trigger manual cleanup sweep. Configure auto-cleanup threshold.
+- **Emote management:** Upload/delete custom emotes, view current emote list with previews.
 - **Instance settings:** Toggle open registration, set instance name, set default theme color.
 
 ---
@@ -332,6 +471,8 @@ src/
 │   │   └── app.html
 │   ├── static/
 │   └── bun.lockb
+├── data/
+│   └── emotes/            # Custom emote images (uuid.ext), gitignored
 ├── docs/
 │   ├── plan.md            # This document
 │   └── progress.md        # Updated by Claude after every run
@@ -397,40 +538,72 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Typing indicators
 - [ ] Verify: Two browser tabs can chat in real time
 
-### Run 6 — DMs & Pinned Messages
+### Run 6 — Custom Emotes
+- [ ] Migration for `custom_emotes` table
+- [ ] Backend: emote CRUD endpoints (`POST /api/emotes` admin-only create with image upload, `DELETE /api/emotes/{id}`, `GET /api/emotes` public list, `GET /api/emotes/{id}/image` serve image)
+- [ ] Backend: image validation on upload (256 KB max, PNG/GIF/WebP, 128×128 max dimensions)
+- [ ] Backend: disk storage under `data/emotes/` with `{uuid}.{ext}` naming
+- [ ] Backend: on message create/edit, resolve `:shortcode:` → `<emote:uuid>` tokens before persisting
+- [ ] Backend: escape angle brackets in user content before emote resolution (prevent collisions)
+- [ ] Backend: WebSocket `emote_list_update` broadcast on emote create/delete
+- [ ] Frontend: emote store — fetch full list on load, re-fetch on WS `emote_list_update`
+- [ ] Frontend: message renderer parses `<emote:uuid>` tokens → inline `<img>` (line-height sized, larger if message is emote-only)
+- [ ] Frontend: deleted emote fallback (`:unknown:` text or placeholder icon)
+- [ ] Frontend: emote autocomplete popup on `:` + 2 chars — filtered list with image previews, inserts `:shortcode:`
+- [ ] Frontend: emote management page (admin-only) — upload form, list with previews, delete
+- [ ] Verify: Upload emote as admin, send message with `:shortcode:`, renders as image; delete emote, old message shows placeholder
+
+### Run 7 — @Mentions, Notifications & Unread
+- [ ] Migration for `channel_reads` and `message_mentions` tables
+- [ ] Backend: on message create, resolve `@username` → `<mention:uuid>` tokens before persisting
+- [ ] Backend: extract mentioned user IDs, insert into `message_mentions` table
+- [ ] Backend: `GET /api/channels/unread` endpoint — returns `[{channel_id, unread_count, mention_count}]` per user
+- [ ] Backend: `PUT /api/channels/{id}/read` endpoint — updates `channel_reads.last_read_at`
+- [ ] Backend: WS broadcast includes `mentioned_user_ids` array on new messages
+- [ ] Frontend: message renderer parses `<mention:uuid>` tokens → highlighted clickable spans with current username
+- [ ] Frontend: self-mentions styled with distinct background color (gold/yellow tint)
+- [ ] Frontend: `@` autocomplete popup — shows all users filtered as they type, inserts `@username`
+- [ ] Frontend: unread count badge on channels in sidebar (derived from local tracking + API on connect)
+- [ ] Frontend: mention count badge on channels (visually distinct from unread, e.g. red pill)
+- [ ] Frontend: real-time unread increment when WS message arrives for non-active channel; reset on channel switch
+- [ ] Frontend: notification sound on mention when not viewing that channel (with mute toggle in localStorage)
+- [ ] Frontend: on reconnect, fetch `GET /api/channels/unread` to sync offline mentions and unread counts
+- [ ] Verify: Mention a user → they see highlight, badge, and hear sound; go offline, get mentioned, reconnect → badge shows; unread counts track correctly across channel switches
+
+### Run 8 — DMs & Pinned Messages
 - [ ] DM pair creation and conversation view
 - [ ] DM delivery over existing WebSocket
 - [ ] Pin/unpin messages (admin or author)
 - [ ] Pinned messages view per channel
 - [ ] Verify: DMs work between two users, pinned messages persist across reload
 
-### Run 7 — Search
+### Run 9 — Search
 - [ ] Backend search endpoint with all filter combinations (text, author, date, date range, channel)
 - [ ] Frontend Command palette (Cmd+K) wired to search endpoint
 - [ ] Verify: Search by text returns correct results, GIN index is being used (`EXPLAIN ANALYZE`)
 
-### Run 8 — Admin Panel
+### Run 10 — Admin Panel
 - [ ] User management (list, toggle admin, reset password, deactivate)
 - [ ] Channel management (create, rename, delete, reorder)
 - [ ] Message cleanup controls (current count, manual sweep, threshold config)
 - [ ] Instance settings (open registration toggle, instance name)
 - [ ] Verify: Admin can promote another user who can then access the panel
 
-### Run 9 — Embeds & Imgur Upload
+### Run 11 — Embeds & Imgur Upload
 - [ ] Backend URL extractor and oEmbed/OG fetcher with in-memory cache
 - [ ] Embed metadata returned alongside message objects
 - [ ] Frontend embed renderer (image, YouTube iframe, GIF, generic link card)
 - [ ] Imgur client-side upload button (file picker → Imgur API → inserts URL)
 - [ ] Verify: Pasting a YouTube URL renders an embed; Imgur button inserts a working image URL
 
-### Run 10 — Voice Channels
+### Run 12 — Voice Channels
 - [ ] LiveKit token minting in Go backend
 - [ ] Voice channel presence tracked over WebSocket
 - [ ] `@livekit/components-svelte` integrated in frontend
 - [ ] Join/leave voice, mic toggle, participant list
 - [ ] Verify: Two users can join a voice channel and hear each other
 
-### Run 11 — Polish & Deployment
+### Run 13 — Polish & Deployment
 - [ ] Mobile layout (slide-out drawer, bottom voice bar)
 - [ ] Touch targets and mobile interaction pass
 - [ ] PWA manifest
@@ -447,7 +620,7 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - End-to-end encryption
 - Role/permission systems beyond admin/non-admin
 - Screen sharing
-- Message reactions (not in spec, skip it)
+- Message reactions (emoji reactions on messages — custom emotes are for inline message content only)
 - Threads or replies (keep it flat)
 - Bots or webhooks
 - Federation or multi-server
