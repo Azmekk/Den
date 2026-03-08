@@ -7,8 +7,8 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Chi Router + Layered Architecture Refactor (between Run 4 and Run 5)
-**Next run:** Run 5
+**Last completed run:** Run 5 — Main Chat UI
+**Next run:** Run 6
 
 ---
 
@@ -58,6 +58,21 @@
 - Route guard on `/` redirects unauthenticated users to `/login`; auth pages redirect logged-in users to `/`
 - Vite dev proxy configured to forward `/api` to `http://localhost:8080`
 - `bun run build` and `cd src && go build .` both pass clean
+
+### Run 5 — Main Chat UI
+- Added `ListUsers` sqlc query and generated `users.sql.go`
+- Created `UserService` and `UserHandler` with `GET /api/users` endpoint
+- Added presence tracking to WS Hub: `onlineUsers` map, `presence_initial` on connect, `presence_update` on first connect/last disconnect
+- Added `BroadcastExclude` to Hub for typing indicators (broadcasts to channel subscribers except sender)
+- Added `typing_start` message handler in WS client
+- Created 6 frontend stores: `websocket` (auto-reconnect with exponential backoff), `channels`, `messages` (with cursor pagination), `presence`, `typing` (3s auto-clear, 2s send throttle), `users`
+- Created shared TypeScript types (`ChannelInfo`, `MessageInfo`, `UserInfo`)
+- Created `ChannelSidebar` component: channel list sorted by position, user panel with logout
+- Created `MessageArea` component: channel header, scrollable message list with auto-scroll-to-bottom, load-older-on-scroll-top with scroll position preservation, typing indicator, textarea input (Enter to send, Shift+Enter for newline)
+- Created `MemberList` component: online/offline sections with hash-based colored avatars and presence dots
+- Rewrote `+page.svelte` with three-column layout, WS lifecycle management, event listener wiring, auto-select first channel
+- Updated Vite proxy config for WebSocket upgrade support
+- `go build` and `bun run build` both pass clean
 
 ---
 
@@ -115,6 +130,14 @@
 - `go build`, `go vet` both pass clean
 - No changes to API contracts, frontend, or database layer
 
+### Run 5 (2026-03-08)
+- No `color` column in users table — plan referenced it but schema doesn't have it. Colors generated client-side via username hash instead.
+- No virtual list — simple scrollable div with load-more-on-scroll-up is sufficient for current scale
+- No optimistic message sending — WS broadcast used as single source of truth
+- Presence tracked via WS only — no REST endpoint for online users; `presence_initial` on connect provides initial state
+- Svelte 5 reactivity with Set/Map requires creating new instances on mutation (reassignment pattern)
+- Hub refactored to use `removeClient` helper to DRY up cleanup logic across register/unregister/broadcast cases
+
 ---
 
 ## Known Deviations from Plan
@@ -138,7 +161,10 @@
 - Channel CRUD requires admin for create/update/delete; list/get requires auth
 - WebSocket connects via `GET /api/ws?token=<JWT>` (query param auth since browsers can't set WS headers — browser WebSocket API doesn't support custom headers)
 - Message cursor pagination uses `before_time` + `before_id` query params (both required together)
-- Hub uses channel-based select loop for all operations — no mutexes needed
+- Hub uses channel-based select loop for all operations — no mutexes needed. Hub now also handles presence tracking and `BroadcastExclude` for typing.
 - Tailwind v4 uses `@theme inline` block in app.css for custom colors (no `tailwind.config.js`)
 - shadcn-svelte components can be added incrementally (bits-ui is installed, cn utility exists)
-- Vite dev server proxies `/api` → `http://localhost:8080` for local development
+- Vite dev server proxies `/api` → `http://localhost:8080` with `ws: true` for WebSocket upgrade support
+- Frontend stores follow factory pattern with `$state` runes in `.svelte.ts` files
+- User colors are generated client-side from username hash — no `color` column in DB
+- Three-column layout: ChannelSidebar (w-60) | MessageArea (flex-1) | MemberList (w-60)

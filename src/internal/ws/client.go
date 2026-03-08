@@ -144,6 +144,15 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		})
 		c.hub.Broadcast(channelID, envelope)
 
+	case "typing_start":
+		envelope, _ := json.Marshal(map[string]any{
+			"type":       "typing_start",
+			"channel_id": msg.ChannelID,
+			"user_id":    c.UserID,
+			"username":   c.Username,
+		})
+		c.hub.BroadcastExclude(msg.ChannelID, envelope, c)
+
 	default:
 		c.sendError("unknown message type: " + msg.Type)
 	}

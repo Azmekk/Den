@@ -97,6 +97,47 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, display_name, avatar_url, is_admin FROM users ORDER BY username
+`
+
+type ListUsersRow struct {
+	ID          uuid.UUID
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+	IsAdmin     bool
+}
+
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.IsAdmin,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setUserAdmin = `-- name: SetUserAdmin :exec
 UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1
 `

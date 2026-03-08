@@ -13,10 +13,11 @@ import (
 	"github.com/martinmckenna/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, hub *ws.Hub, staticFS fs.FS) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, hub *ws.Hub, staticFS fs.FS) chi.Router {
 	authH := handler.NewAuthHandler(authSvc)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc)
+	userH := handler.NewUserHandler(userSvc)
 
 	r := chi.NewRouter()
 
@@ -42,6 +43,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Get("/channels", channelH.List)
 			r.Get("/channels/{id}", channelH.Get)
 			r.Get("/channels/{id}/messages", messageH.GetHistory)
+			r.Get("/users", userH.List)
 
 			// Admin only
 			r.Group(func(r chi.Router) {
