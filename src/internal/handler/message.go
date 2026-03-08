@@ -1,16 +1,26 @@
-package message
+package handler
 
 import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/src/internal/httputil"
+	"github.com/martinmckenna/den/internal/httputil"
+	"github.com/martinmckenna/den/internal/service"
 )
 
-func (s *Service) GetHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	channelID, err := uuid.Parse(r.PathValue("id"))
+type MessageHandler struct {
+	svc *service.MessageService
+}
+
+func NewMessageHandler(svc *service.MessageService) *MessageHandler {
+	return &MessageHandler{svc: svc}
+}
+
+func (h *MessageHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+	channelID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid channel id")
 		return
@@ -42,7 +52,7 @@ func (s *Service) GetHistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, hasMore, err := s.GetHistory(r.Context(), channelID, beforeTime, beforeID)
+	messages, hasMore, err := h.svc.GetHistory(r.Context(), channelID, beforeTime, beforeID)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return

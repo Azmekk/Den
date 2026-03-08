@@ -1,4 +1,4 @@
-package channel
+package service
 
 import (
 	"context"
@@ -8,21 +8,20 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/src/internal/db"
+	"github.com/martinmckenna/den/internal/db"
 )
 
 var (
-	ErrNotFound     = errors.New("channel not found")
-	ErrInvalidInput = errors.New("invalid input")
-	ErrNameTaken    = errors.New("channel name already taken")
+	ErrChannelNotFound = errors.New("channel not found")
+	ErrChannelNameTaken = errors.New("channel name already taken")
 )
 
-type Service struct {
+type ChannelService struct {
 	queries *db.Queries
 }
 
-func NewService(queries *db.Queries) *Service {
-	return &Service{queries: queries}
+func NewChannelService(queries *db.Queries) *ChannelService {
+	return &ChannelService{queries: queries}
 }
 
 type ChannelInfo struct {
@@ -46,7 +45,7 @@ func channelInfoFromDB(ch db.Channel) ChannelInfo {
 	return info
 }
 
-func (s *Service) List(ctx context.Context) ([]ChannelInfo, error) {
+func (s *ChannelService) List(ctx context.Context) ([]ChannelInfo, error) {
 	channels, err := s.queries.ListChannels(ctx)
 	if err != nil {
 		return nil, err
@@ -58,18 +57,18 @@ func (s *Service) List(ctx context.Context) ([]ChannelInfo, error) {
 	return result, nil
 }
 
-func (s *Service) Get(ctx context.Context, id uuid.UUID) (ChannelInfo, error) {
+func (s *ChannelService) Get(ctx context.Context, id uuid.UUID) (ChannelInfo, error) {
 	ch, err := s.queries.GetChannel(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ChannelInfo{}, ErrNotFound
+			return ChannelInfo{}, ErrChannelNotFound
 		}
 		return ChannelInfo{}, err
 	}
 	return channelInfoFromDB(ch), nil
 }
 
-func (s *Service) Create(ctx context.Context, name, topic string, position int32) (ChannelInfo, error) {
+func (s *ChannelService) Create(ctx context.Context, name, topic string, position int32) (ChannelInfo, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
 		return ChannelInfo{}, ErrInvalidInput
@@ -82,14 +81,14 @@ func (s *Service) Create(ctx context.Context, name, topic string, position int32
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			return ChannelInfo{}, ErrNameTaken
+			return ChannelInfo{}, ErrChannelNameTaken
 		}
 		return ChannelInfo{}, err
 	}
 	return channelInfoFromDB(ch), nil
 }
 
-func (s *Service) Update(ctx context.Context, id uuid.UUID, name, topic string, position int32) (ChannelInfo, error) {
+func (s *ChannelService) Update(ctx context.Context, id uuid.UUID, name, topic string, position int32) (ChannelInfo, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
 		return ChannelInfo{}, ErrInvalidInput
@@ -103,21 +102,16 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, name, topic string, 
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ChannelInfo{}, ErrNotFound
+			return ChannelInfo{}, ErrChannelNotFound
 		}
 		if isUniqueViolation(err) {
-			return ChannelInfo{}, ErrNameTaken
+			return ChannelInfo{}, ErrChannelNameTaken
 		}
 		return ChannelInfo{}, err
 	}
 	return channelInfoFromDB(ch), nil
 }
 
-func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+func (s *ChannelService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.queries.DeleteChannel(ctx, id)
-}
-
-func isUniqueViolation(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint")
 }

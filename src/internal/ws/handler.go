@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/martinmckenna/den/src/internal/auth"
+	"github.com/martinmckenna/den/internal/service"
 )
 
 var upgrader = websocket.Upgrader{
@@ -18,7 +18,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func ServeWS(hub *Hub, authService *auth.Service, msgHandler MessageHandler) http.HandlerFunc {
+func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tokenString := r.URL.Query().Get("token")
 		if tokenString == "" {

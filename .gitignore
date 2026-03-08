@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-/den
+/bin/
 
 # Node / Bun
 node_modules/

@@ -7,7 +7,7 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 4 — SvelteKit Frontend Scaffold & Auth UI
+**Last completed run:** Chi Router + Layered Architecture Refactor (between Run 4 and Run 5)
 **Next run:** Run 5
 
 ---
@@ -57,7 +57,7 @@
 - Dashboard (`/`) shows sidebar with user info, logout button, and empty channel list placeholder
 - Route guard on `/` redirects unauthenticated users to `/login`; auth pages redirect logged-in users to `/`
 - Vite dev proxy configured to forward `/api` to `http://localhost:8080`
-- `bun run build` and `go build ./src/cmd/server` both pass clean
+- `bun run build` and `cd src && go build .` both pass clean
 
 ---
 
@@ -93,6 +93,28 @@
 - No shadcn-svelte CLI used; bits-ui installed manually, `cn()` utility created by hand
 - Vite proxy avoids CORS issues during development
 
+### Chi Router + Layered Architecture Refactor (2026-03-08)
+- Switched from `http.ServeMux` to `chi` router for cleaner route groups and middleware chaining
+- Separated HTTP handlers from business logic into a layered architecture:
+  - `src/internal/service/` — pure business logic (AuthService, ChannelService, MessageService)
+  - `src/internal/handler/` — HTTP handlers (AuthHandler, ChannelHandler, MessageHandler)
+  - `src/internal/middleware/auth.go` — RequireAuth (chi middleware signature), RequireAdmin, context accessors
+  - `src/internal/router/router.go` — chi router with route groups (public, authenticated, admin)
+- Consolidated duplicate `isUniqueViolation` helper (was in both auth and channel) into `service/helpers.go`
+- Consolidated cookie helpers from `auth/helpers.go` into `httputil/httputil.go` (SetRefreshTokenCookie, ClearRefreshTokenCookie)
+- Updated `ws/handler.go` to import `service.AuthService` instead of `auth.Service`
+- Slimmed `main.go` down to config loading + service wiring only
+- Moved Go module root to `src/` — `go.mod` and `main.go` live in `src/`, eliminating `cmd/server/` nesting
+- Import paths shortened from `den/src/internal/...` to `den/internal/...`
+- `embed.go` changed from `package src` to `package main` (same package as `main.go`)
+- Deleted old packages: `internal/auth/`, `internal/channel/`, `internal/message/`
+- Deleted placeholder packages: `internal/admin/`, `internal/dm/`, `internal/embed/`, `internal/voice/`
+- Added chi standard middleware: RealIP, RequestID, Logger, Recoverer, Compress, Heartbeat(`/healthz`)
+- Build output goes to `bin/` at project root (`cd src && go build -o ../bin/den .`)
+- Added `.dockerignore` for build context efficiency
+- `go build`, `go vet` both pass clean
+- No changes to API contracts, frontend, or database layer
+
 ---
 
 ## Known Deviations from Plan
@@ -101,6 +123,7 @@
 - **Postgres port 5440** instead of 5432 — ports 5432-5434 were already in use on host.
 - **5-minute access tokens** instead of 15 — tighter security window, negligible UX impact with refresh rotation.
 - **No shadcn-svelte CLI init** — bits-ui installed directly, `cn()` utility created manually. Components will be added as needed in future runs.
+- **Layered architecture instead of per-domain packages** — Plan originally listed `internal/auth/`, `internal/channel/`, etc. Refactored to `service/`, `handler/`, `middleware/`, `router/` layers with chi router. Future features (admin, embed, voice) will add files to existing layers rather than creating new top-level packages.
 
 ---
 
@@ -109,8 +132,11 @@
 - Postgres is running on port 5440, all migrations applied through 000005
 - Auth is fully wired frontend-to-backend: login, register, refresh, logout all work through the Vite proxy
 - `MSYS_NO_PATHCONV=1` prefix needed for Docker commands with volume mounts in Git Bash
+- **Go module root is `src/`** — build with `cd src && go build -o ../bin/den .`, run with `cd src && go run .`
+- **Architecture is now layered**: business logic in `service/`, HTTP handlers in `handler/`, middleware in `middleware/`, routing in `router/`. New features add files to existing layers.
+- **Chi router** is used — route params accessed via `chi.URLParam(r, "id")`, not `r.PathValue("id")`
 - Channel CRUD requires admin for create/update/delete; list/get requires auth
-- WebSocket connects via `GET /api/ws?token=<JWT>` (query param auth since browsers can't set WS headers)
+- WebSocket connects via `GET /api/ws?token=<JWT>` (query param auth since browsers can't set WS headers — browser WebSocket API doesn't support custom headers)
 - Message cursor pagination uses `before_time` + `before_id` query params (both required together)
 - Hub uses channel-based select loop for all operations — no mutexes needed
 - Tailwind v4 uses `@theme inline` block in app.css for custom colors (no `tailwind.config.js`)

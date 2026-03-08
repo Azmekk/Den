@@ -1,4 +1,4 @@
-package message
+package service
 
 import (
 	"context"
@@ -10,21 +10,20 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/src/internal/db"
+	"github.com/martinmckenna/den/internal/db"
 )
 
 var (
-	ErrNotFound     = errors.New("message not found")
-	ErrInvalidInput = errors.New("invalid input")
-	ErrForbidden    = errors.New("forbidden")
+	ErrMessageNotFound = errors.New("message not found")
+	ErrForbidden       = errors.New("forbidden")
 )
 
-type Service struct {
+type MessageService struct {
 	queries *db.Queries
 }
 
-func NewService(queries *db.Queries) *Service {
-	return &Service{queries: queries}
+func NewMessageService(queries *db.Queries) *MessageService {
+	return &MessageService{queries: queries}
 }
 
 type MessageInfo struct {
@@ -81,7 +80,7 @@ func messageInfoFromCursorRow(row db.GetMessagesByChannelRow) MessageInfo {
 	return info
 }
 
-func (s *Service) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, error) {
+func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > 2000 {
 		return nil, ErrInvalidInput
@@ -112,7 +111,7 @@ func (s *Service) SendMessage(ctx context.Context, channelID, userID uuid.UUID, 
 	return data, nil
 }
 
-func (s *Service) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error) {
+func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > 2000 {
 		return nil, uuid.Nil, ErrInvalidInput
@@ -121,7 +120,7 @@ func (s *Service) EditMessage(ctx context.Context, messageID, userID uuid.UUID, 
 	existing, err := s.queries.GetMessageByID(ctx, messageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, uuid.Nil, ErrNotFound
+			return nil, uuid.Nil, ErrMessageNotFound
 		}
 		return nil, uuid.Nil, err
 	}
@@ -153,11 +152,11 @@ func (s *Service) EditMessage(ctx context.Context, messageID, userID uuid.UUID, 
 	return data, channelID, nil
 }
 
-func (s *Service) DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, error) {
+func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, error) {
 	existing, err := s.queries.GetMessageByID(ctx, messageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return uuid.Nil, ErrNotFound
+			return uuid.Nil, ErrMessageNotFound
 		}
 		return uuid.Nil, err
 	}
@@ -173,7 +172,7 @@ func (s *Service) DeleteMessage(ctx context.Context, messageID, userID uuid.UUID
 	return existing.ChannelID.UUID, nil
 }
 
-func (s *Service) GetHistory(ctx context.Context, channelID uuid.UUID, beforeTime *time.Time, beforeID *uuid.UUID) ([]MessageInfo, bool, error) {
+func (s *MessageService) GetHistory(ctx context.Context, channelID uuid.UUID, beforeTime *time.Time, beforeID *uuid.UUID) ([]MessageInfo, bool, error) {
 	nullChannelID := uuid.NullUUID{UUID: channelID, Valid: true}
 
 	if beforeTime != nil && beforeID != nil {

@@ -28,13 +28,13 @@ cd src/web && bun run build
 
 **Backend:**
 ```sh
-go build -o den ./src/cmd/server
+cd src && go build -o ../bin/den .
 ```
 
 ## Dev Server
 
 ```sh
-go run ./src/cmd/server
+cd src && go run .
 ```
 
 ## Docker
@@ -47,8 +47,9 @@ docker compose down             # Stop everything
 
 ## Project Structure
 
-- All source code lives under `src/`
-- Go backend: `src/cmd/server/`, `src/internal/`
+- All source code lives under `src/` (Go module root)
+- Go entrypoint: `src/main.go`
+- Go packages: `src/internal/` (service, handler, middleware, router, httputil, ws, db)
 - SvelteKit frontend: `src/web/`
 - DB migrations: `src/db/migrations/`
 - sqlc queries: `src/db/queries/`

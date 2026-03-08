@@ -6,12 +6,13 @@ COPY src/web/ .
 RUN bun run build
 
 FROM golang:1.23-alpine AS backend
-WORKDIR /app
-COPY go.mod go.sum ./
+WORKDIR /app/src
+COPY src/go.mod src/go.sum ./
 RUN go mod download
+WORKDIR /app
 COPY . .
 COPY --from=frontend /app/src/web/build ./src/web/build
-RUN CGO_ENABLED=0 go build -o /den ./src/cmd/server
+RUN cd src && CGO_ENABLED=0 go build -o /den .
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates

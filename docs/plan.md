@@ -299,38 +299,51 @@ services:
 
 ## Project Structure
 
+All source code lives under `src/`, which is also the Go module root. The Go backend uses a layered architecture with chi router:
+
 ```
-/
-├── cmd/
-│   └── server/         # main.go entrypoint
+src/
+├── main.go                # Entrypoint (config + wiring only)
+├── embed.go               # Embeds built frontend static files
 ├── internal/
-│   ├── auth/           # JWT, bcrypt, session handling
-│   ├── channel/        # Channel CRUD, WebSocket hub
-│   ├── message/        # Message CRUD, search, cleanup job
-│   ├── dm/             # Direct message logic
-│   ├── voice/          # LiveKit token minting
-│   ├── embed/          # URL detection, oEmbed fetching
-│   └── admin/          # Admin handlers
+│   ├── router/router.go   # Chi router setup + all route registration
+│   ├── handler/           # HTTP handlers (thin layer, no business logic)
+│   │   ├── auth.go        # AuthHandler — register, login, refresh, logout, me, change-password
+│   │   ├── channel.go     # ChannelHandler — list, get, create, update, delete
+│   │   └── message.go     # MessageHandler — get history
+│   ├── service/           # Business logic (no HTTP concerns)
+│   │   ├── auth.go        # AuthService — registration, login, JWT, refresh tokens
+│   │   ├── channel.go     # ChannelService — channel CRUD
+│   │   ├── message.go     # MessageService — send, edit, delete, history
+│   │   └── helpers.go     # Shared helpers (isUniqueViolation)
+│   ├── middleware/auth.go # RequireAuth, RequireAdmin, context accessors
+│   ├── httputil/httputil.go # DecodeJSON, WriteJSON, WriteError, cookie helpers
+│   ├── ws/                # WebSocket hub, client, handler
+│   └── db/                # sqlc generated code
 ├── db/
-│   ├── migrations/     # SQL migration files
-│   └── queries/        # sqlc .sql query files
-├── web/                # SvelteKit frontend
+│   ├── migrations/        # SQL migration files
+│   └── queries/           # sqlc .sql query files
+├── web/                   # SvelteKit frontend
 │   ├── src/
 │   │   ├── routes/
 │   │   ├── lib/
 │   │   │   ├── components/
-│   │   │   └── stores/     # Svelte stores for WS state
+│   │   │   └── stores/    # Svelte stores for WS state
 │   │   └── app.html
 │   ├── static/
 │   └── bun.lockb
 ├── docs/
-│   ├── plan.md         # This document
-│   └── progress.md     # Updated by Claude after every run
+│   ├── plan.md            # This document
+│   └── progress.md        # Updated by Claude after every run
 ├── docker-compose.yml
 ├── Dockerfile
 ├── livekit.yaml
 └── .env.example
 ```
+
+Future features (admin panel, embeds, voice) will slot into the existing layers:
+- Business logic → `service/admin.go`, `service/embed.go`, `service/voice.go`
+- HTTP handlers → `handler/admin.go`, `handler/embed.go`, `handler/voice.go`
 
 ---
 

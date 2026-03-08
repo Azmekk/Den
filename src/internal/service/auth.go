@@ -1,4 +1,4 @@
-package auth
+package service
 
 import (
 	"context"
@@ -8,14 +8,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/martinmckenna/den/src/internal/db"
+	"github.com/martinmckenna/den/internal/db"
 )
 
 var (
@@ -26,15 +25,15 @@ var (
 	ErrInvalidToken       = errors.New("invalid or expired token")
 )
 
-type Service struct {
-	queries          *db.Queries
+type AuthService struct {
+	Queries          *db.Queries
 	jwtSecret        []byte
 	openRegistration bool
 }
 
-func NewService(queries *db.Queries, jwtSecret string, openRegistration bool) *Service {
-	return &Service{
-		queries:          queries,
+func NewAuthService(queries *db.Queries, jwtSecret string, openRegistration bool) *AuthService {
+	return &AuthService{
+		Queries:          queries,
 		jwtSecret:        []byte(jwtSecret),
 		openRegistration: openRegistration,
 	}
@@ -52,7 +51,7 @@ type UserInfo struct {
 	IsAdmin     bool      `json:"is_admin"`
 }
 
-func userInfoFromDB(u db.User) UserInfo {
+func UserInfoFromDB(u db.User) UserInfo {
 	info := UserInfo{
 		ID:       u.ID,
 		Username: u.Username,
@@ -64,7 +63,7 @@ func userInfoFromDB(u db.User) UserInfo {
 	return info
 }
 
-func (s *Service) Register(ctx context.Context, username, password, displayName string) (UserInfo, TokenPair, error) {
+func (s *AuthService) Register(ctx context.Context, username, password, displayName string) (UserInfo, TokenPair, error) {
 	if username == "" || password == "" {
 		return UserInfo{}, TokenPair{}, ErrInvalidInput
 	}
@@ -75,7 +74,7 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username too long", ErrInvalidInput)
 	}
 
-	count, err := s.queries.CountUsers(ctx)
+	count, err := s.Queries.CountUsers(ctx)
 	if err != nil {
 		return UserInfo{}, TokenPair{}, err
 	}
@@ -90,7 +89,7 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 		return UserInfo{}, TokenPair{}, err
 	}
 
-	user, err := s.queries.CreateUser(ctx, db.CreateUserParams{
+	user, err := s.Queries.CreateUser(ctx, db.CreateUserParams{
 		Username:     username,
 		PasswordHash: string(hash),
 		DisplayName:  sql.NullString{String: displayName, Valid: displayName != ""},
@@ -108,11 +107,11 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 		return UserInfo{}, TokenPair{}, err
 	}
 
-	return userInfoFromDB(user), tokens, nil
+	return UserInfoFromDB(user), tokens, nil
 }
 
-func (s *Service) Login(ctx context.Context, username, password string) (UserInfo, TokenPair, error) {
-	user, err := s.queries.GetUserByUsername(ctx, username)
+func (s *AuthService) Login(ctx context.Context, username, password string) (UserInfo, TokenPair, error) {
+	user, err := s.Queries.GetUserByUsername(ctx, username)
 	if err != nil {
 		return UserInfo{}, TokenPair{}, ErrInvalidCredentials
 	}
@@ -126,10 +125,10 @@ func (s *Service) Login(ctx context.Context, username, password string) (UserInf
 		return UserInfo{}, TokenPair{}, err
 	}
 
-	return userInfoFromDB(user), tokens, nil
+	return UserInfoFromDB(user), tokens, nil
 }
 
-func (s *Service) IssueTokens(ctx context.Context, user db.User) (TokenPair, error) {
+func (s *AuthService) IssueTokens(ctx context.Context, user db.User) (TokenPair, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub":      user.ID.String(),
@@ -151,7 +150,7 @@ func (s *Service) IssueTokens(ctx context.Context, user db.User) (TokenPair, err
 	refreshToken := hex.EncodeToString(rawRefresh)
 	hash := sha256Hash(refreshToken)
 
-	_, err = s.queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+	_, err = s.Queries.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		TokenHash: hash,
 		ExpiresAt: now.Add(7 * 24 * time.Hour),
@@ -166,25 +165,25 @@ func (s *Service) IssueTokens(ctx context.Context, user db.User) (TokenPair, err
 	}, nil
 }
 
-func (s *Service) RefreshTokens(ctx context.Context, rawRefreshToken string) (UserInfo, TokenPair, error) {
+func (s *AuthService) RefreshTokens(ctx context.Context, rawRefreshToken string) (UserInfo, TokenPair, error) {
 	if rawRefreshToken == "" {
 		return UserInfo{}, TokenPair{}, ErrInvalidToken
 	}
 
 	hash := sha256Hash(rawRefreshToken)
-	stored, err := s.queries.GetRefreshTokenByHash(ctx, hash)
+	stored, err := s.Queries.GetRefreshTokenByHash(ctx, hash)
 	if err != nil {
 		return UserInfo{}, TokenPair{}, ErrInvalidToken
 	}
 
 	if time.Now().After(stored.ExpiresAt) {
-		s.queries.DeleteRefreshToken(ctx, stored.ID)
+		s.Queries.DeleteRefreshToken(ctx, stored.ID)
 		return UserInfo{}, TokenPair{}, ErrInvalidToken
 	}
 
-	s.queries.DeleteRefreshToken(ctx, stored.ID)
+	s.Queries.DeleteRefreshToken(ctx, stored.ID)
 
-	user, err := s.queries.GetUserByID(ctx, stored.UserID)
+	user, err := s.Queries.GetUserByID(ctx, stored.UserID)
 	if err != nil {
 		return UserInfo{}, TokenPair{}, err
 	}
@@ -194,15 +193,15 @@ func (s *Service) RefreshTokens(ctx context.Context, rawRefreshToken string) (Us
 		return UserInfo{}, TokenPair{}, err
 	}
 
-	return userInfoFromDB(user), tokens, nil
+	return UserInfoFromDB(user), tokens, nil
 }
 
-func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error {
 	if newPassword == "" || len(newPassword) < 8 {
 		return fmt.Errorf("%w: password must be at least 8 characters", ErrInvalidInput)
 	}
 
-	user, err := s.queries.GetUserByID(ctx, userID)
+	user, err := s.Queries.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -216,29 +215,29 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, oldPassw
 		return err
 	}
 
-	if err := s.queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
+	if err := s.Queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
 		ID:           userID,
 		PasswordHash: string(hash),
 	}); err != nil {
 		return err
 	}
 
-	return s.queries.DeleteRefreshTokensByUser(ctx, userID)
+	return s.Queries.DeleteRefreshTokensByUser(ctx, userID)
 }
 
-func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
+func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error {
 	if rawRefreshToken == "" {
 		return nil
 	}
 	hash := sha256Hash(rawRefreshToken)
-	stored, err := s.queries.GetRefreshTokenByHash(ctx, hash)
+	stored, err := s.Queries.GetRefreshTokenByHash(ctx, hash)
 	if err != nil {
 		return nil
 	}
-	return s.queries.DeleteRefreshToken(ctx, stored.ID)
+	return s.Queries.DeleteRefreshToken(ctx, stored.ID)
 }
 
-func (s *Service) ValidateAccessToken(tokenString string) (jwt.MapClaims, error) {
+func (s *AuthService) ValidateAccessToken(tokenString string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -260,9 +259,4 @@ func (s *Service) ValidateAccessToken(tokenString string) (jwt.MapClaims, error)
 func sha256Hash(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
-}
-
-func isUniqueViolation(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint")
 }
