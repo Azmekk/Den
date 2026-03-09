@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/internal/db"
+	"github.com/Azmekk/den/internal/db"
 )
 
 var (
-	ErrChannelNotFound = errors.New("channel not found")
+	ErrChannelNotFound  = errors.New("channel not found")
 	ErrChannelNameTaken = errors.New("channel name already taken")
 )
 

@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	_ "golang.org/x/image/webp"
 
-	"github.com/martinmckenna/den/internal/db"
+	"github.com/Azmekk/den/internal/db"
 )
 
 var (

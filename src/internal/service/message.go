@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/internal/db"
+	"github.com/Azmekk/den/internal/db"
 )
 
 var mentionPattern = regexp.MustCompile(`@([a-zA-Z0-9_]+)`)

@@ -7,16 +7,16 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/internal/httputil"
-	"github.com/martinmckenna/den/internal/service"
+	"github.com/Azmekk/den/internal/httputil"
+	"github.com/Azmekk/den/internal/service"
 )
 
 type contextKey string
 
 const (
-	ctxUserID  contextKey = "user_id"
+	ctxUserID   contextKey = "user_id"
 	ctxUsername contextKey = "username"
-	ctxIsAdmin contextKey = "is_admin"
+	ctxIsAdmin  contextKey = "is_admin"
 )
 
 func RequireAuth(authSvc *service.AuthService) func(http.Handler) http.Handler {

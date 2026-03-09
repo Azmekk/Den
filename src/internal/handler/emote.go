@@ -8,10 +8,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/internal/httputil"
-	"github.com/martinmckenna/den/internal/middleware"
-	"github.com/martinmckenna/den/internal/service"
-	"github.com/martinmckenna/den/internal/ws"
+	"github.com/Azmekk/den/internal/httputil"
+	"github.com/Azmekk/den/internal/middleware"
+	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/ws"
 )
 
 type EmoteHandler struct {

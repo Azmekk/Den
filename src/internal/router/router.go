@@ -7,10 +7,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/martinmckenna/den/internal/handler"
-	"github.com/martinmckenna/den/internal/middleware"
-	"github.com/martinmckenna/den/internal/service"
-	"github.com/martinmckenna/den/internal/ws"
+	"github.com/Azmekk/den/internal/handler"
+	"github.com/Azmekk/den/internal/middleware"
+	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/ws"
 )
 
 func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/martinmckenna/den/internal/db"
+	"github.com/Azmekk/den/internal/db"
 )
 
 type UserService struct {

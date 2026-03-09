@@ -1,4 +1,4 @@
-module github.com/martinmckenna/den
+module github.com/Azmekk/den
 
 go 1.25.5
 

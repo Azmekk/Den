@@ -3,8 +3,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/martinmckenna/den/internal/httputil"
-	"github.com/martinmckenna/den/internal/service"
+	"github.com/Azmekk/den/internal/httputil"
+	"github.com/Azmekk/den/internal/service"
 )
 
 type UserHandler struct {

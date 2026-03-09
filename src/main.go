@@ -12,10 +12,10 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
-	"github.com/martinmckenna/den/internal/db"
-	"github.com/martinmckenna/den/internal/router"
-	"github.com/martinmckenna/den/internal/service"
-	"github.com/martinmckenna/den/internal/ws"
+	"github.com/Azmekk/den/internal/db"
+	"github.com/Azmekk/den/internal/router"
+	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/ws"
 )
 
 func main() {

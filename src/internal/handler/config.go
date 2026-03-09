@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/martinmckenna/den/internal/httputil"
+	"github.com/Azmekk/den/internal/httputil"
 )
 
 type ConfigHandler struct {

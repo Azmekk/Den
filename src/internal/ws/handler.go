@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/martinmckenna/den/internal/service"
+	"github.com/Azmekk/den/internal/service"
 )
 
 var upgrader = websocket.Upgrader{
