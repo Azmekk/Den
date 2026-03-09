@@ -723,6 +723,11 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Removed `_` prefix from all script variables/functions that Biome incorrectly marked as unused (Svelte template references invisible to Biome)
 - [x] 9 files fixed, `bun run build` passes clean
 
+### Deviation — Fix UserProfilePopover not opening on click (DONE)
+- [x] Replaced `Popover.Trigger` with `Popover.Anchor` + manual `onclick`/`onkeydown` handlers in `UserProfilePopover.svelte`
+- [x] `e.stopPropagation()` prevents click from being swallowed by parent `ContextMenu.Trigger`
+- [x] `bind:open` on `Popover.Root` preserves bits-ui positioning, focus, and dismiss behavior
+
 ### Deviation — @everyone Mention, Reserved Usernames, Display Name Update, User Profile Popover, User Color Picker (DONE)
 - [x] Reserved usernames (everyone, here, channel, admin) blocked at registration
 - [x] @everyone mention: backend token resolution + frontend rendering + notification

@@ -245,6 +245,12 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - Color was already updating in real-time via `getColorForMessage()` which looks up the users store.
 - `bun run build` passes clean
 
+### Deviation (2026-03-09) — Fix UserProfilePopover not opening on click
+- `Popover.Trigger` inside `ContextMenu.Trigger` doesn't receive clicks — ContextMenu intercepts `pointerdown` events
+- Replaced `Popover.Trigger` with `Popover.Anchor` wrapping a `<div role="button" tabindex="0" class="contents">` with manual `onclick` (toggle + `stopPropagation`) and `onkeydown` (Enter/Space)
+- `bind:open` on `Popover.Root` preserves bits-ui auto-positioning, focus management, and dismiss-on-outside-click
+- Right-click context menu unaffected (separate event path from `onclick`)
+
 ### Deviation (2026-03-09) — Fix Biome --unsafe underscore-prefixed variables
 - Biome `--unsafe` applied `noUnusedVariables` fixes that prefixed Svelte script variables with `_`, breaking template references (Biome can't see Svelte template usage)
 - Removed `_` prefix from all affected variables/functions across 9 files:
