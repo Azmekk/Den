@@ -35,3 +35,13 @@ export interface AdminSettings {
 	open_registration: boolean;
 	instance_name: string;
 }
+
+export interface EmoteInfo {
+	id: string;
+	name: string;
+	url: string;
+}
+
+export interface AppConfig {
+	uploads_enabled: boolean;
+}

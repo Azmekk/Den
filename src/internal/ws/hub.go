@@ -30,16 +30,17 @@ type broadcastExcludeMsg struct {
 }
 
 type Hub struct {
-	clients      map[*Client]bool
-	channels     map[uuid.UUID]map[*Client]bool
-	onlineUsers  map[uuid.UUID]map[*Client]bool
-	register     chan *Client
-	unregister   chan *Client
-	subscribe    chan subRequest
-	unsub        chan subRequest
-	broadcast    chan broadcastMsg
-	directSend   chan directMsg
-	broadcastExc chan broadcastExcludeMsg
+	clients         map[*Client]bool
+	channels        map[uuid.UUID]map[*Client]bool
+	onlineUsers     map[uuid.UUID]map[*Client]bool
+	register        chan *Client
+	unregister      chan *Client
+	subscribe       chan subRequest
+	unsub           chan subRequest
+	broadcast       chan broadcastMsg
+	directSend      chan directMsg
+	broadcastExc    chan broadcastExcludeMsg
+	globalBroadcast chan []byte
 }
 
 type broadcastMsg struct {
@@ -49,16 +50,17 @@ type broadcastMsg struct {
 
 func NewHub() *Hub {
 	return &Hub{
-		clients:      make(map[*Client]bool),
-		channels:     make(map[uuid.UUID]map[*Client]bool),
-		onlineUsers:  make(map[uuid.UUID]map[*Client]bool),
-		register:     make(chan *Client),
-		unregister:   make(chan *Client),
-		subscribe:    make(chan subRequest),
-		unsub:        make(chan subRequest),
-		broadcast:    make(chan broadcastMsg, 256),
-		directSend:   make(chan directMsg, 256),
-		broadcastExc: make(chan broadcastExcludeMsg, 256),
+		clients:         make(map[*Client]bool),
+		channels:        make(map[uuid.UUID]map[*Client]bool),
+		onlineUsers:     make(map[uuid.UUID]map[*Client]bool),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		subscribe:       make(chan subRequest),
+		unsub:           make(chan subRequest),
+		broadcast:       make(chan broadcastMsg, 256),
+		directSend:      make(chan directMsg, 256),
+		broadcastExc:    make(chan broadcastExcludeMsg, 256),
+		globalBroadcast: make(chan []byte, 256),
 	}
 }
 
@@ -192,6 +194,9 @@ func (h *Hub) Run() {
 					}
 				}
 			}
+
+		case data := <-h.globalBroadcast:
+			h.broadcastAll(data)
 		}
 	}
 }
@@ -210,4 +215,8 @@ func (h *Hub) Broadcast(channelID uuid.UUID, data []byte) {
 
 func (h *Hub) BroadcastExclude(channelID uuid.UUID, data []byte, exclude *Client) {
 	h.broadcastExc <- broadcastExcludeMsg{channelID: channelID, data: data, exclude: exclude}
+}
+
+func (h *Hub) BroadcastGlobal(data []byte) {
+	h.globalBroadcast <- data
 }

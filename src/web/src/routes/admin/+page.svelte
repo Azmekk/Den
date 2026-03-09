@@ -2,9 +2,10 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import type { UserInfo, ChannelInfo, AdminStats, AdminSettings } from '$lib/types';
+	import type { UserInfo, ChannelInfo, AdminStats, AdminSettings, EmoteInfo } from '$lib/types';
+	import { configStore } from '$lib/stores/config.svelte';
 
-	let activeTab = $state<'users' | 'channels' | 'messages' | 'settings'>('users');
+	let activeTab = $state<'users' | 'channels' | 'messages' | 'settings' | 'emotes'>('users');
 
 	// Users
 	let users = $state<UserInfo[]>([]);
@@ -26,9 +27,16 @@
 	let settings = $state<AdminSettings>({ open_registration: true, instance_name: 'Den' });
 	let settingsLoading = $state(false);
 
+	// Emotes
+	let emotes = $state<EmoteInfo[]>([]);
+	let emotesLoading = $state(false);
+	let emoteForm = $state({ name: '' });
+	let emoteFile = $state<File | null>(null);
+	let emoteUploading = $state(false);
+
 	// Modals
 	let tempPassword = $state<string | null>(null);
-	let confirmDelete = $state<{ type: 'user' | 'channel'; id: string; name: string } | null>(null);
+	let confirmDelete = $state<{ type: 'user' | 'channel' | 'emote'; id: string; name: string } | null>(null);
 	let error = $state('');
 
 	function headers() {
@@ -41,6 +49,7 @@
 			return;
 		}
 		fetchUsers();
+		configStore.fetch();
 	});
 
 	async function fetchUsers() {
@@ -196,6 +205,56 @@
 		}
 	}
 
+	async function fetchEmotes() {
+		emotesLoading = true;
+		try {
+			const res = await fetch('/api/emotes', { headers: headers() });
+			if (res.ok) emotes = await res.json();
+		} finally {
+			emotesLoading = false;
+		}
+	}
+
+	async function uploadEmote() {
+		if (!emoteFile || !emoteForm.name) return;
+		error = '';
+		emoteUploading = true;
+		try {
+			const formData = new FormData();
+			formData.append('name', emoteForm.name);
+			formData.append('image', emoteFile);
+			const res = await fetch('/api/emotes', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${auth.accessToken}` },
+				body: formData
+			});
+			if (!res.ok) {
+				const body = await res.json().catch(() => ({ error: 'upload failed' }));
+				error = body.error;
+				return;
+			}
+			emoteForm = { name: '' };
+			emoteFile = null;
+			await fetchEmotes();
+		} finally {
+			emoteUploading = false;
+		}
+	}
+
+	async function deleteEmote(id: string) {
+		error = '';
+		const res = await fetch(`/api/emotes/${id}`, {
+			method: 'DELETE',
+			headers: headers()
+		});
+		if (!res.ok) {
+			error = 'Failed to delete emote';
+			return;
+		}
+		confirmDelete = null;
+		await fetchEmotes();
+	}
+
 	function switchTab(tab: typeof activeTab) {
 		activeTab = tab;
 		error = '';
@@ -203,6 +262,7 @@
 		if (tab === 'channels') fetchChannels();
 		if (tab === 'messages') fetchStats();
 		if (tab === 'settings') fetchSettings();
+		if (tab === 'emotes') fetchEmotes();
 	}
 </script>
 
@@ -219,7 +279,7 @@
 
 	<!-- Tabs -->
 	<div class="flex gap-1 border-b border-border px-6">
-		{#each ['users', 'channels', 'messages', 'settings'] as tab}
+		{#each ['users', 'channels', 'messages', 'settings', 'emotes'] as tab}
 			<button
 				onclick={() => switchTab(tab as typeof activeTab)}
 				class="px-4 py-2.5 text-sm font-medium capitalize transition-colors {activeTab === tab
@@ -448,6 +508,84 @@
 					{settingsLoading ? 'Saving...' : 'Save Settings'}
 				</button>
 			</div>
+
+		{:else if activeTab === 'emotes'}
+			<!-- Emotes Tab -->
+			<div class="max-w-2xl space-y-6">
+				{#if configStore.uploadsEnabled}
+					<div class="rounded-lg border border-border p-4">
+						<h3 class="mb-3 text-sm font-medium text-foreground">Upload Emote</h3>
+						<div class="flex items-end gap-3">
+							<div class="flex-1">
+								<label for="emote-name" class="mb-1 block text-xs text-muted-foreground">Shortcode</label>
+								<input
+									id="emote-name"
+									bind:value={emoteForm.name}
+									placeholder="emote_name"
+									class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+								/>
+							</div>
+							<div class="flex-1">
+								<label for="emote-file" class="mb-1 block text-xs text-muted-foreground">Image (PNG, GIF, WebP, max 128x128, 256KB)</label>
+								<input
+									id="emote-file"
+									type="file"
+									accept="image/png,image/gif,image/webp"
+									onchange={(e) => { emoteFile = (e.target as HTMLInputElement).files?.[0] ?? null; }}
+									class="w-full text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:text-foreground"
+								/>
+							</div>
+							<button
+								onclick={uploadEmote}
+								disabled={emoteUploading || !emoteForm.name || !emoteFile}
+								class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+							>
+								{emoteUploading ? 'Uploading...' : 'Upload'}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<div class="rounded-lg border border-border bg-secondary/50 p-4">
+						<p class="text-sm text-muted-foreground">Bucket storage is not configured. Set the BUCKET_* environment variables to enable emote uploads.</p>
+					</div>
+				{/if}
+
+				{#if emotesLoading}
+					<p class="text-muted-foreground">Loading emotes...</p>
+				{:else if emotes.length > 0}
+					<div class="overflow-hidden rounded-lg border border-border">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="border-b border-border bg-secondary/50">
+									<th class="px-4 py-3 text-left font-medium text-muted-foreground">Preview</th>
+									<th class="px-4 py-3 text-left font-medium text-muted-foreground">Shortcode</th>
+									<th class="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each emotes as emote (emote.id)}
+									<tr class="border-b border-border last:border-0">
+										<td class="px-4 py-3">
+											<img src={emote.url} alt={emote.name} class="h-8 w-8" />
+										</td>
+										<td class="px-4 py-3 font-medium text-foreground">:{emote.name}:</td>
+										<td class="px-4 py-3 text-right">
+											<button
+												onclick={() => (confirmDelete = { type: 'emote', id: emote.id, name: emote.name })}
+												class="rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+											>
+												Delete
+											</button>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{:else}
+					<p class="text-muted-foreground">No emotes uploaded yet.</p>
+				{/if}
+			</div>
 		{/if}
 	</div>
 </div>
@@ -490,6 +628,7 @@
 					onclick={() => {
 						if (confirmDelete?.type === 'user') deleteUser(confirmDelete.id);
 						else if (confirmDelete?.type === 'channel') deleteChannel(confirmDelete.id);
+						else if (confirmDelete?.type === 'emote') deleteEmote(confirmDelete.id);
 					}}
 					class="flex-1 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
 				>

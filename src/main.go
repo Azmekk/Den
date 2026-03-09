@@ -51,9 +51,18 @@ func main() {
 	log.Println("connected to database")
 
 	queries := db.New(conn)
+
+	bucketSvc := service.NewBucketService()
+	if bucketSvc != nil {
+		log.Println("bucket storage configured")
+	} else {
+		log.Println("bucket storage not configured, emote uploads disabled")
+	}
+
 	authSvc := service.NewAuthService(queries, jwtSecret, openRegistration)
 	channelSvc := service.NewChannelService(queries)
-	messageSvc := service.NewMessageService(queries)
+	emoteSvc := service.NewEmoteService(queries, bucketSvc)
+	messageSvc := service.NewMessageService(queries, emoteSvc)
 	userSvc := service.NewUserService(queries)
 	adminSvc := service.NewAdminService(queries, authSvc)
 
@@ -65,7 +74,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, hub, staticFS)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

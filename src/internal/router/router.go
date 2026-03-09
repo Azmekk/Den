@@ -13,12 +13,14 @@ import (
 	"github.com/martinmckenna/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, hub *ws.Hub, staticFS fs.FS) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
 	authH := handler.NewAuthHandler(authSvc)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc)
 	userH := handler.NewUserHandler(userSvc)
 	adminH := handler.NewAdminHandler(adminSvc)
+	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
+	configH := handler.NewConfigHandler(bucketConfigured)
 
 	r := chi.NewRouter()
 
@@ -35,6 +37,8 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		r.Post("/login", authH.Login)
 		r.Post("/refresh", authH.Refresh)
 		r.Post("/logout", authH.Logout)
+		r.Get("/config", configH.GetConfig)
+		r.Get("/emotes/{id}/image", emoteH.ServeImage)
 
 		// Authenticated
 		r.Group(func(r chi.Router) {
@@ -45,6 +49,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Get("/channels/{id}", channelH.Get)
 			r.Get("/channels/{id}/messages", messageH.GetHistory)
 			r.Get("/users", userH.List)
+			r.Get("/emotes", emoteH.List)
 
 			// Admin only
 			r.Group(func(r chi.Router) {
@@ -52,6 +57,8 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				r.Post("/channels", channelH.Create)
 				r.Put("/channels/{id}", channelH.Update)
 				r.Delete("/channels/{id}", channelH.Delete)
+				r.Post("/emotes", emoteH.Create)
+				r.Delete("/emotes/{id}", emoteH.Delete)
 
 				r.Route("/admin", func(r chi.Router) {
 					r.Get("/users", adminH.ListUsers)

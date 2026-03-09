@@ -19,11 +19,12 @@ var (
 )
 
 type MessageService struct {
-	queries *db.Queries
+	queries  *db.Queries
+	emoteSvc *EmoteService
 }
 
-func NewMessageService(queries *db.Queries) *MessageService {
-	return &MessageService{queries: queries}
+func NewMessageService(queries *db.Queries, emoteSvc *EmoteService) *MessageService {
+	return &MessageService{queries: queries, emoteSvc: emoteSvc}
 }
 
 type MessageInfo struct {
@@ -86,6 +87,12 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 		return nil, ErrInvalidInput
 	}
 
+	if s.emoteSvc != nil {
+		content, _ = s.emoteSvc.ResolveTokens(ctx, content)
+	} else {
+		content = EscapeContent(content)
+	}
+
 	msg, err := s.queries.CreateMessage(ctx, db.CreateMessageParams{
 		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
 		UserID:    userID,
@@ -115,6 +122,12 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > 2000 {
 		return nil, uuid.Nil, ErrInvalidInput
+	}
+
+	if s.emoteSvc != nil {
+		content, _ = s.emoteSvc.ResolveTokens(ctx, content)
+	} else {
+		content = EscapeContent(content)
 	}
 
 	existing, err := s.queries.GetMessageByID(ctx, messageID)

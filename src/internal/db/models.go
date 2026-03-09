@@ -20,6 +20,14 @@ type Channel struct {
 	CreatedAt time.Time
 }
 
+type CustomEmote struct {
+	ID         uuid.UUID
+	Name       string
+	Filename   string
+	UploadedBy uuid.UUID
+	CreatedAt  time.Time
+}
+
 type DmPair struct {
 	ID        uuid.UUID
 	UserA     uuid.UUID

@@ -6,6 +6,8 @@
 	import { presence } from '$lib/stores/presence.svelte';
 	import { typing } from '$lib/stores/typing.svelte';
 	import { usersStore } from '$lib/stores/users.svelte';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { emoteStore } from '$lib/stores/emotes.svelte';
 	import ChannelSidebar from '$lib/components/ChannelSidebar.svelte';
 	import MessageArea from '$lib/components/MessageArea.svelte';
 	import MemberList from '$lib/components/MemberList.svelte';
@@ -25,6 +27,8 @@
 			}
 		});
 		usersStore.fetch();
+		configStore.fetch();
+		emoteStore.fetch();
 
 		// Register WS event listeners before connecting so no messages are dropped
 		websocket.on('new_message', messageStore.handleNewMessage);
@@ -33,6 +37,7 @@
 		websocket.on('presence_initial', presence.handlePresenceInitial);
 		websocket.on('presence_update', presence.handlePresenceUpdate);
 		websocket.on('typing_start', typing.handleTypingStart);
+		websocket.on('emote_list_update', emoteStore.refresh);
 
 		// Connect WebSocket
 		if (auth.accessToken) {
@@ -46,6 +51,7 @@
 			websocket.off('presence_initial', presence.handlePresenceInitial);
 			websocket.off('presence_update', presence.handlePresenceUpdate);
 			websocket.off('typing_start', typing.handleTypingStart);
+			websocket.off('emote_list_update', emoteStore.refresh);
 			websocket.disconnect();
 		};
 	});

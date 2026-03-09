@@ -4,6 +4,8 @@
 	import { typing } from '$lib/stores/typing.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { tick } from 'svelte';
+	import MessageContent from './MessageContent.svelte';
+	import EmoteAutocomplete from './EmoteAutocomplete.svelte';
 
 	const USER_COLORS = [
 		'#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e',
@@ -28,6 +30,9 @@
 	let messageListEl: HTMLDivElement | undefined = $state();
 	let isNearBottom = $state(true);
 	let prevMessageCount = $state(0);
+	let cursorPosition = $state(0);
+	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let autocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
 
 	const channelId = $derived(channelStore.selectedChannelId);
 	const channel = $derived(channelStore.selectedChannel);
@@ -85,12 +90,39 @@
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
+		if (autocompleteHandler(e)) {
+			return;
+		}
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			sendMsg();
 		} else if (channelId) {
 			typing.sendTyping(channelId);
 		}
+	}
+
+	function handleInput(e: Event) {
+		autoResize(e);
+		updateCursorPosition();
+	}
+
+	function updateCursorPosition() {
+		if (textareaEl) {
+			cursorPosition = textareaEl.selectionStart ?? 0;
+		}
+	}
+
+	function handleEmoteSelect(shortcode: string, start: number, end: number) {
+		messageInput = messageInput.slice(0, start) + shortcode + messageInput.slice(end);
+		const newPos = start + shortcode.length;
+		tick().then(() => {
+			if (textareaEl) {
+				textareaEl.selectionStart = newPos;
+				textareaEl.selectionEnd = newPos;
+				cursorPosition = newPos;
+				textareaEl.focus();
+			}
+		});
 	}
 
 	function sendMsg() {
@@ -147,7 +179,7 @@
 								<span class="text-xs text-muted-foreground italic">(edited)</span>
 							{/if}
 						</div>
-						<p class="text-sm text-foreground whitespace-pre-wrap break-words">{msg.content}</p>
+						<MessageContent content={msg.content} />
 					</div>
 				{/each}
 			{/if}
@@ -161,11 +193,20 @@
 		</div>
 
 		<!-- Input -->
-		<div class="border-t border-border p-4">
+		<div class="relative border-t border-border p-4">
+			<EmoteAutocomplete
+				inputValue={messageInput}
+				{cursorPosition}
+				onSelect={handleEmoteSelect}
+				onKeydown={(handler) => autocompleteHandler = handler}
+			/>
 			<textarea
+				bind:this={textareaEl}
 				bind:value={messageInput}
 				onkeydown={handleKeydown}
-				oninput={autoResize}
+				oninput={handleInput}
+				onclick={updateCursorPosition}
+				onkeyup={updateCursorPosition}
 				placeholder="Message #{channel.name}"
 				rows="1"
 				class="w-full resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
