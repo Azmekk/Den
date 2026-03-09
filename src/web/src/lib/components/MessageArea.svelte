@@ -6,6 +6,7 @@
 	import { tick } from 'svelte';
 	import MessageContent from './MessageContent.svelte';
 	import EmoteAutocomplete from './EmoteAutocomplete.svelte';
+	import MentionAutocomplete from './MentionAutocomplete.svelte';
 	import type { MessageInfo } from '$lib/types';
 
 	const USER_COLORS = [
@@ -42,7 +43,8 @@
 	let prevMessageCount = $state(0);
 	let cursorPosition = $state(0);
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
-	let autocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
+	let emoteAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
+	let mentionAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
 
 	const channelId = $derived(channelStore.selectedChannelId);
 	const channel = $derived(channelStore.selectedChannel);
@@ -99,10 +101,15 @@
 		}
 	});
 
+	function hasSelfMention(msg: MessageInfo): boolean {
+		const userId = auth.user?.id;
+		if (!userId) return false;
+		return msg.content.includes(`<mention:${userId}>`);
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
-		if (autocompleteHandler(e)) {
-			return;
-		}
+		if (mentionAutocompleteHandler(e)) return;
+		if (emoteAutocompleteHandler(e)) return;
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			sendMsg();
@@ -183,7 +190,7 @@
 				{#each messages as msg, i (msg.id)}
 					{@const grouped = isGrouped(messages, i)}
 					{#if grouped}
-						<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded">
+						<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 							<div class="w-8 flex items-center justify-center shrink-0">
 								<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
 							</div>
@@ -192,7 +199,7 @@
 							</div>
 						</div>
 					{:else}
-						<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded {i > 0 ? 'mt-3' : ''}">
+						<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 							<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5" style="background-color: {userColor(msg.username)}">
 								<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
 							</div>
@@ -223,11 +230,17 @@
 
 		<!-- Input -->
 		<div class="relative border-t border-border p-4">
+			<MentionAutocomplete
+				inputValue={messageInput}
+				{cursorPosition}
+				onSelect={handleEmoteSelect}
+				onKeydown={(handler) => mentionAutocompleteHandler = handler}
+			/>
 			<EmoteAutocomplete
 				inputValue={messageInput}
 				{cursorPosition}
 				onSelect={handleEmoteSelect}
-				onKeydown={(handler) => autocompleteHandler = handler}
+				onKeydown={(handler) => emoteAutocompleteHandler = handler}
 			/>
 			<textarea
 				bind:this={textareaEl}

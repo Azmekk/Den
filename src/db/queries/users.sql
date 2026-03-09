@@ -23,3 +23,6 @@ SELECT id, username, display_name, avatar_url, is_admin FROM users ORDER BY user
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;
+
+-- name: GetUsersByUsernames :many
+SELECT id, username FROM users WHERE username = ANY($1::text[]);

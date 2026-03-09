@@ -115,3 +115,32 @@ func (s *ChannelService) Update(ctx context.Context, id uuid.UUID, name, topic s
 func (s *ChannelService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.queries.DeleteChannel(ctx, id)
 }
+
+type UnreadInfo struct {
+	ChannelID    uuid.UUID `json:"channel_id"`
+	UnreadCount  int       `json:"unread_count"`
+	MentionCount int       `json:"mention_count"`
+}
+
+func (s *ChannelService) GetUnreadCounts(ctx context.Context, userID uuid.UUID) ([]UnreadInfo, error) {
+	rows, err := s.queries.GetUnreadCounts(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]UnreadInfo, len(rows))
+	for i, r := range rows {
+		result[i] = UnreadInfo{
+			ChannelID:    r.ChannelID,
+			UnreadCount:  int(r.UnreadCount),
+			MentionCount: int(r.MentionCount),
+		}
+	}
+	return result, nil
+}
+
+func (s *ChannelService) MarkChannelRead(ctx context.Context, userID, channelID uuid.UUID) error {
+	return s.queries.UpsertChannelRead(ctx, db.UpsertChannelReadParams{
+		UserID:    userID,
+		ChannelID: channelID,
+	})
+}

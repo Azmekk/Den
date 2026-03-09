@@ -3,6 +3,7 @@ type WsCallback = (data: any) => void;
 function createWebSocket() {
 	let ws: WebSocket | null = $state(null);
 	let connected = $state(false);
+	let reconnecting = $state(false);
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectDelay = 1000;
 	let token: string | null = null;
@@ -24,6 +25,7 @@ function createWebSocket() {
 
 		ws.onopen = () => {
 			connected = true;
+			reconnecting = false;
 			reconnectDelay = 1000;
 			const cbs = listeners.get('open');
 			if (cbs) {
@@ -37,6 +39,7 @@ function createWebSocket() {
 			connected = false;
 			ws = null;
 			if (!intentionalClose) {
+				reconnecting = true;
 				scheduleReconnect();
 			}
 		};
@@ -78,6 +81,7 @@ function createWebSocket() {
 		ws?.close();
 		ws = null;
 		connected = false;
+		reconnecting = false;
 		token = null;
 	}
 
@@ -100,6 +104,7 @@ function createWebSocket() {
 
 	return {
 		get connected() { return connected; },
+		get reconnecting() { return reconnecting; },
 		connect,
 		disconnect,
 		send,

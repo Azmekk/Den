@@ -6,6 +6,7 @@ function createMessages() {
 	let messagesByChannel = $state<Map<string, MessageInfo[]>>(new Map());
 	let hasMoreByChannel = $state<Map<string, boolean>>(new Map());
 	let loadingOlder = $state(false);
+	const loadedChannels = new Set<string>();
 
 	function getMessages(channelId: string): MessageInfo[] {
 		return messagesByChannel.get(channelId) ?? [];
@@ -16,6 +17,8 @@ function createMessages() {
 	}
 
 	async function fetchHistory(channelId: string) {
+		if (loadedChannels.has(channelId)) return;
+
 		const res = await globalThis.fetch(`/api/channels/${channelId}/messages`, {
 			headers: { Authorization: `Bearer ${auth.accessToken}` }
 		});
@@ -28,6 +31,8 @@ function createMessages() {
 		const newHasMore = new Map(hasMoreByChannel);
 		newHasMore.set(channelId, data.has_more ?? false);
 		hasMoreByChannel = newHasMore;
+
+		loadedChannels.add(channelId);
 	}
 
 	async function fetchOlder(channelId: string) {

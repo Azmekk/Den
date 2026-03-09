@@ -8,11 +8,26 @@
 	import { usersStore } from '$lib/stores/users.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { emoteStore } from '$lib/stores/emotes.svelte';
+	import { unreadStore } from '$lib/stores/unread.svelte';
 	import ChannelSidebar from '$lib/components/ChannelSidebar.svelte';
 	import MessageArea from '$lib/components/MessageArea.svelte';
 	import MemberList from '$lib/components/MemberList.svelte';
+	import ConnectionBanner from '$lib/components/ConnectionBanner.svelte';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+
+	let notificationsMuted = $state(
+		typeof localStorage !== 'undefined' && localStorage.getItem('den_mute_mentions') === 'true'
+	);
+
+	function playMentionSound() {
+		if (notificationsMuted) return;
+		try {
+			new Audio('/audio/den_notification.mp3').play();
+		} catch {
+			// Audio not available
+		}
+	}
 
 	onMount(() => {
 		if (!auth.isLoggedIn) {
@@ -29,9 +44,25 @@
 		usersStore.fetch();
 		configStore.fetch();
 		emoteStore.fetch();
+		unreadStore.fetch();
 
 		// Register WS event listeners before connecting so no messages are dropped
-		websocket.on('new_message', messageStore.handleNewMessage);
+		function handleNewMessage(data: any) {
+			messageStore.handleNewMessage(data);
+
+			const currentChannelId = channelStore.selectedChannelId;
+			if (data.channel_id !== currentChannelId) {
+				unreadStore.increment(data.channel_id);
+
+				const mentionedIds: string[] = data.mentioned_user_ids ?? [];
+				if (auth.user && mentionedIds.includes(auth.user.id)) {
+					unreadStore.incrementMention(data.channel_id);
+					playMentionSound();
+				}
+			}
+		}
+
+		websocket.on('new_message', handleNewMessage);
 		websocket.on('edit_message', messageStore.handleEditMessage);
 		websocket.on('delete_message', messageStore.handleDeleteMessage);
 		websocket.on('presence_initial', presence.handlePresenceInitial);
@@ -45,6 +76,8 @@
 			if (id) {
 				websocket.send({ type: 'subscribe', channel_id: id });
 			}
+			// Sync unread state on reconnect
+			unreadStore.fetch();
 		}
 		websocket.on('open', handleWsOpen);
 
@@ -54,7 +87,7 @@
 		}
 
 		return () => {
-			websocket.off('new_message', messageStore.handleNewMessage);
+			websocket.off('new_message', handleNewMessage);
 			websocket.off('edit_message', messageStore.handleEditMessage);
 			websocket.off('delete_message', messageStore.handleDeleteMessage);
 			websocket.off('presence_initial', presence.handlePresenceInitial);
@@ -67,16 +100,20 @@
 		};
 	});
 
-	// Fetch messages when selected channel changes
+	// Fetch messages and mark channel read when selected channel changes
 	$effect(() => {
 		const id = channelStore.selectedChannelId;
 		if (id) {
-			messageStore.fetchHistory(id);
+			untrack(() => {
+				messageStore.fetchHistory(id);
+				unreadStore.markRead(id);
+			});
 		}
 	});
 </script>
 
 {#if auth.isLoggedIn}
+	<ConnectionBanner />
 	<div class="flex h-screen">
 		<ChannelSidebar />
 		<MessageArea />

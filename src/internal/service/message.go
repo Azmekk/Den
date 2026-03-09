@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 
 	"github.com/martinmckenna/den/internal/db"
 )
+
+var mentionPattern = regexp.MustCompile(`@([a-zA-Z0-9_]+)`)
 
 var (
 	ErrMessageNotFound = errors.New("message not found")
@@ -81,10 +84,10 @@ func messageInfoFromCursorRow(row db.GetMessagesByChannelRow) MessageInfo {
 	return info
 }
 
-func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, error) {
+func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > 2000 {
-		return nil, ErrInvalidInput
+		return nil, nil, ErrInvalidInput
 	}
 
 	if s.emoteSvc != nil {
@@ -93,29 +96,45 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 		content = EscapeContent(content)
 	}
 
+	content, mentionedIDs, _ := s.resolveMentions(ctx, content)
+
 	msg, err := s.queries.CreateMessage(ctx, db.CreateMessageParams{
 		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
 		UserID:    userID,
 		Content:   content,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Insert mention rows
+	for _, uid := range mentionedIDs {
+		_ = s.queries.InsertMention(ctx, db.InsertMentionParams{
+			MessageID: msg.ID,
+			UserID:    uid,
+		})
+	}
+
+	mentionedStrings := make([]string, len(mentionedIDs))
+	for i, uid := range mentionedIDs {
+		mentionedStrings[i] = uid.String()
 	}
 
 	envelope := map[string]any{
-		"type":       "new_message",
-		"id":         msg.ID,
-		"channel_id": channelID,
-		"user_id":    userID,
-		"username":   username,
-		"content":    msg.Content,
-		"created_at": msg.CreatedAt.Format(time.RFC3339Nano),
+		"type":               "new_message",
+		"id":                 msg.ID,
+		"channel_id":         channelID,
+		"user_id":            userID,
+		"username":           username,
+		"content":            msg.Content,
+		"created_at":         msg.CreatedAt.Format(time.RFC3339Nano),
+		"mentioned_user_ids": mentionedStrings,
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return data, nil
+	return data, mentionedIDs, nil
 }
 
 func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error) {
@@ -129,6 +148,8 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 	} else {
 		content = EscapeContent(content)
 	}
+
+	content, mentionedIDs, _ := s.resolveMentions(ctx, content)
 
 	existing, err := s.queries.GetMessageByID(ctx, messageID)
 	if err != nil {
@@ -150,13 +171,28 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 		return nil, uuid.Nil, err
 	}
 
+	// Re-resolve mentions: delete old, insert new
+	_ = s.queries.DeleteMentionsByMessage(ctx, messageID)
+	for _, uid := range mentionedIDs {
+		_ = s.queries.InsertMention(ctx, db.InsertMentionParams{
+			MessageID: messageID,
+			UserID:    uid,
+		})
+	}
+
+	mentionedStrings := make([]string, len(mentionedIDs))
+	for i, uid := range mentionedIDs {
+		mentionedStrings[i] = uid.String()
+	}
+
 	channelID := existing.ChannelID.UUID
 	envelope := map[string]any{
-		"type":       "edit_message",
-		"id":         updated.ID,
-		"channel_id": channelID,
-		"content":    updated.Content,
-		"edited_at":  updated.EditedAt.Time.Format(time.RFC3339Nano),
+		"type":               "edit_message",
+		"id":                 updated.ID,
+		"channel_id":         channelID,
+		"content":            updated.Content,
+		"edited_at":          updated.EditedAt.Time.Format(time.RFC3339Nano),
+		"mentioned_user_ids": mentionedStrings,
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
@@ -213,4 +249,51 @@ func (s *MessageService) GetHistory(ctx context.Context, channelID uuid.UUID, be
 		messages[i] = messageInfoFromRow(row)
 	}
 	return messages, len(rows) == 50, nil
+}
+
+// resolveMentions finds @username patterns and replaces them with <mention:uuid> tokens.
+func (s *MessageService) resolveMentions(ctx context.Context, content string) (string, []uuid.UUID, error) {
+	matches := mentionPattern.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return content, nil, nil
+	}
+
+	// Collect unique usernames
+	nameSet := make(map[string]bool)
+	for _, m := range matches {
+		name := content[m[2]:m[3]]
+		nameSet[name] = true
+	}
+	names := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		names = append(names, n)
+	}
+
+	users, err := s.queries.GetUsersByUsernames(ctx, names)
+	if err != nil {
+		return content, nil, err
+	}
+
+	nameToID := make(map[string]uuid.UUID, len(users))
+	for _, u := range users {
+		nameToID[u.Username] = u.ID
+	}
+
+	// Replace from end to start to preserve indices
+	var mentionedIDs []uuid.UUID
+	seen := make(map[uuid.UUID]bool)
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		name := content[m[2]:m[3]]
+		if id, ok := nameToID[name]; ok {
+			token := "<mention:" + id.String() + ">"
+			content = content[:m[0]] + token + content[m[1]:]
+			if !seen[id] {
+				seen[id] = true
+				mentionedIDs = append(mentionedIDs, id)
+			}
+		}
+	}
+
+	return content, mentionedIDs, nil
 }

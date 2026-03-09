@@ -20,6 +20,12 @@ type Channel struct {
 	CreatedAt time.Time
 }
 
+type ChannelRead struct {
+	UserID     uuid.UUID
+	ChannelID  uuid.UUID
+	LastReadAt time.Time
+}
+
 type CustomEmote struct {
 	ID         uuid.UUID
 	Name       string
@@ -44,6 +50,11 @@ type Message struct {
 	Pinned    bool
 	EditedAt  sql.NullTime
 	CreatedAt time.Time
+}
+
+type MessageMention struct {
+	MessageID uuid.UUID
+	UserID    uuid.UUID
 }
 
 type PinnedMessage struct {

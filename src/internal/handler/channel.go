@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/martinmckenna/den/internal/httputil"
+	"github.com/martinmckenna/den/internal/middleware"
 	"github.com/martinmckenna/den/internal/service"
 )
 
@@ -123,4 +124,28 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})
+}
+
+func (h *ChannelHandler) GetUnreadCounts(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	counts, err := h.svc.GetUnreadCounts(r.Context(), userID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, counts)
+}
+
+func (h *ChannelHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	channelID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid channel id")
+		return
+	}
+	if err := h.svc.MarkChannelRead(r.Context(), userID, channelID); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "ok"})
 }

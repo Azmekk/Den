@@ -10,6 +10,7 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 const countUsers = `-- name: CountUsers :one
@@ -104,6 +105,38 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getUsersByUsernames = `-- name: GetUsersByUsernames :many
+SELECT id, username FROM users WHERE username = ANY($1::text[])
+`
+
+type GetUsersByUsernamesRow struct {
+	ID       uuid.UUID
+	Username string
+}
+
+func (q *Queries) GetUsersByUsernames(ctx context.Context, dollar_1 []string) ([]GetUsersByUsernamesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUsersByUsernames, pq.Array(dollar_1))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUsersByUsernamesRow
+	for rows.Next() {
+		var i GetUsersByUsernamesRow
+		if err := rows.Scan(&i.ID, &i.Username); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUsers = `-- name: ListUsers :many

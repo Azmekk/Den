@@ -2,21 +2,21 @@
 
 ## Database Migrations
 
-All migration commands use the `migrate/migrate` Docker image. Prefix with `MSYS_NO_PATHCONV=1` to prevent Git Bash path mangling.
+Uses `migrate` CLI installed locally.
 
 **Run all up migrations:**
 ```sh
-MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/src/db/migrations:/migrations" migrate/migrate -path=/migrations -database "postgres://den:changeme@host.docker.internal:5440/den?sslmode=disable" up
+migrate -path src/db/migrations -database "postgres://den:changeme@localhost:5440/den?sslmode=disable" up
 ```
 
 **Roll back one migration:**
 ```sh
-MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/src/db/migrations:/migrations" migrate/migrate -path=/migrations -database "postgres://den:changeme@host.docker.internal:5440/den?sslmode=disable" down 1
+migrate -path src/db/migrations -database "postgres://den:changeme@localhost:5440/den?sslmode=disable" down 1
 ```
 
 **Roll back all migrations:**
 ```sh
-MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/src/db/migrations:/migrations" migrate/migrate -path=/migrations -database "postgres://den:changeme@host.docker.internal:5440/den?sslmode=disable" down -all
+migrate -path src/db/migrations -database "postgres://den:changeme@localhost:5440/den?sslmode=disable" down -all
 ```
 
 ## Build

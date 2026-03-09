@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth.svelte';
 	import { channelStore } from '$lib/stores/channels.svelte';
+	import { unreadStore } from '$lib/stores/unread.svelte';
 	import { goto } from '$app/navigation';
 
 	const sortedChannels = $derived(
@@ -18,14 +19,23 @@
 			<p class="px-2 py-1 text-sm text-muted-foreground">No channels yet</p>
 		{:else}
 			{#each sortedChannels as channel (channel.id)}
+				{@const unread = unreadStore.getUnread(channel.id)}
+				{@const mentions = unreadStore.getMentions(channel.id)}
 				<button
 					onclick={() => channelStore.select(channel.id)}
 					class="flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition-colors {channelStore.selectedChannelId === channel.id
 						? 'bg-secondary text-foreground font-medium'
-						: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+						: unread > 0
+							? 'text-foreground font-semibold hover:bg-secondary/50'
+							: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
 				>
 					<span class="mr-1.5 text-muted-foreground">#</span>
-					{channel.name}
+					<span class="flex-1 truncate">{channel.name}</span>
+					{#if mentions > 0}
+						<span class="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">{mentions}</span>
+					{:else if unread > 0 && channelStore.selectedChannelId !== channel.id}
+						<span class="ml-1 h-2 w-2 rounded-full bg-foreground"></span>
+					{/if}
 				</button>
 			{/each}
 		{/if}

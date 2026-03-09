@@ -45,3 +45,9 @@ export interface EmoteInfo {
 export interface AppConfig {
 	uploads_enabled: boolean;
 }
+
+export interface UnreadInfo {
+	channel_id: string;
+	unread_count: number;
+	mention_count: number;
+}

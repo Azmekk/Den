@@ -116,12 +116,12 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		c.hub.Unsubscribe(c, msg.ChannelID)
 
 	case "send_message":
-		data, err := c.msgHandler.SendMessage(ctx, msg.ChannelID, c.UserID, c.Username, msg.Content)
+		data, _, err := c.msgHandler.SendMessage(ctx, msg.ChannelID, c.UserID, c.Username, msg.Content)
 		if err != nil {
 			c.sendError(err.Error())
 			return
 		}
-		c.hub.Broadcast(msg.ChannelID, data)
+		c.hub.BroadcastGlobal(data)
 
 		// Auto-stop typing indicator when a message is sent
 		stopEnvelope, _ := json.Marshal(map[string]any{
@@ -133,12 +133,12 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		c.hub.BroadcastExclude(msg.ChannelID, stopEnvelope, c)
 
 	case "edit_message":
-		data, channelID, err := c.msgHandler.EditMessage(ctx, msg.MessageID, c.UserID, msg.Content)
+		data, _, err := c.msgHandler.EditMessage(ctx, msg.MessageID, c.UserID, msg.Content)
 		if err != nil {
 			c.sendError(err.Error())
 			return
 		}
-		c.hub.Broadcast(channelID, data)
+		c.hub.BroadcastGlobal(data)
 
 	case "delete_message":
 		channelID, err := c.msgHandler.DeleteMessage(ctx, msg.MessageID, c.UserID, c.IsAdmin)
@@ -151,7 +151,7 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			"id":         msg.MessageID,
 			"channel_id": channelID,
 		})
-		c.hub.Broadcast(channelID, envelope)
+		c.hub.BroadcastGlobal(envelope)
 
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{

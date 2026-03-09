@@ -8,7 +8,7 @@ import (
 )
 
 type MessageHandler interface {
-	SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, error)
+	SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error)
 	EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error)
 	DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, error)
 }
@@ -29,6 +29,11 @@ type broadcastExcludeMsg struct {
 	exclude   *Client
 }
 
+type userMsg struct {
+	userID uuid.UUID
+	data   []byte
+}
+
 type Hub struct {
 	clients         map[*Client]bool
 	channels        map[uuid.UUID]map[*Client]bool
@@ -41,6 +46,7 @@ type Hub struct {
 	directSend      chan directMsg
 	broadcastExc    chan broadcastExcludeMsg
 	globalBroadcast chan []byte
+	userSend        chan userMsg
 }
 
 type broadcastMsg struct {
@@ -61,6 +67,7 @@ func NewHub() *Hub {
 		directSend:      make(chan directMsg, 256),
 		broadcastExc:    make(chan broadcastExcludeMsg, 256),
 		globalBroadcast: make(chan []byte, 256),
+		userSend:        make(chan userMsg, 256),
 	}
 }
 
@@ -83,6 +90,12 @@ func (h *Hub) removeClient(client *Client) {
 			if len(m) == 0 {
 				delete(h.channels, chID)
 			}
+		}
+	}
+	if conns, ok := h.onlineUsers[client.UserID]; ok {
+		delete(conns, client)
+		if len(conns) == 0 {
+			delete(h.onlineUsers, client.UserID)
 		}
 	}
 }
@@ -131,20 +144,15 @@ func (h *Hub) Run() {
 				username := client.Username
 				h.removeClient(client)
 
-				// Remove from online users
-				if conns, ok := h.onlineUsers[userID]; ok {
-					delete(conns, client)
-					if len(conns) == 0 {
-						delete(h.onlineUsers, userID)
-						// Broadcast offline status
-						update, _ := json.Marshal(map[string]any{
-							"type":     "presence_update",
-							"user_id":  userID,
-							"username": username,
-							"status":   "offline",
-						})
-						h.broadcastAll(update)
-					}
+				// Broadcast offline status if no connections remain
+				if len(h.onlineUsers[userID]) == 0 {
+					update, _ := json.Marshal(map[string]any{
+						"type":     "presence_update",
+						"user_id":  userID,
+						"username": username,
+						"status":   "offline",
+					})
+					h.broadcastAll(update)
 				}
 			}
 
@@ -197,6 +205,17 @@ func (h *Hub) Run() {
 
 		case data := <-h.globalBroadcast:
 			h.broadcastAll(data)
+
+		case msg := <-h.userSend:
+			if conns, ok := h.onlineUsers[msg.userID]; ok {
+				for client := range conns {
+					select {
+					case client.send <- msg.data:
+					default:
+						h.removeClient(client)
+					}
+				}
+			}
 		}
 	}
 }
@@ -219,4 +238,8 @@ func (h *Hub) BroadcastExclude(channelID uuid.UUID, data []byte, exclude *Client
 
 func (h *Hub) BroadcastGlobal(data []byte) {
 	h.globalBroadcast <- data
+}
+
+func (h *Hub) SendToUser(userID uuid.UUID, data []byte) {
+	h.userSend <- userMsg{userID: userID, data: data}
 }
