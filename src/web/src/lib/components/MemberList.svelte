@@ -17,10 +17,19 @@ const offlineUsers = $derived(
 
 async function openDM(userId: string) {
 	if (userId === auth.user?.id) return;
+	const existing = dmStore.findByUserId(userId);
+	if (existing) {
+		dmStore.select(existing.id);
+		layoutStore.sidebarTab = 'messages';
+		layoutStore.closeMemberList();
+		return;
+	}
+	// New DM — switch UI immediately, fire POST in background
+	layoutStore.sidebarTab = 'messages';
+	layoutStore.closeMemberList();
 	const pair = await dmStore.createOrGetDM(userId);
 	if (pair) {
 		dmStore.select(pair.id);
-		layoutStore.closeMemberList();
 	}
 }
 </script>

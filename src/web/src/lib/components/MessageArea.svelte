@@ -16,6 +16,19 @@ import MessageContent from './MessageContent.svelte';
 import MessageContextMenu from './MessageContextMenu.svelte';
 import UserProfilePopover from './UserProfilePopover.svelte';
 
+async function openDM(userId: string) {
+	if (userId === auth.user?.id) return;
+	const existing = dmStore.findByUserId(userId);
+	if (existing) {
+		dmStore.select(existing.id);
+		layoutStore.sidebarTab = 'messages';
+		return;
+	}
+	layoutStore.sidebarTab = 'messages';
+	const pair = await dmStore.createOrGetDM(userId);
+	if (pair) dmStore.select(pair.id);
+}
+
 function getColorForMessage(msg: MessageInfo): string {
 	const user = usersStore.users.find((u) => u.id === msg.user_id);
 	if (user) return getUserColor(user);
@@ -337,14 +350,14 @@ const mentionFilterIds = $derived(
 							</div>
 						{:else}
 							<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)}>
+								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
 									<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
 										<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
 									</div>
 								</UserProfilePopover>
 								<div class="flex-1 min-w-0">
 									<div class="flex items-baseline gap-2">
-										<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)}>
+										<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
 											<span class="font-medium text-sm cursor-pointer hover:underline" style="color: {getColorForMessage(msg)}">
 												{getDisplayNameForMessage(msg)}
 											</span>

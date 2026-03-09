@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 9 — DMs & Pinned Messages
-**Last deviation:** Sidebar Sections + Mobile Drawers
+**Last deviation:** Fix DM Opening, Navigation & Token Refresh
 **Next run:** Run 10
 
 ---
@@ -263,6 +263,20 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
   - `admin/+page.svelte` (22 vars/functions)
   - `login/+page.svelte` (3 vars/functions)
   - `register/+page.svelte` (3 vars/functions)
+- `bun run build` passes clean
+
+### Deviation (2026-03-10) — Fix DM Opening, Navigation & Token Refresh
+- **Fast DM Opening**: Added `findByUserId(userId)` to `dms.svelte.ts` — searches conversations by `other_user_id`. `MemberList.svelte` `openDM()` now checks for existing conversation first, skipping the POST request. UI switches immediately to Messages tab.
+- **Tab Auto-Switching**: `selectChannel()` in `ChannelSidebar.svelte` sets `layoutStore.sidebarTab = 'server'`; `selectDM()` sets it to `'messages'`. DM opening from MemberList and MessageArea also switches tab.
+- **DM Unread Tracking**: Added `dmUnreadCounts` Map to `dms.svelte.ts` with `incrementUnread`, `clearUnread`, `getDMUnread`, `hasAnyUnread` methods. `select()` auto-clears unread for selected DM. `+page.svelte` `handleNewDM` increments unread when incoming DM is not the active one.
+- **Tab Notification Indicators**: Server tab shows red dot when `unreadStore.unreadCounts.size > 0`; Messages tab shows red dot when `dmStore.hasAnyUnread()`. Individual DM items show count badge + bold text (mirrors channel unread pattern).
+- **Message Button in Chat Profiles**: Added `openDM()` function to `MessageArea.svelte`, passed `onMessage` and `isSelf` props to both `UserProfilePopover` instances on chat messages (avatar and username).
+- **Token Refresh on Wake**: Added `visibilitychange` listener in `+page.svelte` `onMount` — when tab becomes visible, calls `auth.refresh()`, updates WebSocket token via new `updateToken()` method, reconnects WS if disconnected. Redirects to `/login` if refresh fails.
+- **WebSocket `updateToken`**: Added `updateToken(newToken)` method to `websocket.svelte.ts` that updates the stored token without disconnecting (reconnect logic uses fresh token automatically).
+- `bun run build` passes clean
+
+### Deviation (2026-03-10) — Fix @-mention autocomplete broken
+- **Missing Import**: Added `import { getUserColor } from '$lib/utils'` to `MentionAutocomplete.svelte` — was used on line 156 but never imported, causing a runtime crash when the autocomplete popup tried to render colored user avatars
 - `bun run build` passes clean
 
 ### Deviation (2026-03-09) — Sidebar Tabs + Mobile Drawers

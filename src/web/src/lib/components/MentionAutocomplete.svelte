@@ -1,5 +1,6 @@
 <script lang="ts">
 import { usersStore } from '$lib/stores/users.svelte';
+import { getUserColor } from '$lib/utils';
 import type { UserInfo } from '$lib/types';
 
 interface Props {

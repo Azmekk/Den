@@ -102,6 +102,10 @@ function createWebSocket() {
 		listeners.get(type)?.delete(callback);
 	}
 
+	function updateToken(newToken: string) {
+		token = newToken;
+	}
+
 	return {
 		get connected() {
 			return connected;
@@ -114,6 +118,7 @@ function createWebSocket() {
 		send,
 		on,
 		off,
+		updateToken,
 	};
 }
 

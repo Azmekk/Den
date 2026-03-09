@@ -82,6 +82,13 @@ onMount(() => {
 	function handleNewDM(data: any) {
 		dmStore.handleNewDM(data);
 
+		// Track unread + play sound if not viewing this DM
+		const dmId = data.dm_pair_id as string;
+		if (dmId !== dmStore.selectedDMId) {
+			dmStore.incrementUnread(dmId);
+			playMentionSound();
+		}
+
 		// Refresh conversations to ensure this DM pair is listed
 		dmStore.fetchConversations();
 	}
@@ -167,7 +174,25 @@ onMount(() => {
 		websocket.connect(auth.accessToken);
 	}
 
+	// Refresh token when tab becomes visible (handles sleep/background)
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			auth.refresh().then((ok) => {
+				if (ok && auth.accessToken) {
+					websocket.updateToken(auth.accessToken);
+					if (!websocket.connected) {
+						websocket.connect(auth.accessToken);
+					}
+				} else {
+					goto('/login');
+				}
+			});
+		}
+	}
+	document.addEventListener('visibilitychange', handleVisibilityChange);
+
 	return () => {
+		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		websocket.off('new_message', handleNewMessage);
 		websocket.off('new_dm', handleNewDM);
 		websocket.off('edit_message', handleEditMessage);

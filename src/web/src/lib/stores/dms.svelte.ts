@@ -10,6 +10,35 @@ function createDMs() {
 	let hasMoreByDM = $state<Map<string, boolean>>(new Map());
 	let loadingOlder = $state(false);
 	const loadedDMs = new Set<string>();
+	let dmUnreadCounts = $state<Map<string, number>>(new Map());
+
+	function findByUserId(userId: string): DMPairInfo | undefined {
+		return conversations.find((c) => c.other_user_id === userId);
+	}
+
+	function incrementUnread(dmId: string) {
+		const newMap = new Map(dmUnreadCounts);
+		newMap.set(dmId, (newMap.get(dmId) ?? 0) + 1);
+		dmUnreadCounts = newMap;
+	}
+
+	function clearUnread(dmId: string) {
+		if (!dmUnreadCounts.has(dmId)) return;
+		const newMap = new Map(dmUnreadCounts);
+		newMap.delete(dmId);
+		dmUnreadCounts = newMap;
+	}
+
+	function getDMUnread(dmId: string): number {
+		return dmUnreadCounts.get(dmId) ?? 0;
+	}
+
+	function hasAnyUnread(): boolean {
+		for (const count of dmUnreadCounts.values()) {
+			if (count > 0) return true;
+		}
+		return false;
+	}
 
 	async function fetchConversations() {
 		const res = await globalThis.fetch('/api/dms', {
@@ -43,6 +72,7 @@ function createDMs() {
 		// Mutual exclusion with channel selection
 		channelStore.deselect();
 		selectedDMId = dmId;
+		clearUnread(dmId);
 	}
 
 	function deselect() {
@@ -188,6 +218,7 @@ function createDMs() {
 		},
 		fetchConversations,
 		createOrGetDM,
+		findByUserId,
 		select,
 		deselect,
 		getMessages,
@@ -199,6 +230,10 @@ function createDMs() {
 		handleDeleteDM,
 		updatePinStatus,
 		sendMessage,
+		incrementUnread,
+		clearUnread,
+		getDMUnread,
+		hasAnyUnread,
 	};
 }
 

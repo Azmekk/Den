@@ -719,6 +719,15 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Look up display name from usersStore in MessageArea (real-time updates)
 - [x] Pass live display name to UserProfilePopover props in MessageArea
 
+### Deviation — Fix DM Opening, Navigation & Token Refresh (DONE)
+- [x] Fast DM opening via `findByUserId` — skip POST for existing conversations
+- [x] Tab auto-switching on channel/DM selection
+- [x] DM unread tracking (client-side) with badge indicators on individual DMs and Messages tab
+- [x] Channel unread indicator on Server tab
+- [x] Message button in chat user profiles (UserProfilePopover in MessageArea)
+- [x] Token refresh on visibility change (sleep/tab switch recovery)
+- [x] WebSocket `updateToken` method for fresh token on reconnect
+
 ### Deviation — Fix Biome --unsafe underscore-prefixed variables (DONE)
 - [x] Removed `_` prefix from all script variables/functions that Biome incorrectly marked as unused (Svelte template references invisible to Biome)
 - [x] 9 files fixed, `bun run build` passes clean
