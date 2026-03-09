@@ -7,8 +7,8 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 6 — Admin Panel
-**Next run:** Run 7
+**Last completed run:** Run 7 — Custom Emotes
+**Next run:** Run 8
 
 ---
 
@@ -85,6 +85,15 @@
 - Added `AdminStats` and `AdminSettings` TypeScript types
 - `go build` and `bun run build` both pass clean
 
+### Run 7 — Custom Emotes
+- Added S3-compatible bucket storage for custom emote images (via MinIO in dev)
+- Created migration for `emotes` table with unique name constraint
+- Added sqlc queries and generated Go code for emote CRUD
+- Implemented `EmoteService` and `EmoteHandler` with upload (admin-only), list (authenticated), and delete (admin-only) endpoints
+- Frontend emote picker in chat input with `:emote_name:` syntax rendering in messages
+- Emote images served from S3 bucket via presigned URLs or direct bucket access
+- `go build` and `bun run build` both pass clean
+
 ---
 
 ## Run Log
@@ -155,6 +164,14 @@
 - `CountChannels` query added to messages.sql (alongside `CountMessages`) since it's used only by admin stats
 - Password reset generates 16 hex chars (8 random bytes) and revokes all refresh tokens for the user
 - WS event listener registration moved before `websocket.connect()` in `+page.svelte` to avoid dropped messages on connect
+
+### Run 7 (2026-03-09)
+- Custom emotes with S3-compatible storage (MinIO for dev, any S3-compatible provider for prod)
+- Emote images uploaded as multipart form data, stored in S3 bucket
+- `:emote_name:` syntax parsed and rendered inline in message text
+- Emote picker UI added to chat input area
+- Admin-only upload/delete; all authenticated users can list and use emotes
+- **Message ordering fix**: wrapped `GetMessagesByChannel` query in a SQL subquery to ensure chronological order — outer query re-sorts `ASC` after inner query limits `DESC` (ensures newest N messages are returned in display order)
 
 ---
 
