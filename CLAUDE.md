@@ -62,6 +62,7 @@ cd src && go run .
 - Svelte 5 with runes, `.svelte.ts` store files
 - Tailwind v4 with `@theme inline` in app.css (no tailwind.config.js)
 - bits-ui for headless components, `cn()` utility in `src/web/src/lib/utils.ts`
+- Tailwind v4 does not add `cursor: pointer` to buttons by default; a global rule in `app.css` handles this. For non-button clickable elements (e.g. `<div onclick>`), add the `cursor-pointer` Tailwind class.
 
 ## Docker
 

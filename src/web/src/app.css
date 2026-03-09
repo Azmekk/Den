@@ -35,6 +35,10 @@
 		color: hsl(var(--foreground));
 		font-family: "Inter", system-ui, -apple-system, sans-serif;
 	}
+
+	button, [role="button"] {
+		cursor: pointer;
+	}
 }
 
 @theme inline {
