@@ -8,23 +8,33 @@ SELECT * FROM messages
 WHERE id = $1;
 
 -- name: GetLatestMessagesByChannel :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
-FROM messages m
-JOIN users u ON u.id = m.user_id
-WHERE m.channel_id = $1
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT 50;
+SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.channel_id = $1
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC;
 
 -- name: GetMessagesByChannel :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
-FROM messages m
-JOIN users u ON u.id = m.user_id
-WHERE m.channel_id = @channel_id
-  AND (m.created_at < @before_time OR (m.created_at = @before_time AND m.id < @before_id))
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT 50;
+SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.channel_id = @channel_id
+    AND (m.created_at < @before_time OR (m.created_at = @before_time AND m.id < @before_id))
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC;
 
 -- name: UpdateMessageContent :one
 UPDATE messages

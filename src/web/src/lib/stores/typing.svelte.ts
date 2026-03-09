@@ -45,11 +45,38 @@ function createTyping() {
 		typingByChannel = next;
 	}
 
+	function handleTypingStop(data: any) {
+		const channelId = data.channel_id as string;
+		const userId = data.user_id as string;
+
+		const ch = typingByChannel.get(channelId);
+		if (!ch) return;
+
+		const existing = ch.get(userId);
+		if (existing) clearTimeout(existing.timeout);
+
+		const newCh = new Map(ch);
+		newCh.delete(userId);
+
+		const next = new Map(typingByChannel);
+		if (newCh.size === 0) {
+			next.delete(channelId);
+		} else {
+			next.set(channelId, newCh);
+		}
+		typingByChannel = next;
+	}
+
 	function sendTyping(channelId: string) {
 		const now = Date.now();
 		if (now - lastSentAt < 2000) return;
 		lastSentAt = now;
 		websocket.send({ type: 'typing_start', channel_id: channelId });
+	}
+
+	function stopTyping(channelId: string) {
+		websocket.send({ type: 'typing_stop', channel_id: channelId });
+		lastSentAt = 0;
 	}
 
 	function getTypingUsers(channelId: string): string[] {
@@ -72,7 +99,9 @@ function createTyping() {
 
 	return {
 		handleTypingStart,
+		handleTypingStop,
 		sendTyping,
+		stopTyping,
 		getTypingUsers,
 		clearChannel
 	};

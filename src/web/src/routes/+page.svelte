@@ -37,7 +37,16 @@
 		websocket.on('presence_initial', presence.handlePresenceInitial);
 		websocket.on('presence_update', presence.handlePresenceUpdate);
 		websocket.on('typing_start', typing.handleTypingStart);
+		websocket.on('typing_stop', typing.handleTypingStop);
 		websocket.on('emote_list_update', emoteStore.refresh);
+
+		function handleWsOpen() {
+			const id = channelStore.selectedChannelId;
+			if (id) {
+				websocket.send({ type: 'subscribe', channel_id: id });
+			}
+		}
+		websocket.on('open', handleWsOpen);
 
 		// Connect WebSocket
 		if (auth.accessToken) {
@@ -51,7 +60,9 @@
 			websocket.off('presence_initial', presence.handlePresenceInitial);
 			websocket.off('presence_update', presence.handlePresenceUpdate);
 			websocket.off('typing_start', typing.handleTypingStart);
+			websocket.off('typing_stop', typing.handleTypingStop);
 			websocket.off('emote_list_update', emoteStore.refresh);
+			websocket.off('open', handleWsOpen);
 			websocket.disconnect();
 		};
 	});

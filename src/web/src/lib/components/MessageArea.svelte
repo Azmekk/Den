@@ -96,14 +96,15 @@
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			sendMsg();
-		} else if (channelId) {
-			typing.sendTyping(channelId);
 		}
 	}
 
 	function handleInput(e: Event) {
 		autoResize(e);
 		updateCursorPosition();
+		if (channelId) {
+			typing.sendTyping(channelId);
+		}
 	}
 
 	function updateCursorPosition() {
@@ -128,6 +129,7 @@
 	function sendMsg() {
 		const content = messageInput.trim();
 		if (!content || !channelId) return;
+		typing.stopTyping(channelId);
 		messageStore.sendMessage(channelId, content);
 		messageInput = '';
 	}

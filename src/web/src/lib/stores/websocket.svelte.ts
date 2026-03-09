@@ -25,6 +25,12 @@ function createWebSocket() {
 		ws.onopen = () => {
 			connected = true;
 			reconnectDelay = 1000;
+			const cbs = listeners.get('open');
+			if (cbs) {
+				for (const cb of cbs) {
+					cb({});
+				}
+			}
 		};
 
 		ws.onclose = () => {

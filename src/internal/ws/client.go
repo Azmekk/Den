@@ -123,6 +123,15 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		}
 		c.hub.Broadcast(msg.ChannelID, data)
 
+		// Auto-stop typing indicator when a message is sent
+		stopEnvelope, _ := json.Marshal(map[string]any{
+			"type":       "typing_stop",
+			"channel_id": msg.ChannelID,
+			"user_id":    c.UserID,
+			"username":   c.Username,
+		})
+		c.hub.BroadcastExclude(msg.ChannelID, stopEnvelope, c)
+
 	case "edit_message":
 		data, channelID, err := c.msgHandler.EditMessage(ctx, msg.MessageID, c.UserID, msg.Content)
 		if err != nil {
@@ -147,6 +156,15 @@ func (c *Client) handleMessage(msg incomingMessage) {
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{
 			"type":       "typing_start",
+			"channel_id": msg.ChannelID,
+			"user_id":    c.UserID,
+			"username":   c.Username,
+		})
+		c.hub.BroadcastExclude(msg.ChannelID, envelope, c)
+
+	case "typing_stop":
+		envelope, _ := json.Marshal(map[string]any{
+			"type":       "typing_stop",
 			"channel_id": msg.ChannelID,
 			"user_id":    c.UserID,
 			"username":   c.Username,

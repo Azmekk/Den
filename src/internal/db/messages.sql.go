@@ -89,13 +89,18 @@ func (q *Queries) DeleteOldestMessages(ctx context.Context, limit int32) error {
 }
 
 const getLatestMessagesByChannel = `-- name: GetLatestMessagesByChannel :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
-FROM messages m
-JOIN users u ON u.id = m.user_id
-WHERE m.channel_id = $1
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT 50
+SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.channel_id = $1
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC
 `
 
 type GetLatestMessagesByChannelRow struct {
@@ -167,14 +172,19 @@ func (q *Queries) GetMessageByID(ctx context.Context, id uuid.UUID) (Message, er
 }
 
 const getMessagesByChannel = `-- name: GetMessagesByChannel :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
-FROM messages m
-JOIN users u ON u.id = m.user_id
-WHERE m.channel_id = $1
-  AND (m.created_at < $2 OR (m.created_at = $2 AND m.id < $3))
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT 50
+SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.channel_id = $1
+    AND (m.created_at < $2 OR (m.created_at = $2 AND m.id < $3))
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC
 `
 
 type GetMessagesByChannelParams struct {
