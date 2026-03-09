@@ -6,6 +6,7 @@
 	import { tick } from 'svelte';
 	import MessageContent from './MessageContent.svelte';
 	import EmoteAutocomplete from './EmoteAutocomplete.svelte';
+	import type { MessageInfo } from '$lib/types';
 
 	const USER_COLORS = [
 		'#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e',
@@ -24,6 +25,15 @@
 	function formatTime(iso: string): string {
 		const d = new Date(iso);
 		return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	function isGrouped(msgs: MessageInfo[], index: number): boolean {
+		if (index === 0) return false;
+		const prev = msgs[index - 1];
+		const curr = msgs[index];
+		if (prev.username !== curr.username) return false;
+		const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
+		return diff < 5 * 60 * 1000;
 	}
 
 	let messageInput = $state('');
@@ -170,19 +180,36 @@
 					</div>
 				</div>
 			{:else}
-				{#each messages as msg (msg.id)}
-					<div class="group py-1 hover:bg-secondary/30 -mx-2 px-2 rounded">
-						<div class="flex items-baseline gap-2">
-							<span class="font-medium text-sm" style="color: {userColor(msg.username)}">
-								{msg.username}
-							</span>
-							<span class="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
-							{#if msg.edited_at}
-								<span class="text-xs text-muted-foreground italic">(edited)</span>
-							{/if}
+				{#each messages as msg, i (msg.id)}
+					{@const grouped = isGrouped(messages, i)}
+					{#if grouped}
+						<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded">
+							<div class="w-8 flex items-center justify-center shrink-0">
+								<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
+							</div>
+							<div class="flex-1 min-w-0">
+								<MessageContent content={msg.content} />
+							</div>
 						</div>
-						<MessageContent content={msg.content} />
-					</div>
+					{:else}
+						<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded {i > 0 ? 'mt-3' : ''}">
+							<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5" style="background-color: {userColor(msg.username)}">
+								<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
+							</div>
+							<div class="flex-1 min-w-0">
+								<div class="flex items-baseline gap-2">
+									<span class="font-medium text-sm" style="color: {userColor(msg.username)}">
+										{msg.username}
+									</span>
+									<span class="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
+									{#if msg.edited_at}
+										<span class="text-xs text-muted-foreground italic">(edited)</span>
+									{/if}
+								</div>
+								<MessageContent content={msg.content} />
+							</div>
+						</div>
+					{/if}
 				{/each}
 			{/if}
 		</div>
