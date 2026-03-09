@@ -35,3 +35,18 @@ RETURNING *;
 -- name: DeleteMessage :exec
 DELETE FROM messages
 WHERE id = $1;
+
+-- name: CountMessages :one
+SELECT count(*) FROM messages;
+
+-- name: DeleteOldestMessages :exec
+DELETE FROM messages
+WHERE id IN (
+  SELECT id FROM messages
+  WHERE pinned = false
+  ORDER BY created_at ASC
+  LIMIT $1
+);
+
+-- name: CountChannels :one
+SELECT count(*) FROM channels;

@@ -55,6 +55,7 @@ func main() {
 	channelSvc := service.NewChannelService(queries)
 	messageSvc := service.NewMessageService(queries)
 	userSvc := service.NewUserService(queries)
+	adminSvc := service.NewAdminService(queries, authSvc)
 
 	hub := ws.NewHub()
 	go hub.Run()
@@ -64,7 +65,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, hub, staticFS)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, hub, staticFS)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

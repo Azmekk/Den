@@ -24,3 +24,14 @@ export interface UserInfo {
 	avatar_url?: string;
 	is_admin: boolean;
 }
+
+export interface AdminStats {
+	message_count: number;
+	user_count: number;
+	channel_count: number;
+}
+
+export interface AdminSettings {
+	open_registration: boolean;
+	instance_name: string;
+}

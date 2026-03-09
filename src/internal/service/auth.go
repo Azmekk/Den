@@ -29,6 +29,7 @@ type AuthService struct {
 	Queries          *db.Queries
 	jwtSecret        []byte
 	openRegistration bool
+	instanceName     string
 }
 
 func NewAuthService(queries *db.Queries, jwtSecret string, openRegistration bool) *AuthService {
@@ -36,6 +37,7 @@ func NewAuthService(queries *db.Queries, jwtSecret string, openRegistration bool
 		Queries:          queries,
 		jwtSecret:        []byte(jwtSecret),
 		openRegistration: openRegistration,
+		instanceName:     "Den",
 	}
 }
 
@@ -254,6 +256,24 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (jwt.MapClaims, er
 	}
 
 	return claims, nil
+}
+
+func (s *AuthService) IsOpenRegistration() bool {
+	return s.openRegistration
+}
+
+func (s *AuthService) SetOpenRegistration(open bool) {
+	s.openRegistration = open
+}
+
+func (s *AuthService) GetInstanceName() string {
+	return s.instanceName
+}
+
+func (s *AuthService) SetInstanceName(name string) {
+	if name != "" {
+		s.instanceName = name
+	}
 }
 
 func sha256Hash(s string) string {

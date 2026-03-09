@@ -26,18 +26,18 @@
 		});
 		usersStore.fetch();
 
-		// Connect WebSocket
-		if (auth.accessToken) {
-			websocket.connect(auth.accessToken);
-		}
-
-		// Register WS event listeners
+		// Register WS event listeners before connecting so no messages are dropped
 		websocket.on('new_message', messageStore.handleNewMessage);
 		websocket.on('edit_message', messageStore.handleEditMessage);
 		websocket.on('delete_message', messageStore.handleDeleteMessage);
 		websocket.on('presence_initial', presence.handlePresenceInitial);
 		websocket.on('presence_update', presence.handlePresenceUpdate);
 		websocket.on('typing_start', typing.handleTypingStart);
+
+		// Connect WebSocket
+		if (auth.accessToken) {
+			websocket.connect(auth.accessToken);
+		}
 
 		return () => {
 			websocket.off('new_message', messageStore.handleNewMessage);

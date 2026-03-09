@@ -13,6 +13,28 @@ import (
 	"github.com/google/uuid"
 )
 
+const countChannels = `-- name: CountChannels :one
+SELECT count(*) FROM channels
+`
+
+func (q *Queries) CountChannels(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countChannels)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMessages = `-- name: CountMessages :one
+SELECT count(*) FROM messages
+`
+
+func (q *Queries) CountMessages(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countMessages)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content)
 VALUES ($1, $2, $3)
@@ -48,6 +70,21 @@ WHERE id = $1
 
 func (q *Queries) DeleteMessage(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, deleteMessage, id)
+	return err
+}
+
+const deleteOldestMessages = `-- name: DeleteOldestMessages :exec
+DELETE FROM messages
+WHERE id IN (
+  SELECT id FROM messages
+  WHERE pinned = false
+  ORDER BY created_at ASC
+  LIMIT $1
+)
+`
+
+func (q *Queries) DeleteOldestMessages(ctx context.Context, limit int32) error {
+	_, err := q.db.ExecContext(ctx, deleteOldestMessages, limit)
 	return err
 }
 

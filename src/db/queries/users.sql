@@ -20,3 +20,6 @@ UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1;
 
 -- name: ListUsers :many
 SELECT id, username, display_name, avatar_url, is_admin FROM users ORDER BY username;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;

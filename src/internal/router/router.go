@@ -13,11 +13,12 @@ import (
 	"github.com/martinmckenna/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, hub *ws.Hub, staticFS fs.FS) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, hub *ws.Hub, staticFS fs.FS) chi.Router {
 	authH := handler.NewAuthHandler(authSvc)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc)
 	userH := handler.NewUserHandler(userSvc)
+	adminH := handler.NewAdminHandler(adminSvc)
 
 	r := chi.NewRouter()
 
@@ -51,6 +52,17 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				r.Post("/channels", channelH.Create)
 				r.Put("/channels/{id}", channelH.Update)
 				r.Delete("/channels/{id}", channelH.Delete)
+
+				r.Route("/admin", func(r chi.Router) {
+					r.Get("/users", adminH.ListUsers)
+					r.Put("/users/{id}/admin", adminH.SetAdmin)
+					r.Post("/users/{id}/reset-password", adminH.ResetPassword)
+					r.Delete("/users/{id}", adminH.DeleteUser)
+					r.Get("/stats", adminH.GetStats)
+					r.Post("/messages/cleanup", adminH.CleanupMessages)
+					r.Get("/settings", adminH.GetSettings)
+					r.Put("/settings", adminH.UpdateSettings)
+				})
 			})
 		})
 

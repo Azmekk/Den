@@ -7,8 +7,8 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 5 — Main Chat UI
-**Next run:** Run 6
+**Last completed run:** Run 6 — Admin Panel
+**Next run:** Run 7
 
 ---
 
@@ -72,6 +72,17 @@
 - Created `MemberList` component: online/offline sections with hash-based colored avatars and presence dots
 - Rewrote `+page.svelte` with three-column layout, WS lifecycle management, event listener wiring, auto-select first channel
 - Updated Vite proxy config for WebSocket upgrade support
+- `go build` and `bun run build` both pass clean
+
+### Run 6 — Admin Panel
+- Added `DeleteUser`, `CountMessages`, `DeleteOldestMessages`, `CountChannels` sqlc queries and regenerated Go code
+- Created `AdminService` (`src/internal/service/admin.go`): list users, toggle admin (prevents self-demotion), reset password (random 16-char hex + revoke tokens), delete user (prevents self-deletion), stats, message cleanup, settings
+- Created `AdminHandler` (`src/internal/handler/admin.go`): 8 endpoints under `/api/admin/*`
+- Extended `AuthService` with `SetOpenRegistration`/`IsOpenRegistration` and `SetInstanceName`/`GetInstanceName` for runtime settings toggle
+- Wired admin routes in router under existing auth + admin middleware group
+- Created admin panel frontend (`src/web/src/routes/admin/+page.svelte`) with 4 tabs: Users (toggle admin, reset password with modal, delete with confirmation), Channels (create/edit/delete), Messages (stats + cleanup), Settings (instance name, open registration toggle)
+- Added gear icon in `ChannelSidebar` linking to `/admin` (visible only for admins)
+- Added `AdminStats` and `AdminSettings` TypeScript types
 - `go build` and `bun run build` both pass clean
 
 ---
@@ -138,6 +149,13 @@
 - Svelte 5 reactivity with Set/Map requires creating new instances on mutation (reassignment pattern)
 - Hub refactored to use `removeClient` helper to DRY up cleanup logic across register/unregister/broadcast cases
 
+### Run 6 (2026-03-09)
+- Settings (open_registration, instance_name) are runtime-only in-memory toggles — not persisted to DB
+- Admin routes nested inside existing admin middleware group (reuses `RequireAdmin` middleware)
+- `CountChannels` query added to messages.sql (alongside `CountMessages`) since it's used only by admin stats
+- Password reset generates 16 hex chars (8 random bytes) and revokes all refresh tokens for the user
+- WS event listener registration moved before `websocket.connect()` in `+page.svelte` to avoid dropped messages on connect
+
 ---
 
 ## Known Deviations from Plan
@@ -168,3 +186,6 @@
 - Frontend stores follow factory pattern with `$state` runes in `.svelte.ts` files
 - User colors are generated client-side from username hash — no `color` column in DB
 - Three-column layout: ChannelSidebar (w-60) | MessageArea (flex-1) | MemberList (w-60)
+- Admin panel at `/admin` — admin-only, 4 tabs (users, channels, messages, settings)
+- Admin settings (open_registration, instance_name) are in-memory only — reset on server restart
+- Admin routes: `/api/admin/users`, `/api/admin/users/{id}/admin`, `/api/admin/users/{id}/reset-password`, `/api/admin/users/{id}` (DELETE), `/api/admin/stats`, `/api/admin/messages/cleanup`, `/api/admin/settings`
