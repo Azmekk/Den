@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 9 — DMs & Pinned Messages
-**Last deviation:** Fix Biome --unsafe underscore-prefixed variables
+**Last deviation:** Sidebar Sections + Mobile Drawers
 **Next run:** Run 10
 
 ---
@@ -263,6 +263,15 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
   - `admin/+page.svelte` (22 vars/functions)
   - `login/+page.svelte` (3 vars/functions)
   - `register/+page.svelte` (3 vars/functions)
+- `bun run build` passes clean
+
+### Deviation (2026-03-09) — Sidebar Tabs + Mobile Drawers
+- **Layout Store**: Created `layout.svelte.ts` with `sidebarOpen`/`memberListOpen` state, mutual exclusion, `anyDrawerOpen` derived, `sidebarTab` (`'server' | 'messages'`) state for tab switching
+- **ChannelSidebar Tabs**: Replaced combined Server+DM sections with a tab bar at top — "Server" tab (server icon, channel list) and "Messages" tab (chat icon, DM list); tabs fill full height; outer tag changed from `<aside>` to `<div>`; `onNavigate` callback prop
+- **MemberList Rework**: Clicking a user row now opens `UserProfilePopover` (shows profile + "Message" button) instead of directly opening a DM; auto-closes member list drawer when DM is opened
+- **UserProfilePopover**: Added `onMessage` and `isSelf` props; shows a "Message" button inside the profile drawer for non-self users; clicking it closes the popover and triggers the DM action
+- **MessageArea Header**: Added hamburger button (left, `md:hidden`) and users/people button (right, `md:hidden`, hidden in DM mode)
+- **+page.svelte Responsive Layout**: Desktop — static sidebar and member list; Mobile — full-height overlay drawers (inset-y-0) with fly/fade transitions, backdrop click to close, auto-close on navigation
 - `bun run build` passes clean
 
 ---

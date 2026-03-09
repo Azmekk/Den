@@ -1,11 +1,13 @@
 <script lang="ts">
 import { onMount, untrack } from 'svelte';
+import { fly, fade } from 'svelte/transition';
 import { goto } from '$app/navigation';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { dmStore } from '$lib/stores/dms.svelte';
 import { emoteStore } from '$lib/stores/emotes.svelte';
+import { layoutStore } from '$lib/stores/layout.svelte';
 import { messageStore } from '$lib/stores/messages.svelte';
 import { pinStore } from '$lib/stores/pins.svelte';
 import { presence } from '$lib/stores/presence.svelte';
@@ -231,14 +233,46 @@ function updateMessagePin(
 
 {#if auth.isLoggedIn}
 	<ConnectionBanner />
-	<div class="flex h-screen">
-		<ChannelSidebar />
+	<div class="flex h-screen {layoutStore.anyDrawerOpen ? 'overflow-hidden' : ''}">
+		<!-- Static sidebar (desktop) -->
+		<aside class="hidden md:flex w-60 shrink-0">
+			<ChannelSidebar />
+		</aside>
+
+		<!-- Mobile sidebar drawer -->
+		{#if layoutStore.sidebarOpen}
+			<div class="fixed inset-0 z-40 md:hidden" transition:fade={{ duration: 150 }}>
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="absolute inset-0 bg-black/40" onclick={() => layoutStore.closeSidebar()}></div>
+				<div class="absolute inset-y-0 left-0 w-60" transition:fly={{ x: -240, duration: 200 }}>
+					<ChannelSidebar onNavigate={() => layoutStore.closeSidebar()} />
+				</div>
+			</div>
+		{/if}
+
 		<MessageArea />
 		{#if activeTargetId}
 			<PinnedMessagesPanel targetId={activeTargetId} isDM={isDMMode} />
 		{/if}
+
+		<!-- Static member list (desktop) -->
 		{#if !isDMMode}
-			<MemberList />
+			<aside class="hidden md:flex w-60 shrink-0">
+				<MemberList />
+			</aside>
+		{/if}
+
+		<!-- Mobile member list drawer -->
+		{#if layoutStore.memberListOpen && !isDMMode}
+			<div class="fixed inset-0 z-40 md:hidden" transition:fade={{ duration: 150 }}>
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="absolute inset-0 bg-black/40" onclick={() => layoutStore.closeMemberList()}></div>
+				<div class="absolute inset-y-0 right-0 w-60" transition:fly={{ x: 240, duration: 200 }}>
+					<MemberList />
+				</div>
+			</div>
 		{/if}
 	</div>
 {/if}

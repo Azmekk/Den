@@ -706,7 +706,7 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Verify: Two users can join a voice channel and hear each other
 
 ### Run 13 — Polish & Deployment
-- [ ] Mobile layout (slide-out drawer, bottom voice bar)
+- [x] Mobile layout (slide-out drawer, bottom voice bar) — Sidebar sections + mobile drawers done in deviation
 - [ ] Touch targets and mobile interaction pass
 - [ ] PWA manifest
 - [x] User customization (color picker, display name change) — Done in deviation
@@ -722,6 +722,14 @@ Each run should leave the repo in a working, committable state. Never start a ru
 ### Deviation — Fix Biome --unsafe underscore-prefixed variables (DONE)
 - [x] Removed `_` prefix from all script variables/functions that Biome incorrectly marked as unused (Svelte template references invisible to Biome)
 - [x] 9 files fixed, `bun run build` passes clean
+
+### Deviation — Sidebar Tabs + Mobile Drawers (DONE)
+- [x] Created `layout.svelte.ts` store with sidebar/memberList open state + mutual exclusion + `sidebarTab` (server/messages)
+- [x] Restructured `ChannelSidebar.svelte` with Server/Messages tab bar (full tab switching, not sections), added `onNavigate` prop
+- [x] Changed `MemberList.svelte` — clicking user row opens profile popover (with "Message" button for DMs), auto-closes drawer on DM open
+- [x] Added `onMessage` and `isSelf` props to `UserProfilePopover.svelte` — shows "Message" button inside profile drawer for non-self users
+- [x] Added hamburger + members toggle buttons (`md:hidden`) in `MessageArea.svelte` header
+- [x] Updated `+page.svelte` with responsive layout: static panels on desktop, full-height overlay drawers on mobile with fly/fade transitions
 
 ### Deviation — Fix UserProfilePopover not opening on click (DONE)
 - [x] Replaced `Popover.Trigger` with `Popover.Anchor` + manual `onclick`/`onkeydown` handlers in `UserProfilePopover.svelte`

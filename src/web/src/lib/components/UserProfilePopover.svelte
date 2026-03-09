@@ -6,10 +6,11 @@ interface Props {
 	displayName?: string;
 	color: string;
 	children: Snippet;
+	onMessage?: () => void;
+	isSelf?: boolean;
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: props used in Svelte template
-let { username, displayName, color, children }: Props = $props();
+let { username, displayName, color, children, onMessage, isSelf = false }: Props = $props();
 
 let open = $state(false);
 
@@ -27,6 +28,11 @@ function handleKeydown(e: KeyboardEvent) {
 	if (e.key === 'Escape' && open) {
 		open = false;
 	}
+}
+
+function handleMessage() {
+	open = false;
+	onMessage?.();
 }
 </script>
 
@@ -59,6 +65,15 @@ function handleKeydown(e: KeyboardEvent) {
 					<p class="text-lg font-semibold text-foreground">{displayName || username}</p>
 					<p class="text-sm text-muted-foreground">@{username}</p>
 				</div>
+				{#if onMessage && !isSelf}
+					<button
+						onclick={handleMessage}
+						class="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+						Message
+					</button>
+				{/if}
 			</div>
 		</div>
 	</div>

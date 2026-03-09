@@ -9,6 +9,7 @@ import { typing } from '$lib/stores/typing.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 import type { MessageInfo } from '$lib/types';
 import { getUserColor, userColorFromHash } from '$lib/utils';
+import { layoutStore } from '$lib/stores/layout.svelte';
 import EmoteAutocomplete from './EmoteAutocomplete.svelte';
 import MentionAutocomplete from './MentionAutocomplete.svelte';
 import MessageContent from './MessageContent.svelte';
@@ -262,7 +263,14 @@ const mentionFilterIds = $derived(
 	{#if hasActiveView}
 		<!-- Header -->
 		<div class="flex h-12 items-center justify-between border-b border-border px-4">
-			<div class="flex items-center">
+			<div class="flex items-center gap-2">
+				<button
+					onclick={() => layoutStore.toggleSidebar()}
+					class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden"
+					title="Toggle sidebar"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+				</button>
 				<span class="mr-2 text-muted-foreground">{headerIcon}</span>
 				<h2 class="font-semibold text-foreground">
 					{isDM && dmConversation
@@ -273,13 +281,24 @@ const mentionFilterIds = $derived(
 					<span class="ml-3 truncate text-sm text-muted-foreground">{channel.topic}</span>
 				{/if}
 			</div>
-			<button
-				onclick={() => pinStore.togglePanel()}
-				class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-				title="Pinned messages"
-			>
-				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-			</button>
+			<div class="flex items-center gap-1">
+				<button
+					onclick={() => pinStore.togglePanel()}
+					class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+					title="Pinned messages"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+				</button>
+				{#if !isDM}
+					<button
+						onclick={() => layoutStore.toggleMemberList()}
+						class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden"
+						title="Toggle member list"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		<!-- Message list -->
@@ -370,17 +389,27 @@ const mentionFilterIds = $derived(
 				onSelect={handleEmoteSelect}
 				onKeydown={(handler) => emoteAutocompleteHandler = handler}
 			/>
-			<textarea
-				bind:this={textareaEl}
-				bind:value={messageInput}
-				onkeydown={handleKeydown}
-				oninput={handleInput}
-				onclick={updateCursorPosition}
-				onkeyup={updateCursorPosition}
-				placeholder={placeholderText}
-				rows="1"
-				class="w-full resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
-			></textarea>
+			<div class="flex items-end gap-2">
+				<textarea
+					bind:this={textareaEl}
+					bind:value={messageInput}
+					onkeydown={handleKeydown}
+					oninput={handleInput}
+					onclick={updateCursorPosition}
+					onkeyup={updateCursorPosition}
+					placeholder={placeholderText}
+					rows="1"
+					class="flex-1 min-h-[38px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
+				></textarea>
+				<button
+					onclick={sendMsg}
+					class="shrink-0 h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+					disabled={!messageInput.trim()}
+					title="Send message"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
+				</button>
+			</div>
 		</div>
 	{:else}
 		<div class="flex flex-1 items-center justify-center">
