@@ -1,269 +1,293 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth.svelte';
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
-	import type { UserInfo, ChannelInfo, AdminStats, AdminSettings, EmoteInfo } from '$lib/types';
-	import { configStore } from '$lib/stores/config.svelte';
+import { onMount } from 'svelte';
+import { goto } from '$app/navigation';
+import { auth } from '$lib/stores/auth.svelte';
+import { configStore } from '$lib/stores/config.svelte';
+import type {
+	AdminSettings,
+	AdminStats,
+	ChannelInfo,
+	EmoteInfo,
+	UserInfo,
+} from '$lib/types';
 
-	let activeTab = $state<'users' | 'channels' | 'messages' | 'settings' | 'emotes'>('users');
+let activeTab = $state<
+	'users' | 'channels' | 'messages' | 'settings' | 'emotes'
+>('users');
 
-	// Users
-	let users = $state<UserInfo[]>([]);
-	let usersLoading = $state(false);
+// Users
+let users = $state<UserInfo[]>([]);
+let usersLoading = $state(false);
 
-	// Channels
-	let channels = $state<ChannelInfo[]>([]);
-	let channelsLoading = $state(false);
-	let showChannelForm = $state(false);
-	let channelForm = $state({ name: '', topic: '', position: 0 });
-	let editingChannelId = $state<string | null>(null);
+// Channels
+let channels = $state<ChannelInfo[]>([]);
+let channelsLoading = $state(false);
+let showChannelForm = $state(false);
+let channelForm = $state({ name: '', topic: '', position: 0 });
+let editingChannelId = $state<string | null>(null);
 
-	// Stats
-	let stats = $state<AdminStats>({ message_count: 0, user_count: 0, channel_count: 0 });
-	let cleanupCount = $state(1000);
-	let cleanupLoading = $state(false);
+// Stats
+let stats = $state<AdminStats>({
+	message_count: 0,
+	user_count: 0,
+	channel_count: 0,
+});
+let cleanupCount = $state(1000);
+let cleanupLoading = $state(false);
 
-	// Settings
-	let settings = $state<AdminSettings>({ open_registration: true, instance_name: 'Den' });
-	let settingsLoading = $state(false);
+// Settings
+let settings = $state<AdminSettings>({
+	open_registration: true,
+	instance_name: 'Den',
+});
+let settingsLoading = $state(false);
 
-	// Emotes
-	let emotes = $state<EmoteInfo[]>([]);
-	let emotesLoading = $state(false);
-	let emoteForm = $state({ name: '' });
-	let emoteFile = $state<File | null>(null);
-	let emoteUploading = $state(false);
+// Emotes
+let emotes = $state<EmoteInfo[]>([]);
+let emotesLoading = $state(false);
+let emoteForm = $state({ name: '' });
+let emoteFile = $state<File | null>(null);
+let emoteUploading = $state(false);
 
-	// Modals
-	let tempPassword = $state<string | null>(null);
-	let confirmDelete = $state<{ type: 'user' | 'channel' | 'emote'; id: string; name: string } | null>(null);
-	let error = $state('');
+// Modals
+let tempPassword = $state<string | null>(null);
+let confirmDelete = $state<{
+	type: 'user' | 'channel' | 'emote';
+	id: string;
+	name: string;
+} | null>(null);
+let error = $state('');
 
-	function headers() {
-		return { Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' };
+function headers() {
+	return {
+		Authorization: `Bearer ${auth.accessToken}`,
+		'Content-Type': 'application/json',
+	};
+}
+
+onMount(() => {
+	if (!auth.isLoggedIn || !auth.user?.is_admin) {
+		goto('/');
+		return;
 	}
+	fetchUsers();
+	configStore.fetch();
+});
 
-	onMount(() => {
-		if (!auth.isLoggedIn || !auth.user?.is_admin) {
-			goto('/');
+async function fetchUsers() {
+	usersLoading = true;
+	try {
+		const res = await fetch('/api/admin/users', { headers: headers() });
+		if (res.ok) users = await res.json();
+	} finally {
+		usersLoading = false;
+	}
+}
+
+async function fetchChannels() {
+	channelsLoading = true;
+	try {
+		const res = await fetch('/api/channels', { headers: headers() });
+		if (res.ok) channels = await res.json();
+	} finally {
+		channelsLoading = false;
+	}
+}
+
+async function fetchStats() {
+	const res = await fetch('/api/admin/stats', { headers: headers() });
+	if (res.ok) stats = await res.json();
+}
+
+async function fetchSettings() {
+	settingsLoading = true;
+	try {
+		const res = await fetch('/api/admin/settings', { headers: headers() });
+		if (res.ok) settings = await res.json();
+	} finally {
+		settingsLoading = false;
+	}
+}
+
+async function toggleAdmin(user: UserInfo) {
+	error = '';
+	const res = await fetch(`/api/admin/users/${user.id}/admin`, {
+		method: 'PUT',
+		headers: headers(),
+		body: JSON.stringify({ is_admin: !user.is_admin }),
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: 'failed' }));
+		error = body.error;
+		return;
+	}
+	await fetchUsers();
+}
+
+async function resetPassword(userId: string) {
+	error = '';
+	const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
+		method: 'POST',
+		headers: headers(),
+	});
+	if (!res.ok) {
+		error = 'Failed to reset password';
+		return;
+	}
+	const data = await res.json();
+	tempPassword = data.temp_password;
+}
+
+async function deleteUser(userId: string) {
+	error = '';
+	const res = await fetch(`/api/admin/users/${userId}`, {
+		method: 'DELETE',
+		headers: headers(),
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: 'failed' }));
+		error = body.error;
+		return;
+	}
+	confirmDelete = null;
+	await fetchUsers();
+}
+
+async function saveChannel() {
+	error = '';
+	const method = editingChannelId ? 'PUT' : 'POST';
+	const url = editingChannelId
+		? `/api/channels/${editingChannelId}`
+		: '/api/channels';
+	const res = await fetch(url, {
+		method,
+		headers: headers(),
+		body: JSON.stringify(channelForm),
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({ error: 'failed' }));
+		error = body.error;
+		return;
+	}
+	showChannelForm = false;
+	editingChannelId = null;
+	channelForm = { name: '', topic: '', position: 0 };
+	await fetchChannels();
+}
+
+function editChannel(ch: ChannelInfo) {
+	editingChannelId = ch.id;
+	channelForm = { name: ch.name, topic: ch.topic || '', position: ch.position };
+	showChannelForm = true;
+}
+
+async function deleteChannel(id: string) {
+	error = '';
+	const res = await fetch(`/api/channels/${id}`, {
+		method: 'DELETE',
+		headers: headers(),
+	});
+	if (!res.ok) {
+		error = 'Failed to delete channel';
+		return;
+	}
+	confirmDelete = null;
+	await fetchChannels();
+}
+
+async function cleanupMessages() {
+	error = '';
+	cleanupLoading = true;
+	try {
+		const res = await fetch('/api/admin/messages/cleanup', {
+			method: 'POST',
+			headers: headers(),
+			body: JSON.stringify({ count: cleanupCount }),
+		});
+		if (!res.ok) {
+			error = 'Failed to cleanup messages';
 			return;
 		}
-		fetchUsers();
-		configStore.fetch();
-	});
-
-	async function fetchUsers() {
-		usersLoading = true;
-		try {
-			const res = await fetch('/api/admin/users', { headers: headers() });
-			if (res.ok) users = await res.json();
-		} finally {
-			usersLoading = false;
-		}
+		await fetchStats();
+	} finally {
+		cleanupLoading = false;
 	}
+}
 
-	async function fetchChannels() {
-		channelsLoading = true;
-		try {
-			const res = await fetch('/api/channels', { headers: headers() });
-			if (res.ok) channels = await res.json();
-		} finally {
-			channelsLoading = false;
-		}
-	}
-
-	async function fetchStats() {
-		const res = await fetch('/api/admin/stats', { headers: headers() });
-		if (res.ok) stats = await res.json();
-	}
-
-	async function fetchSettings() {
-		settingsLoading = true;
-		try {
-			const res = await fetch('/api/admin/settings', { headers: headers() });
-			if (res.ok) settings = await res.json();
-		} finally {
-			settingsLoading = false;
-		}
-	}
-
-	async function toggleAdmin(user: UserInfo) {
-		error = '';
-		const res = await fetch(`/api/admin/users/${user.id}/admin`, {
+async function saveSettings() {
+	error = '';
+	settingsLoading = true;
+	try {
+		const res = await fetch('/api/admin/settings', {
 			method: 'PUT',
 			headers: headers(),
-			body: JSON.stringify({ is_admin: !user.is_admin })
+			body: JSON.stringify(settings),
 		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'failed' }));
-			error = body.error;
-			return;
-		}
-		await fetchUsers();
+		if (res.ok) settings = await res.json();
+	} finally {
+		settingsLoading = false;
 	}
+}
 
-	async function resetPassword(userId: string) {
-		error = '';
-		const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
+async function fetchEmotes() {
+	emotesLoading = true;
+	try {
+		const res = await fetch('/api/emotes', { headers: headers() });
+		if (res.ok) emotes = await res.json();
+	} finally {
+		emotesLoading = false;
+	}
+}
+
+async function uploadEmote() {
+	if (!emoteFile || !emoteForm.name) return;
+	error = '';
+	emoteUploading = true;
+	try {
+		const formData = new FormData();
+		formData.append('name', emoteForm.name);
+		formData.append('image', emoteFile);
+		const res = await fetch('/api/emotes', {
 			method: 'POST',
-			headers: headers()
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
+			body: formData,
 		});
 		if (!res.ok) {
-			error = 'Failed to reset password';
-			return;
-		}
-		const data = await res.json();
-		tempPassword = data.temp_password;
-	}
-
-	async function deleteUser(userId: string) {
-		error = '';
-		const res = await fetch(`/api/admin/users/${userId}`, {
-			method: 'DELETE',
-			headers: headers()
-		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'failed' }));
+			const body = await res.json().catch(() => ({ error: 'upload failed' }));
 			error = body.error;
 			return;
 		}
-		confirmDelete = null;
-		await fetchUsers();
-	}
-
-	async function saveChannel() {
-		error = '';
-		const method = editingChannelId ? 'PUT' : 'POST';
-		const url = editingChannelId ? `/api/channels/${editingChannelId}` : '/api/channels';
-		const res = await fetch(url, {
-			method,
-			headers: headers(),
-			body: JSON.stringify(channelForm)
-		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'failed' }));
-			error = body.error;
-			return;
-		}
-		showChannelForm = false;
-		editingChannelId = null;
-		channelForm = { name: '', topic: '', position: 0 };
-		await fetchChannels();
-	}
-
-	function editChannel(ch: ChannelInfo) {
-		editingChannelId = ch.id;
-		channelForm = { name: ch.name, topic: ch.topic || '', position: ch.position };
-		showChannelForm = true;
-	}
-
-	async function deleteChannel(id: string) {
-		error = '';
-		const res = await fetch(`/api/channels/${id}`, {
-			method: 'DELETE',
-			headers: headers()
-		});
-		if (!res.ok) {
-			error = 'Failed to delete channel';
-			return;
-		}
-		confirmDelete = null;
-		await fetchChannels();
-	}
-
-	async function cleanupMessages() {
-		error = '';
-		cleanupLoading = true;
-		try {
-			const res = await fetch('/api/admin/messages/cleanup', {
-				method: 'POST',
-				headers: headers(),
-				body: JSON.stringify({ count: cleanupCount })
-			});
-			if (!res.ok) {
-				error = 'Failed to cleanup messages';
-				return;
-			}
-			await fetchStats();
-		} finally {
-			cleanupLoading = false;
-		}
-	}
-
-	async function saveSettings() {
-		error = '';
-		settingsLoading = true;
-		try {
-			const res = await fetch('/api/admin/settings', {
-				method: 'PUT',
-				headers: headers(),
-				body: JSON.stringify(settings)
-			});
-			if (res.ok) settings = await res.json();
-		} finally {
-			settingsLoading = false;
-		}
-	}
-
-	async function fetchEmotes() {
-		emotesLoading = true;
-		try {
-			const res = await fetch('/api/emotes', { headers: headers() });
-			if (res.ok) emotes = await res.json();
-		} finally {
-			emotesLoading = false;
-		}
-	}
-
-	async function uploadEmote() {
-		if (!emoteFile || !emoteForm.name) return;
-		error = '';
-		emoteUploading = true;
-		try {
-			const formData = new FormData();
-			formData.append('name', emoteForm.name);
-			formData.append('image', emoteFile);
-			const res = await fetch('/api/emotes', {
-				method: 'POST',
-				headers: { Authorization: `Bearer ${auth.accessToken}` },
-				body: formData
-			});
-			if (!res.ok) {
-				const body = await res.json().catch(() => ({ error: 'upload failed' }));
-				error = body.error;
-				return;
-			}
-			emoteForm = { name: '' };
-			emoteFile = null;
-			await fetchEmotes();
-		} finally {
-			emoteUploading = false;
-		}
-	}
-
-	async function deleteEmote(id: string) {
-		error = '';
-		const res = await fetch(`/api/emotes/${id}`, {
-			method: 'DELETE',
-			headers: headers()
-		});
-		if (!res.ok) {
-			error = 'Failed to delete emote';
-			return;
-		}
-		confirmDelete = null;
+		emoteForm = { name: '' };
+		emoteFile = null;
 		await fetchEmotes();
+	} finally {
+		emoteUploading = false;
 	}
+}
 
-	function switchTab(tab: typeof activeTab) {
-		activeTab = tab;
-		error = '';
-		if (tab === 'users') fetchUsers();
-		if (tab === 'channels') fetchChannels();
-		if (tab === 'messages') fetchStats();
-		if (tab === 'settings') fetchSettings();
-		if (tab === 'emotes') fetchEmotes();
+async function deleteEmote(id: string) {
+	error = '';
+	const res = await fetch(`/api/emotes/${id}`, {
+		method: 'DELETE',
+		headers: headers(),
+	});
+	if (!res.ok) {
+		error = 'Failed to delete emote';
+		return;
 	}
+	confirmDelete = null;
+	await fetchEmotes();
+}
+
+function switchTab(tab: typeof activeTab) {
+	activeTab = tab;
+	error = '';
+	if (tab === 'users') fetchUsers();
+	if (tab === 'channels') fetchChannels();
+	if (tab === 'messages') fetchStats();
+	if (tab === 'settings') fetchSettings();
+	if (tab === 'emotes') fetchEmotes();
+}
 </script>
 
 <div class="flex h-screen flex-col bg-background text-foreground">

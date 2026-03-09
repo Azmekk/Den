@@ -19,7 +19,7 @@ function createEmotes() {
 
 	async function fetch() {
 		const res = await globalThis.fetch('/api/emotes', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` }
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
 		});
 		if (res.ok) {
 			emotes = await res.json();
@@ -32,11 +32,17 @@ function createEmotes() {
 	}
 
 	return {
-		get emotes() { return emotes; },
-		get emoteMap() { return emoteMap; },
-		get emoteByName() { return emoteByName; },
+		get emotes() {
+			return emotes;
+		},
+		get emoteMap() {
+			return emoteMap;
+		},
+		get emoteByName() {
+			return emoteByName;
+		},
 		fetch,
-		refresh
+		refresh,
 	};
 }
 

@@ -1,172 +1,285 @@
 <script lang="ts">
-	import { channelStore } from '$lib/stores/channels.svelte';
-	import { messageStore } from '$lib/stores/messages.svelte';
-	import { typing } from '$lib/stores/typing.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { tick } from 'svelte';
-	import MessageContent from './MessageContent.svelte';
-	import EmoteAutocomplete from './EmoteAutocomplete.svelte';
-	import MentionAutocomplete from './MentionAutocomplete.svelte';
-	import type { MessageInfo } from '$lib/types';
+import { tick } from 'svelte';
+import { auth } from '$lib/stores/auth.svelte';
+import { channelStore } from '$lib/stores/channels.svelte';
+import { dmStore } from '$lib/stores/dms.svelte';
+import { messageStore } from '$lib/stores/messages.svelte';
+import { pinStore } from '$lib/stores/pins.svelte';
+import { typing } from '$lib/stores/typing.svelte';
+import { usersStore } from '$lib/stores/users.svelte';
+import type { MessageInfo } from '$lib/types';
+import { getUserColor, userColorFromHash } from '$lib/utils';
+import EmoteAutocomplete from './EmoteAutocomplete.svelte';
+import MentionAutocomplete from './MentionAutocomplete.svelte';
+import MessageContent from './MessageContent.svelte';
+import MessageContextMenu from './MessageContextMenu.svelte';
+import UserProfilePopover from './UserProfilePopover.svelte';
 
-	const USER_COLORS = [
-		'#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e',
-		'#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7',
-		'#ec4899', '#f43f5e'
-	];
+function getColorForMessage(msg: MessageInfo): string {
+	const user = usersStore.users.find((u) => u.id === msg.user_id);
+	if (user) return getUserColor(user);
+	return userColorFromHash(msg.username);
+}
 
-	function userColor(username: string): string {
-		let hash = 0;
-		for (let i = 0; i < username.length; i++) {
-			hash = username.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+function getDisplayNameForMessage(msg: MessageInfo): string {
+	const user = usersStore.users.find((u) => u.id === msg.user_id);
+	if (user) return user.display_name || user.username;
+	return msg.display_name || msg.username;
+}
+
+function formatTime(iso: string): string {
+	const d = new Date(iso);
+	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function isGrouped(msgs: MessageInfo[], index: number): boolean {
+	if (index === 0) return false;
+	const prev = msgs[index - 1];
+	const curr = msgs[index];
+	if (prev.username !== curr.username) return false;
+	const diff =
+		new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
+	return diff < 5 * 60 * 1000;
+}
+
+let messageInput = $state('');
+let messageListEl: HTMLDivElement | undefined = $state();
+let isNearBottom = $state(true);
+let prevMessageCount = $state(0);
+let cursorPosition = $state(0);
+let textareaEl: HTMLTextAreaElement | undefined = $state();
+let emoteAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(
+	() => false,
+);
+let mentionAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(
+	() => false,
+);
+
+// Derive view mode
+const isDM = $derived(
+	!!dmStore.selectedDMId && !channelStore.selectedChannelId,
+);
+const channelId = $derived(channelStore.selectedChannelId);
+const dmId = $derived(dmStore.selectedDMId);
+const channel = $derived(channelStore.selectedChannel);
+
+// Get the DM conversation info
+const dmConversation = $derived(
+	dmId ? dmStore.conversations.find((c) => c.id === dmId) : null,
+);
+
+const messages = $derived(
+	isDM && dmId
+		? dmStore.getMessages(dmId)
+		: channelId
+			? messageStore.getMessages(channelId)
+			: [],
+);
+
+const typingUsers = $derived(
+	channelId ? typing.getTypingUsers(channelId) : [],
+);
+
+const hasMore = $derived(
+	isDM && dmId
+		? dmStore.hasMore(dmId)
+		: channelId
+			? messageStore.hasMore(channelId)
+			: false,
+);
+
+const isLoadingOlder = $derived(
+	isDM ? dmStore.loadingOlder : messageStore.loadingOlder,
+);
+
+// Active view identifier for pin panel
+const activeTargetId = $derived(isDM ? dmId : channelId);
+
+function typingText(users: string[]): string {
+	if (users.length === 0) return '';
+	if (users.length === 1) return `${users[0]} is typing...`;
+	if (users.length === 2) return `${users[0]} and ${users[1]} are typing...`;
+	return `${users[0]}, ${users[1]}, and others are typing...`;
+}
+
+function handleScroll() {
+	if (!messageListEl) return;
+	const { scrollTop, scrollHeight, clientHeight } = messageListEl;
+	isNearBottom = scrollHeight - scrollTop - clientHeight < 50;
+
+	if (scrollTop === 0 && hasMore) {
+		loadOlder();
 	}
+}
 
-	function formatTime(iso: string): string {
-		const d = new Date(iso);
-		return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-	}
+async function loadOlder() {
+	if (isLoadingOlder) return;
+	const el = messageListEl;
+	if (!el) return;
+	const prevScrollHeight = el.scrollHeight;
 
-	function isGrouped(msgs: MessageInfo[], index: number): boolean {
-		if (index === 0) return false;
-		const prev = msgs[index - 1];
-		const curr = msgs[index];
-		if (prev.username !== curr.username) return false;
-		const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
-		return diff < 5 * 60 * 1000;
-	}
-
-	let messageInput = $state('');
-	let messageListEl: HTMLDivElement | undefined = $state();
-	let isNearBottom = $state(true);
-	let prevMessageCount = $state(0);
-	let cursorPosition = $state(0);
-	let textareaEl: HTMLTextAreaElement | undefined = $state();
-	let emoteAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
-	let mentionAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(() => false);
-
-	const channelId = $derived(channelStore.selectedChannelId);
-	const channel = $derived(channelStore.selectedChannel);
-	const messages = $derived(channelId ? messageStore.getMessages(channelId) : []);
-	const typingUsers = $derived(channelId ? typing.getTypingUsers(channelId) : []);
-	const hasMore = $derived(channelId ? messageStore.hasMore(channelId) : false);
-
-	function typingText(users: string[]): string {
-		if (users.length === 0) return '';
-		if (users.length === 1) return `${users[0]} is typing...`;
-		if (users.length === 2) return `${users[0]} and ${users[1]} are typing...`;
-		return `${users[0]}, ${users[1]}, and others are typing...`;
-	}
-
-	function handleScroll() {
-		if (!messageListEl) return;
-		const { scrollTop, scrollHeight, clientHeight } = messageListEl;
-		isNearBottom = scrollHeight - scrollTop - clientHeight < 50;
-
-		if (scrollTop === 0 && hasMore && channelId) {
-			loadOlder();
-		}
-	}
-
-	async function loadOlder() {
-		if (!channelId || messageStore.loadingOlder) return;
-		const el = messageListEl;
-		if (!el) return;
-		const prevScrollHeight = el.scrollHeight;
+	if (isDM && dmId) {
+		await dmStore.fetchOlder(dmId);
+	} else if (channelId) {
 		await messageStore.fetchOlder(channelId);
-		await tick();
-		el.scrollTop = el.scrollHeight - prevScrollHeight;
 	}
 
-	async function scrollToBottom() {
-		await tick();
-		if (messageListEl) {
-			messageListEl.scrollTop = messageListEl.scrollHeight;
-		}
+	await tick();
+	el.scrollTop = el.scrollHeight - prevScrollHeight;
+}
+
+async function scrollToBottom() {
+	await tick();
+	if (messageListEl) {
+		messageListEl.scrollTop = messageListEl.scrollHeight;
 	}
+}
 
-	$effect(() => {
-		const count = messages.length;
-		if (count > prevMessageCount && isNearBottom) {
-			scrollToBottom();
-		}
-		prevMessageCount = count;
-	});
-
-	$effect(() => {
-		// When channel changes, scroll to bottom
-		if (channelId) {
-			scrollToBottom();
-		}
-	});
-
-	function hasSelfMention(msg: MessageInfo): boolean {
-		const userId = auth.user?.id;
-		if (!userId) return false;
-		return msg.content.includes(`<mention:${userId}>`);
+$effect(() => {
+	const count = messages.length;
+	if (count > prevMessageCount && isNearBottom) {
+		scrollToBottom();
 	}
+	prevMessageCount = count;
+});
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (mentionAutocompleteHandler(e)) return;
-		if (emoteAutocompleteHandler(e)) return;
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			sendMsg();
-		}
+$effect(() => {
+	// When channel/DM changes, scroll to bottom
+	if (channelId || dmId) {
+		scrollToBottom();
 	}
+});
 
-	function handleInput(e: Event) {
-		autoResize(e);
-		updateCursorPosition();
-		if (channelId) {
-			typing.sendTyping(channelId);
-		}
+function hasSelfMention(msg: MessageInfo): boolean {
+	const userId = auth.user?.id;
+	if (!userId) return false;
+	return (
+		msg.content.includes(`<mention:${userId}>`) ||
+		msg.content.includes('<mention:everyone>')
+	);
+}
+
+function handleKeydown(e: KeyboardEvent) {
+	if (mentionAutocompleteHandler(e)) return;
+	if (emoteAutocompleteHandler(e)) return;
+	if (e.key === 'Enter' && !e.shiftKey) {
+		e.preventDefault();
+		sendMsg();
 	}
+}
 
-	function updateCursorPosition() {
+function handleInput(e: Event) {
+	autoResize(e);
+	updateCursorPosition();
+	if (channelId && !isDM) {
+		typing.sendTyping(channelId);
+	}
+}
+
+function updateCursorPosition() {
+	if (textareaEl) {
+		cursorPosition = textareaEl.selectionStart ?? 0;
+	}
+}
+
+function handleEmoteSelect(shortcode: string, start: number, end: number) {
+	messageInput =
+		messageInput.slice(0, start) + shortcode + messageInput.slice(end);
+	const newPos = start + shortcode.length;
+	tick().then(() => {
 		if (textareaEl) {
-			cursorPosition = textareaEl.selectionStart ?? 0;
+			textareaEl.selectionStart = newPos;
+			textareaEl.selectionEnd = newPos;
+			cursorPosition = newPos;
+			textareaEl.focus();
 		}
-	}
+	});
+}
 
-	function handleEmoteSelect(shortcode: string, start: number, end: number) {
-		messageInput = messageInput.slice(0, start) + shortcode + messageInput.slice(end);
-		const newPos = start + shortcode.length;
-		tick().then(() => {
-			if (textareaEl) {
-				textareaEl.selectionStart = newPos;
-				textareaEl.selectionEnd = newPos;
-				cursorPosition = newPos;
-				textareaEl.focus();
-			}
-		});
-	}
+function sendMsg() {
+	const content = messageInput.trim();
+	if (!content) return;
 
-	function sendMsg() {
-		const content = messageInput.trim();
-		if (!content || !channelId) return;
+	if (isDM && dmId) {
+		dmStore.sendMessage(dmId, content);
+	} else if (channelId) {
 		typing.stopTyping(channelId);
 		messageStore.sendMessage(channelId, content);
-		messageInput = '';
+	} else {
+		return;
 	}
+	messageInput = '';
+}
 
-	function autoResize(e: Event) {
-		const el = e.target as HTMLTextAreaElement;
-		el.style.height = 'auto';
-		el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+function autoResize(e: Event) {
+	const el = e.target as HTMLTextAreaElement;
+	el.style.height = 'auto';
+	el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+}
+
+function canPin(msg: MessageInfo): boolean {
+	return msg.user_id === auth.user?.id || auth.user?.is_admin === true;
+}
+
+function togglePin(msg: MessageInfo) {
+	if (msg.pinned) {
+		pinStore.unpinMessage(msg.id);
+	} else {
+		pinStore.pinMessage(msg.id);
 	}
+}
+
+// Header info
+const headerName = $derived(
+	isDM && dmConversation
+		? `@${dmConversation.other_display_name || dmConversation.other_username}`
+		: channel
+			? `#${channel.name}`
+			: '',
+);
+
+const headerIcon = $derived(isDM ? '@' : '#');
+
+const placeholderText = $derived(
+	isDM && dmConversation
+		? `Message @${dmConversation.other_display_name || dmConversation.other_username}`
+		: channel
+			? `Message #${channel.name}`
+			: '',
+);
+
+const hasActiveView = $derived(!!(channel || (isDM && dmConversation)));
+
+// In DM mode, restrict mention autocomplete to only the two participants
+const mentionFilterIds = $derived(
+	isDM && dmConversation && auth.user
+		? [auth.user.id, dmConversation.other_user_id]
+		: undefined,
+);
 </script>
 
 <div class="flex flex-1 flex-col">
-	{#if channel}
-		<!-- Channel header -->
-		<div class="flex h-12 items-center border-b border-border px-4">
-			<span class="mr-2 text-muted-foreground">#</span>
-			<h2 class="font-semibold text-foreground">{channel.name}</h2>
-			{#if channel.topic}
-				<span class="ml-3 truncate text-sm text-muted-foreground">{channel.topic}</span>
-			{/if}
+	{#if hasActiveView}
+		<!-- Header -->
+		<div class="flex h-12 items-center justify-between border-b border-border px-4">
+			<div class="flex items-center">
+				<span class="mr-2 text-muted-foreground">{headerIcon}</span>
+				<h2 class="font-semibold text-foreground">
+					{isDM && dmConversation
+						? dmConversation.other_display_name || dmConversation.other_username
+						: channel?.name}
+				</h2>
+				{#if !isDM && channel?.topic}
+					<span class="ml-3 truncate text-sm text-muted-foreground">{channel.topic}</span>
+				{/if}
+			</div>
+			<button
+				onclick={() => pinStore.togglePanel()}
+				class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+				title="Pinned messages"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+			</button>
 		</div>
 
 		<!-- Message list -->
@@ -175,55 +288,68 @@
 			onscroll={handleScroll}
 			class="flex-1 overflow-y-auto px-4 py-2"
 		>
-			{#if messageStore.loadingOlder}
+			{#if isLoadingOlder}
 				<div class="py-2 text-center text-sm text-muted-foreground">Loading older messages...</div>
 			{/if}
 
 			{#if messages.length === 0}
 				<div class="flex h-full items-center justify-center">
 					<div class="text-center">
-						<p class="text-lg font-medium text-foreground">Welcome to #{channel.name}</p>
-						<p class="mt-1 text-sm text-muted-foreground">This is the beginning of the channel.</p>
+						<p class="text-lg font-medium text-foreground">
+							{isDM ? `This is the beginning of your conversation` : `Welcome to #${channel?.name}`}
+						</p>
+						<p class="mt-1 text-sm text-muted-foreground">
+							{isDM ? 'Send a message to start chatting.' : 'This is the beginning of the channel.'}
+						</p>
 					</div>
 				</div>
 			{:else}
 				{#each messages as msg, i (msg.id)}
 					{@const grouped = isGrouped(messages, i)}
-					{#if grouped}
-						<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-							<div class="w-8 flex items-center justify-center shrink-0">
-								<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
-							</div>
-							<div class="flex-1 min-w-0">
-								<MessageContent content={msg.content} />
-							</div>
-						</div>
-					{:else}
-						<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-							<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5" style="background-color: {userColor(msg.username)}">
-								<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
-							</div>
-							<div class="flex-1 min-w-0">
-								<div class="flex items-baseline gap-2">
-									<span class="font-medium text-sm" style="color: {userColor(msg.username)}">
-										{msg.username}
-									</span>
-									<span class="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
-									{#if msg.edited_at}
-										<span class="text-xs text-muted-foreground italic">(edited)</span>
-									{/if}
+					<MessageContextMenu msg={msg} canPin={canPin(msg)} onTogglePin={() => togglePin(msg)}>
+						{#if grouped}
+							<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
+								<div class="w-8 flex items-center justify-center shrink-0">
+									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
 								</div>
-								<MessageContent content={msg.content} />
+								<div class="flex-1 min-w-0">
+									<MessageContent content={msg.content} />
+								</div>
 							</div>
-						</div>
-					{/if}
+						{:else}
+							<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
+								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)}>
+									<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
+										<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
+									</div>
+								</UserProfilePopover>
+								<div class="flex-1 min-w-0">
+									<div class="flex items-baseline gap-2">
+										<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)}>
+											<span class="font-medium text-sm cursor-pointer hover:underline" style="color: {getColorForMessage(msg)}">
+												{getDisplayNameForMessage(msg)}
+											</span>
+										</UserProfilePopover>
+										<span class="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
+										{#if msg.edited_at}
+											<span class="text-xs text-muted-foreground italic">(edited)</span>
+										{/if}
+										{#if msg.pinned}
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+										{/if}
+									</div>
+									<MessageContent content={msg.content} />
+								</div>
+							</div>
+						{/if}
+					</MessageContextMenu>
 				{/each}
 			{/if}
 		</div>
 
 		<!-- Typing indicator -->
 		<div class="h-6 px-4">
-			{#if typingUsers.length > 0}
+			{#if !isDM && typingUsers.length > 0}
 				<p class="text-xs text-muted-foreground italic">{typingText(typingUsers)}</p>
 			{/if}
 		</div>
@@ -235,6 +361,8 @@
 				{cursorPosition}
 				onSelect={handleEmoteSelect}
 				onKeydown={(handler) => mentionAutocompleteHandler = handler}
+				filterUserIds={mentionFilterIds}
+				{isDM}
 			/>
 			<EmoteAutocomplete
 				inputValue={messageInput}
@@ -249,7 +377,7 @@
 				oninput={handleInput}
 				onclick={updateCursorPosition}
 				onkeyup={updateCursorPosition}
-				placeholder="Message #{channel.name}"
+				placeholder={placeholderText}
 				rows="1"
 				class="w-full resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
 			></textarea>

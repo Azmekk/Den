@@ -22,7 +22,7 @@ function createPresence() {
 	return {
 		isOnline,
 		handlePresenceInitial,
-		handlePresenceUpdate
+		handlePresenceUpdate,
 	};
 }
 

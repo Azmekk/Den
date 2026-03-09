@@ -1,60 +1,68 @@
 <script lang="ts">
-	import { emoteStore } from '$lib/stores/emotes.svelte';
-	import { usersStore } from '$lib/stores/users.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
+import { auth } from '$lib/stores/auth.svelte';
+import { emoteStore } from '$lib/stores/emotes.svelte';
+import { usersStore } from '$lib/stores/users.svelte';
 
-	interface Props {
-		content: string;
-	}
+interface Props {
+	content: string;
+}
 
-	let { content }: Props = $props();
+let { content }: Props = $props();
 
-	const tokenRegex = /<emote:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>|<mention:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/g;
+const tokenRegex =
+	/<emote:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>|<mention:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|everyone)>/g;
 
-	interface ContentPart {
-		type: 'text' | 'emote' | 'mention';
-		value: string;
-	}
+interface ContentPart {
+	type: 'text' | 'emote' | 'mention';
+	value: string;
+}
 
-	const parts = $derived.by(() => {
-		const result: ContentPart[] = [];
-		let lastIndex = 0;
-		let match: RegExpExecArray | null;
+const parts = $derived.by(() => {
+	const result: ContentPart[] = [];
+	let lastIndex = 0;
+	let match: RegExpExecArray | null;
 
-		const regex = new RegExp(tokenRegex.source, 'g');
-		while ((match = regex.exec(content)) !== null) {
-			if (match.index > lastIndex) {
-				result.push({ type: 'text', value: content.slice(lastIndex, match.index) });
-			}
-			if (match[1]) {
-				result.push({ type: 'emote', value: match[1] });
-			} else if (match[2]) {
-				result.push({ type: 'mention', value: match[2] });
-			}
-			lastIndex = regex.lastIndex;
+	const regex = new RegExp(tokenRegex.source, 'g');
+	match = regex.exec(content);
+	while (match !== null) {
+		if (match.index > lastIndex) {
+			result.push({
+				type: 'text',
+				value: content.slice(lastIndex, match.index),
+			});
 		}
-		if (lastIndex < content.length) {
-			result.push({ type: 'text', value: content.slice(lastIndex) });
+		if (match[1]) {
+			result.push({ type: 'emote', value: match[1] });
+		} else if (match[2]) {
+			result.push({ type: 'mention', value: match[2] });
 		}
-		return result;
-	});
-
-	const isEmoteOnly = $derived.by(() => {
-		return parts.every(p => p.type === 'emote' || (p.type === 'text' && p.value.trim() === ''));
-	});
-
-	function unescapeHtml(text: string): string {
-		return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+		lastIndex = regex.lastIndex;
+		match = regex.exec(content);
 	}
-
-	function getUsernameById(id: string): string {
-		const user = usersStore.users.find(u => u.id === id);
-		return user ? user.username : 'unknown';
+	if (lastIndex < content.length) {
+		result.push({ type: 'text', value: content.slice(lastIndex) });
 	}
+	return result;
+});
 
-	function isSelfMention(id: string): boolean {
-		return auth.user?.id === id;
-	}
+const isEmoteOnly = $derived.by(() => {
+	return parts.every(
+		(p) => p.type === 'emote' || (p.type === 'text' && p.value.trim() === ''),
+	);
+});
+
+function unescapeHtml(text: string): string {
+	return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
+function getUsernameById(id: string): string {
+	const user = usersStore.users.find((u) => u.id === id);
+	return user ? user.username : 'unknown';
+}
+
+function isSelfMention(id: string): boolean {
+	return auth.user?.id === id;
+}
 </script>
 
 <p class="text-sm text-foreground whitespace-pre-wrap break-words">
@@ -74,9 +82,13 @@
 				<span class="text-muted-foreground">:unknown:</span>
 			{/if}
 		{:else if part.type === 'mention'}
-			<span
-				class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium {isSelfMention(part.value) ? 'bg-amber-500/30 text-amber-200' : 'bg-primary/30 text-primary'}"
-			>@{getUsernameById(part.value)}</span>
+			{#if part.value === 'everyone'}
+				<span class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium bg-amber-500/30 text-amber-200">@everyone</span>
+			{:else}
+				<span
+					class="inline-flex items-center rounded px-1 py-0.5 text-xs font-medium {isSelfMention(part.value) ? 'bg-amber-500/30 text-amber-200' : 'bg-primary/30 text-primary'}"
+				>@{getUsernameById(part.value)}</span>
+			{/if}
 		{/if}
 	{/each}
 </p>

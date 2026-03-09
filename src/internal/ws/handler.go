@@ -18,7 +18,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandler) http.HandlerFunc {
+func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandler, dmHandler DMMessageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tokenString := r.URL.Query().Get("token")
 		if tokenString == "" {
@@ -47,7 +47,7 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 			return
 		}
 
-		client := newClient(hub, conn, userID, username, isAdmin, msgHandler)
+		client := newClient(hub, conn, userID, username, isAdmin, msgHandler, dmHandler)
 		hub.register <- client
 
 		go client.WritePump()

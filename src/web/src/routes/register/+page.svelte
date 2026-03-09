@@ -1,37 +1,37 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth.svelte';
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+import { onMount } from 'svelte';
+import { goto } from '$app/navigation';
+import { auth } from '$lib/stores/auth.svelte';
 
-	let username = $state('');
-	let password = $state('');
-	let confirmPassword = $state('');
-	let error = $state('');
-	let loading = $state(false);
+let username = $state('');
+let password = $state('');
+let confirmPassword = $state('');
+let error = $state('');
+let loading = $state(false);
 
-	onMount(() => {
-		if (auth.isLoggedIn) goto('/');
-	});
+onMount(() => {
+	if (auth.isLoggedIn) goto('/');
+});
 
-	async function handleSubmit(e: Event) {
-		e.preventDefault();
-		error = '';
+async function handleSubmit(e: Event) {
+	e.preventDefault();
+	error = '';
 
-		if (password !== confirmPassword) {
-			error = 'passwords do not match';
-			return;
-		}
-
-		loading = true;
-		try {
-			await auth.register(username, password);
-			goto('/');
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'registration failed';
-		} finally {
-			loading = false;
-		}
+	if (password !== confirmPassword) {
+		error = 'passwords do not match';
+		return;
 	}
+
+	loading = true;
+	try {
+		await auth.register(username, password);
+		goto('/');
+	} catch (err) {
+		error = err instanceof Error ? err.message : 'registration failed';
+	} finally {
+		loading = false;
+	}
+}
 </script>
 
 <div class="flex min-h-screen items-center justify-center px-4">

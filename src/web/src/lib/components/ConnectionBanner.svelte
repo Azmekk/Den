@@ -1,30 +1,30 @@
 <script lang="ts">
-	import { websocket } from '$lib/stores/websocket.svelte';
+import { websocket } from '$lib/stores/websocket.svelte';
 
-	let showReconnected = $state(false);
-	let dismissTimer: ReturnType<typeof setTimeout> | null = null;
-	let wasReconnecting = false;
+let showReconnected = $state(false);
+let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+let wasReconnecting = false;
 
-	$effect(() => {
-		const isReconnecting = websocket.reconnecting;
-		const isConnected = websocket.connected;
+$effect(() => {
+	const isReconnecting = websocket.reconnecting;
+	const isConnected = websocket.connected;
 
-		if (isReconnecting) {
-			wasReconnecting = true;
-			if (dismissTimer) {
-				clearTimeout(dismissTimer);
-				dismissTimer = null;
-			}
-			showReconnected = false;
-		} else if (wasReconnecting && isConnected) {
-			wasReconnecting = false;
-			showReconnected = true;
-			dismissTimer = setTimeout(() => {
-				showReconnected = false;
-				dismissTimer = null;
-			}, 2000);
+	if (isReconnecting) {
+		wasReconnecting = true;
+		if (dismissTimer) {
+			clearTimeout(dismissTimer);
+			dismissTimer = null;
 		}
-	});
+		showReconnected = false;
+	} else if (wasReconnecting && isConnected) {
+		wasReconnecting = false;
+		showReconnected = true;
+		dismissTimer = setTimeout(() => {
+			showReconnected = false;
+			dismissTimer = null;
+		}, 2000);
+	}
+});
 </script>
 
 {#if websocket.reconnecting}

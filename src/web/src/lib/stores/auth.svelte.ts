@@ -29,7 +29,7 @@ function createAuth() {
 		try {
 			const res = await fetch('/api/refresh', {
 				method: 'POST',
-				credentials: 'include'
+				credentials: 'include',
 			});
 			if (!res.ok) return false;
 			const data: AuthResponse = await res.json();
@@ -51,7 +51,7 @@ function createAuth() {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
-			body: JSON.stringify({ username, password })
+			body: JSON.stringify({ username, password }),
 		});
 		if (!res.ok) {
 			const body = await res.json().catch(() => ({ error: 'login failed' }));
@@ -66,10 +66,12 @@ function createAuth() {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
-			body: JSON.stringify({ username, password })
+			body: JSON.stringify({ username, password }),
 		});
 		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'registration failed' }));
+			const body = await res
+				.json()
+				.catch(() => ({ error: 'registration failed' }));
 			throw new Error(body.error || 'registration failed');
 		}
 		const data: AuthResponse = await res.json();
@@ -77,22 +79,33 @@ function createAuth() {
 	}
 
 	async function logout(): Promise<void> {
-		await fetch('/api/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+		await fetch('/api/logout', {
+			method: 'POST',
+			credentials: 'include',
+		}).catch(() => {});
 		clear();
 	}
 
 	return {
-		get accessToken() { return accessToken; },
-		get user() { return user; },
-		get initialized() { return initialized; },
-		get isLoggedIn() { return !!accessToken; },
+		get accessToken() {
+			return accessToken;
+		},
+		get user() {
+			return user;
+		},
+		get initialized() {
+			return initialized;
+		},
+		get isLoggedIn() {
+			return !!accessToken;
+		},
 		setSession,
 		clear,
 		refresh,
 		init,
 		login,
 		register,
-		logout
+		logout,
 	};
 }
 

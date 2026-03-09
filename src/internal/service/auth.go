@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,6 +25,13 @@ var (
 	ErrInvalidInput       = errors.New("invalid input")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 )
+
+var reservedUsernames = map[string]bool{
+	"everyone": true,
+	"here":     true,
+	"channel":  true,
+	"admin":    true,
+}
 
 type AuthService struct {
 	Queries          *db.Queries
@@ -74,6 +82,9 @@ func (s *AuthService) Register(ctx context.Context, username, password, displayN
 	}
 	if len(username) > 32 {
 		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username too long", ErrInvalidInput)
+	}
+	if reservedUsernames[strings.ToLower(username)] {
+		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username is reserved", ErrInvalidInput)
 	}
 
 	count, err := s.Queries.CountUsers(ctx)

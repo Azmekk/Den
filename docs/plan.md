@@ -709,10 +709,28 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Mobile layout (slide-out drawer, bottom voice bar)
 - [ ] Touch targets and mobile interaction pass
 - [ ] PWA manifest
-- [ ] User customization (color picker, username change)
+- [x] User customization (color picker, display name change) — Done in deviation
 - [ ] Message cleanup background job wired up
 - [ ] nginx config + Certbot HTTPS setup documented
 - [ ] Verify: Full flow works on a mobile browser; `docker compose up` on a fresh VPS serves over HTTPS
+
+### Deviation — Fix UserProfilePopover conflicts, display name/color real-time updates (DONE)
+- [x] Remove UserProfilePopover from MemberList (conflicted with UserContextMenu + onclick)
+- [x] Look up display name from usersStore in MessageArea (real-time updates)
+- [x] Pass live display name to UserProfilePopover props in MessageArea
+
+### Deviation — Fix Biome --unsafe underscore-prefixed variables (DONE)
+- [x] Removed `_` prefix from all script variables/functions that Biome incorrectly marked as unused (Svelte template references invisible to Biome)
+- [x] 9 files fixed, `bun run build` passes clean
+
+### Deviation — @everyone Mention, Reserved Usernames, Display Name Update, User Profile Popover, User Color Picker (DONE)
+- [x] Reserved usernames (everyone, here, channel, admin) blocked at registration
+- [x] @everyone mention: backend token resolution + frontend rendering + notification
+- [x] Display name update: PUT /api/users/me/display-name + sidebar edit UI
+- [x] User color picker: migration 000008 + PUT /api/users/me/color + sidebar color swatches + native picker
+- [x] User profile popover: bits-ui Popover on avatar/name in chat and member list
+- [x] Shared userColor utility extracted to $lib/utils.ts (removed duplication from 4 components)
+- [x] Real-time user_updated WS broadcast for display name and color changes
 
 ---
 

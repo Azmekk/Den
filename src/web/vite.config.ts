@@ -1,5 +1,5 @@
-import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -8,8 +8,8 @@ export default defineConfig({
 		proxy: {
 			'/api': {
 				target: 'http://localhost:8080',
-				ws: true
-			}
-		}
-	}
+				ws: true,
+			},
+		},
+	},
 });

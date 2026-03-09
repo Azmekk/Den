@@ -9,8 +9,13 @@ import (
 
 type MessageHandler interface {
 	SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error)
-	EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error)
-	DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, error)
+	EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, uuid.UUID, error)
+	DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, uuid.UUID, error)
+}
+
+type DMMessageHandler interface {
+	SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error)
+	ValidateUserInPair(ctx context.Context, dmPairID, userID uuid.UUID) (uuid.UUID, error)
 }
 
 type subRequest struct {

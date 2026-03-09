@@ -85,4 +85,5 @@ type User struct {
 	IsAdmin      bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	Color        sql.NullString
 }

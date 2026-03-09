@@ -27,7 +27,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, password_hash, display_name, is_admin)
 VALUES ($1, $2, $3, $4)
-RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at
+RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
 `
 
 type CreateUserParams struct {
@@ -54,6 +54,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Color,
 	)
 	return i, err
 }
@@ -68,7 +69,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -83,12 +84,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Color,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at FROM users WHERE username = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -103,6 +105,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Color,
 	)
 	return i, err
 }
@@ -140,7 +143,7 @@ func (q *Queries) GetUsersByUsernames(ctx context.Context, dollar_1 []string) ([
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, avatar_url, is_admin FROM users ORDER BY username
+SELECT id, username, display_name, avatar_url, color, is_admin FROM users ORDER BY username
 `
 
 type ListUsersRow struct {
@@ -148,6 +151,7 @@ type ListUsersRow struct {
 	Username    string
 	DisplayName sql.NullString
 	AvatarUrl   sql.NullString
+	Color       sql.NullString
 	IsAdmin     bool
 }
 
@@ -165,6 +169,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.Color,
 			&i.IsAdmin,
 		); err != nil {
 			return nil, err
@@ -192,6 +197,58 @@ type SetUserAdminParams struct {
 func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) error {
 	_, err := q.db.ExecContext(ctx, setUserAdmin, arg.ID, arg.IsAdmin)
 	return err
+}
+
+const updateUserColor = `-- name: UpdateUserColor :one
+UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+`
+
+type UpdateUserColorParams struct {
+	ID    uuid.UUID
+	Color sql.NullString
+}
+
+func (q *Queries) UpdateUserColor(ctx context.Context, arg UpdateUserColorParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserColor, arg.ID, arg.Color)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+	)
+	return i, err
+}
+
+const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
+UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+`
+
+type UpdateUserDisplayNameParams struct {
+	ID          uuid.UUID
+	DisplayName sql.NullString
+}
+
+func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserDisplayName, arg.ID, arg.DisplayName)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+	)
+	return i, err
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec

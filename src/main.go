@@ -63,6 +63,7 @@ func main() {
 	channelSvc := service.NewChannelService(queries)
 	emoteSvc := service.NewEmoteService(queries, bucketSvc)
 	messageSvc := service.NewMessageService(queries, emoteSvc)
+	dmSvc := service.NewDMService(queries, emoteSvc)
 	userSvc := service.NewUserService(queries)
 	adminSvc := service.NewAdminService(queries, authSvc)
 
@@ -74,7 +75,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, hub, staticFS, bucketSvc != nil)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

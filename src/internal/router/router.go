@@ -13,14 +13,15 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
-	authH := handler.NewAuthHandler(authSvc)
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
+	authH := handler.NewAuthHandler(authSvc, hub)
 	channelH := handler.NewChannelHandler(channelSvc)
-	messageH := handler.NewMessageHandler(messageSvc)
-	userH := handler.NewUserHandler(userSvc)
+	messageH := handler.NewMessageHandler(messageSvc, hub)
+	userH := handler.NewUserHandler(userSvc, hub)
 	adminH := handler.NewAdminHandler(adminSvc)
 	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
 	configH := handler.NewConfigHandler(bucketConfigured)
+	dmH := handler.NewDMHandler(dmSvc)
 
 	r := chi.NewRouter()
 
@@ -50,7 +51,16 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Get("/channels/{id}", channelH.Get)
 			r.Put("/channels/{id}/read", channelH.MarkRead)
 			r.Get("/channels/{id}/messages", messageH.GetHistory)
+			r.Get("/channels/{id}/pins", messageH.GetPinnedMessages)
+			r.Put("/messages/{id}/pin", messageH.PinMessage)
+			r.Delete("/messages/{id}/pin", messageH.UnpinMessage)
+			r.Post("/dms", dmH.CreateOrGet)
+			r.Get("/dms", dmH.List)
+			r.Get("/dms/{id}/messages", dmH.GetHistory)
+			r.Get("/dms/{id}/pins", dmH.GetPins)
 			r.Get("/users", userH.List)
+			r.Put("/users/me/display-name", userH.UpdateDisplayName)
+			r.Put("/users/me/color", userH.UpdateColor)
 			r.Get("/emotes", emoteH.List)
 
 			// Admin only
@@ -76,7 +86,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		})
 
 		// WebSocket (auth via query param)
-		r.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc))
+		r.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc))
 	})
 
 	// SPA static files

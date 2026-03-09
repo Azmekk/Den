@@ -8,15 +8,18 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Azmekk/den/internal/httputil"
+	"github.com/Azmekk/den/internal/middleware"
 	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/ws"
 )
 
 type MessageHandler struct {
 	svc *service.MessageService
+	hub *ws.Hub
 }
 
-func NewMessageHandler(svc *service.MessageService) *MessageHandler {
-	return &MessageHandler{svc: svc}
+func NewMessageHandler(svc *service.MessageService, hub *ws.Hub) *MessageHandler {
+	return &MessageHandler{svc: svc, hub: hub}
 }
 
 func (h *MessageHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
@@ -62,4 +65,76 @@ func (h *MessageHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 		"messages": messages,
 		"has_more": hasMore,
 	})
+}
+
+func (h *MessageHandler) PinMessage(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	isAdmin := middleware.IsAdminFromContext(r.Context())
+
+	messageID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+
+	data, err := h.svc.PinMessage(r.Context(), messageID, userID, isAdmin)
+	if err != nil {
+		if err == service.ErrMessageNotFound {
+			httputil.WriteError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		if err == service.ErrForbidden {
+			httputil.WriteError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	h.hub.BroadcastGlobal(data)
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *MessageHandler) UnpinMessage(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	isAdmin := middleware.IsAdminFromContext(r.Context())
+
+	messageID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+
+	data, err := h.svc.UnpinMessage(r.Context(), messageID, userID, isAdmin)
+	if err != nil {
+		if err == service.ErrMessageNotFound {
+			httputil.WriteError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		if err == service.ErrForbidden {
+			httputil.WriteError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	h.hub.BroadcastGlobal(data)
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *MessageHandler) GetPinnedMessages(w http.ResponseWriter, r *http.Request) {
+	channelID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid channel id")
+		return
+	}
+
+	messages, err := h.svc.GetPinnedMessages(r.Context(), channelID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, messages)
 }

@@ -25,10 +25,11 @@ type Client struct {
 	Username   string
 	IsAdmin    bool
 	msgHandler MessageHandler
+	dmHandler  DMMessageHandler
 	subs       map[uuid.UUID]bool
 }
 
-func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, isAdmin bool, msgHandler MessageHandler) *Client {
+func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, isAdmin bool, msgHandler MessageHandler, dmHandler DMMessageHandler) *Client {
 	return &Client{
 		hub:        hub,
 		conn:       conn,
@@ -37,6 +38,7 @@ func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string
 		Username:   username,
 		IsAdmin:    isAdmin,
 		msgHandler: msgHandler,
+		dmHandler:  dmHandler,
 		subs:       make(map[uuid.UUID]bool),
 	}
 }
@@ -44,6 +46,7 @@ func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string
 type incomingMessage struct {
 	Type      string    `json:"type"`
 	ChannelID uuid.UUID `json:"channel_id"`
+	DMPairID  uuid.UUID `json:"dm_pair_id"`
 	MessageID uuid.UUID `json:"message_id"`
 	Content   string    `json:"content"`
 }
@@ -132,26 +135,61 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		})
 		c.hub.BroadcastExclude(msg.ChannelID, stopEnvelope, c)
 
-	case "edit_message":
-		data, _, err := c.msgHandler.EditMessage(ctx, msg.MessageID, c.UserID, msg.Content)
+	case "send_dm":
+		otherUserID, err := c.dmHandler.ValidateUserInPair(ctx, msg.DMPairID, c.UserID)
 		if err != nil {
 			c.sendError(err.Error())
 			return
 		}
-		c.hub.BroadcastGlobal(data)
+		data, _, err := c.dmHandler.SendDMMessage(ctx, msg.DMPairID, c.UserID, c.Username, msg.Content)
+		if err != nil {
+			c.sendError(err.Error())
+			return
+		}
+		c.hub.SendToUser(c.UserID, data)
+		c.hub.SendToUser(otherUserID, data)
+
+	case "edit_message":
+		data, channelID, dmPairID, err := c.msgHandler.EditMessage(ctx, msg.MessageID, c.UserID, msg.Content)
+		if err != nil {
+			c.sendError(err.Error())
+			return
+		}
+		if dmPairID != uuid.Nil {
+			// DM message: send to both users
+			otherUserID, err := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
+			if err == nil {
+				c.hub.SendToUser(c.UserID, data)
+				c.hub.SendToUser(otherUserID, data)
+			}
+		} else {
+			_ = channelID
+			c.hub.BroadcastGlobal(data)
+		}
 
 	case "delete_message":
-		channelID, err := c.msgHandler.DeleteMessage(ctx, msg.MessageID, c.UserID, c.IsAdmin)
+		channelID, dmPairID, err := c.msgHandler.DeleteMessage(ctx, msg.MessageID, c.UserID, c.IsAdmin)
 		if err != nil {
 			c.sendError(err.Error())
 			return
 		}
-		envelope, _ := json.Marshal(map[string]any{
-			"type":       "delete_message",
-			"id":         msg.MessageID,
-			"channel_id": channelID,
-		})
-		c.hub.BroadcastGlobal(envelope)
+		deleteEnvelope := map[string]any{
+			"type": "delete_message",
+			"id":   msg.MessageID,
+		}
+		if dmPairID != uuid.Nil {
+			deleteEnvelope["dm_pair_id"] = dmPairID
+			data, _ := json.Marshal(deleteEnvelope)
+			otherUserID, err := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
+			if err == nil {
+				c.hub.SendToUser(c.UserID, data)
+				c.hub.SendToUser(otherUserID, data)
+			}
+		} else {
+			deleteEnvelope["channel_id"] = channelID
+			data, _ := json.Marshal(deleteEnvelope)
+			c.hub.BroadcastGlobal(data)
+		}
 
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{

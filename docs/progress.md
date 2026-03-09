@@ -7,8 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 7 — Custom Emotes
-**Next run:** Run 8
+**Last completed run:** Run 9 — DMs & Pinned Messages
+**Last deviation:** Fix Biome --unsafe underscore-prefixed variables
+**Next run:** Run 10
 
 ---
 
@@ -94,6 +95,30 @@
 - Emote images served from S3 bucket via presigned URLs or direct bucket access
 - `go build` and `bun run build` both pass clean
 
+### Run 8 — @Mentions, Notifications & Unread
+- Added `channel_reads` and `message_mentions` tables (migration 000007)
+- @mention support: `@username` → `<mention:uuid>` token, stored in `message_mentions` table
+- `MentionAutocomplete` component for @-mention suggestions in chat input
+- Unread tracking per channel with mention counts; sidebar shows unread dots and mention badges
+- Notification sound on mention when not in current channel
+- `go build` and `bun run build` both pass clean
+
+### Run 9 — DMs & Pinned Messages
+- **DM Pairs**: sqlc queries for `dm_pairs` table (create/get/list), `DMService` with create-or-get, list conversations, send DM message, validate user membership
+- **DM Messaging**: WebSocket `send_dm` message type, DM-aware `edit_message`/`delete_message` routing (sends to both users via `SendToUser` instead of global broadcast)
+- **Pin/Unpin**: `SetMessagePinned` query, `PinMessage`/`UnpinMessage` service methods (author or admin), REST endpoints `PUT/DELETE /api/messages/{id}/pin`, broadcasts `pin_message`/`unpin_message` events
+- **Pinned Messages Panel**: `GET /api/channels/{id}/pins` and `GET /api/dms/{id}/pins` endpoints, `PinnedMessagesPanel` slide-out component
+- **Frontend DM Store**: `dms.svelte.ts` with conversations list, message history, cursor pagination, WS event handlers
+- **Frontend Pin Store**: `pins.svelte.ts` with fetch/pin/unpin/toggle panel
+- **ChannelSidebar**: Added "Direct Messages" section below channels
+- **MemberList**: Click on user opens DM conversation
+- **MessageArea**: Dual-mode (channel/DM), pin button in header, pin/unpin action on message hover
+- **Mutual exclusion**: Selecting a channel deselects DM and vice versa; MemberList hidden in DM mode
+- `MessageInfo.ChannelID` changed from `uuid.UUID` to `*uuid.UUID` (pointer) to support nullable channel_id for DM messages
+- `EditMessage` and `DeleteMessage` signatures updated to return both `channelID` and `dmPairID` for correct WS routing
+- No new migrations needed — `dm_pairs` table and `messages.dm_pair_id` column already exist from migration 000003/000004
+- `go build` and `bun run build` both pass clean
+
 ---
 
 ## Run Log
@@ -173,6 +198,67 @@
 - Admin-only upload/delete; all authenticated users can list and use emotes
 - **Message ordering fix**: wrapped `GetMessagesByChannel` query in a SQL subquery to ensure chronological order — outer query re-sorts `ASC` after inner query limits `DESC` (ensures newest N messages are returned in display order)
 
+### Run 8 (2026-03-09)
+- @Mentions and unread tracking implemented (already done before this run, progress.md not updated)
+
+### Deviation (2026-03-09) — Context Menus, New User Visibility, DM Pin Fix, Mention Autocomplete Avatars
+Applied ahead of Run 10 as a deviation (not a numbered run):
+- **DM Pin Permission Fix**: `PinMessage`/`UnpinMessage` in `service/message.go` now validate DM pair membership — only participants can pin/unpin in DMs (admin bypass disabled for DMs)
+- **New User Broadcast**: `AuthHandler` now holds a `*ws.Hub` reference; on successful registration, broadcasts `user_registered` WS event to all connected clients
+- **Frontend User Registration Listener**: `users.svelte.ts` gained `addUser()` method; `+page.svelte` listens for `user_registered` events and adds new users to the store immediately
+- **Message Context Menu**: Created `MessageContextMenu.svelte` using bits-ui `ContextMenu` — right-click on any message shows "Pin Message" / "Unpin Message" option
+- **User Context Menu**: Created `UserContextMenu.svelte` — right-click on a member shows "Message" option to open DM (skipped for self)
+- **Removed Hover Pin Buttons**: Pin/unpin buttons removed from message hover UI in `MessageArea.svelte`; pinning now exclusively through context menu
+- **Mention Autocomplete Avatars**: Added colored avatar circles (same `userColor` hash function) to `MentionAutocomplete.svelte` results
+- **Bare `@` Trigger**: Mention autocomplete now triggers on bare `@` character (shows all users, capped at 8) instead of requiring at least 1 character after `@`
+- bits-ui `ContextMenu` component used for the first time (was installed in Run 4 but unused until now)
+- `go build` and `bun run build` both pass clean
+
+### Run 9 (2026-03-09)
+- DMs use existing `dm_pairs` table (migration 000003) with `CHECK (user_a < user_b)` canonical ordering
+- `CreateDMPair` uses `LEAST/GREATEST` with `ON CONFLICT DO UPDATE` to always return existing pair (upsert pattern)
+- DM messages routed via `SendToUser` (both sender and recipient) instead of channel broadcast
+- Edit/delete of DM messages also route to both users via `ValidateUserInPair`
+- Pin/unpin accessible to message author or admin; broadcasts globally so all connected clients update
+- `DMMessageHandler` interface added to WS hub for DM operations
+- Frontend mutual exclusion: `dmStore.select()` calls `channelStore.deselect()`, sidebar `selectChannel()` calls `dmStore.deselect()`
+- `MessageInfo.channel_id` changed to optional (`*uuid.UUID` backend, `string?` frontend) to support DM messages where `channel_id` is null
+- `pinned` field added to `MessageInfo` and rendered in message UI
+
+### Deviation (2026-03-09) — @everyone Mention, Reserved Usernames, Display Name Update, User Profile Popover, User Color Picker
+- **Reserved Usernames**: Added `reservedUsernames` map in `service/auth.go` blocking "everyone", "here", "channel", "admin" during registration
+- **@everyone Mention (Backend)**: Updated `resolveMentions()` in `service/message.go` to detect `@everyone` and replace with `<mention:everyone>` token; returns `mentionedEveryone` bool; `SendMessage`/`EditMessage` envelopes include `"mentioned_everyone": true` when applicable; @everyone is not supported in DMs (no special handling needed — "everyone" isn't a real user)
+- **@everyone Mention (Frontend)**: `MessageContent.svelte` tokenRegex extended to match `everyone` as mention value; renders as amber-highlighted `@everyone` span; `MentionAutocomplete.svelte` shows `@everyone` as first entry with amber icon (hidden in DMs via `isDM` prop); `+page.svelte` checks `data.mentioned_everyone` for notification sound + mention badge
+- **Display Name Update (Backend)**: Added `UpdateUserDisplayName` sqlc query; `UserService.UpdateDisplayName()` method with 64-char limit; `UserHandler.UpdateDisplayName` handler at `PUT /api/users/me/display-name`; broadcasts `user_updated` WS event
+- **User Color (Backend)**: Migration 000008 adds nullable `color VARCHAR(7)` column to users; `UpdateUserColor` sqlc query; `ListUsers` now includes color; `UserService.UpdateColor()` with hex validation; `UserHandler.UpdateColor` at `PUT /api/users/me/color`; broadcasts `user_updated` WS event; `PublicUserInfo` gains `Color` field
+- **User Color (Frontend)**: Extracted `USER_COLORS`, `userColorFromHash()`, `getUserColor()` to `$lib/utils.ts`; removed duplicated color functions from `MessageArea`, `MemberList`, `MentionAutocomplete`, `ChannelSidebar`; added `color?: string` to `UserInfo` type
+- **User Profile Popover**: New `UserProfilePopover.svelte` using bits-ui `Popover`; shows large avatar, display name, @username; integrated on avatar/name in `MessageArea` (non-grouped messages) and `MemberList` (avatar)
+- **Settings UI**: `ChannelSidebar.svelte` user panel redesigned — shows user color avatar, display name + username, edit pencil opens Popover with display name input and color picker (12 swatches + native `<input type="color">`); `usersStore` gains `changeDisplayName()`, `changeColor()`, `updateUser()` methods
+- **WS Event**: `+page.svelte` listens for `user_updated` events and updates local user store in real-time
+- **UserHandler** now holds `*ws.Hub` reference (passed from router) for broadcasting profile changes
+- `go build` and `bun run build` both pass clean; migration 000008 applied
+
+### Deviation (2026-03-09) — Fix UserProfilePopover conflicts, display name/color real-time updates
+- **MemberList Popover Fix**: Fixed `UserProfilePopover` in MemberList — changed outer `<button>` to `<div>` (avoids nested-button invalid HTML from Popover.Trigger), wrapped avatar in a `<div onclick={stopPropagation}>` so clicking the avatar opens the profile popover without triggering the DM open. Right-click context menu and row click for DM still work as before.
+- **Live Display Name in Messages**: Added `getDisplayNameForMessage()` helper in `MessageArea.svelte` that looks up the user from `usersStore` by `msg.user_id` instead of using stale `msg.display_name` from when the message was sent. Fallback to `msg.display_name || msg.username` if user not found in store.
+- **Live Data in UserProfilePopover**: Updated `UserProfilePopover` props in MessageArea to pass `displayName={getDisplayNameForMessage(msg)}` instead of `displayName={msg.display_name}`, so popovers show current display name.
+- Color was already updating in real-time via `getColorForMessage()` which looks up the users store.
+- `bun run build` passes clean
+
+### Deviation (2026-03-09) — Fix Biome --unsafe underscore-prefixed variables
+- Biome `--unsafe` applied `noUnusedVariables` fixes that prefixed Svelte script variables with `_`, breaking template references (Biome can't see Svelte template usage)
+- Removed `_` prefix from all affected variables/functions across 9 files:
+  - `ConnectionBanner.svelte` (1 var)
+  - `ChannelSidebar.svelte` (10 vars/functions)
+  - `MemberList.svelte` (3 vars/functions)
+  - `MessageArea.svelte` (20 vars/functions)
+  - `MessageContent.svelte` (4 vars/functions)
+  - `PinnedMessagesPanel.svelte` (3 vars/functions — found beyond original plan)
+  - `admin/+page.svelte` (22 vars/functions)
+  - `login/+page.svelte` (3 vars/functions)
+  - `register/+page.svelte` (3 vars/functions)
+- `bun run build` passes clean
+
 ---
 
 ## Known Deviations from Plan
@@ -187,7 +273,7 @@
 
 ## Notes for Next Run
 
-- Postgres is running on port 5440, all migrations applied through 000005
+- Postgres is running on port 5440, all migrations applied through 000007
 - Auth is fully wired frontend-to-backend: login, register, refresh, logout all work through the Vite proxy
 - `MSYS_NO_PATHCONV=1` prefix needed for Docker commands with volume mounts in Git Bash
 - **Go module root is `src/`** — build with `cd src && go build -o ../bin/den .`, run with `cd src && go run .`
@@ -201,7 +287,7 @@
 - shadcn-svelte components can be added incrementally (bits-ui is installed, cn utility exists)
 - Vite dev server proxies `/api` → `http://localhost:8080` with `ws: true` for WebSocket upgrade support
 - Frontend stores follow factory pattern with `$state` runes in `.svelte.ts` files
-- User colors are generated client-side from username hash — no `color` column in DB
+- User colors stored in DB `users.color` column (nullable, `VARCHAR(7)`); fallback to client-side hash when NULL; shared utility in `$lib/utils.ts`
 - Three-column layout: ChannelSidebar (w-60) | MessageArea (flex-1) | MemberList (w-60)
 - Admin panel at `/admin` — admin-only, 4 tabs (users, channels, messages, settings)
 - Admin settings (open_registration, instance_name) are in-memory only — reset on server restart

@@ -95,7 +95,7 @@ function createWebSocket() {
 		if (!listeners.has(type)) {
 			listeners.set(type, new Set());
 		}
-		listeners.get(type)!.add(callback);
+		listeners.get(type)?.add(callback);
 	}
 
 	function off(type: string, callback: WsCallback) {
@@ -103,13 +103,17 @@ function createWebSocket() {
 	}
 
 	return {
-		get connected() { return connected; },
-		get reconnecting() { return reconnecting; },
+		get connected() {
+			return connected;
+		},
+		get reconnecting() {
+			return reconnecting;
+		},
 		connect,
 		disconnect,
 		send,
 		on,
-		off
+		off,
 	};
 }
 

@@ -1,89 +1,90 @@
 <script lang="ts">
-	import { emoteStore } from '$lib/stores/emotes.svelte';
-	import type { EmoteInfo } from '$lib/types';
+import { emoteStore } from '$lib/stores/emotes.svelte';
+import type { EmoteInfo } from '$lib/types';
 
-	interface Props {
-		inputValue: string;
-		cursorPosition: number;
-		onSelect: (shortcode: string, start: number, end: number) => void;
-		onKeydown: (handler: (e: KeyboardEvent) => boolean) => void;
+interface Props {
+	inputValue: string;
+	cursorPosition: number;
+	onSelect: (shortcode: string, start: number, end: number) => void;
+	onKeydown: (handler: (e: KeyboardEvent) => boolean) => void;
+}
+
+let { inputValue, cursorPosition, onSelect, onKeydown }: Props = $props();
+
+let selectedIndex = $state(0);
+
+interface AutocompleteMatch {
+	query: string;
+	start: number;
+	end: number;
+	results: EmoteInfo[];
+}
+
+const match = $derived.by((): AutocompleteMatch | null => {
+	const textBeforeCursor = inputValue.slice(0, cursorPosition);
+	const colonIdx = textBeforeCursor.lastIndexOf(':');
+	if (colonIdx === -1) return null;
+
+	const query = textBeforeCursor.slice(colonIdx + 1);
+	if (query.length < 2 || !/^[a-zA-Z0-9_]+$/.test(query)) return null;
+
+	const lowerQuery = query.toLowerCase();
+	const results = emoteStore.emotes
+		.filter((e) => e.name.toLowerCase().startsWith(lowerQuery))
+		.slice(0, 8);
+
+	if (results.length === 0) return null;
+
+	return {
+		query,
+		start: colonIdx,
+		end: cursorPosition,
+		results,
+	};
+});
+
+$effect(() => {
+	if (match) {
+		selectedIndex = Math.min(selectedIndex, match.results.length - 1);
 	}
+});
 
-	let { inputValue, cursorPosition, onSelect, onKeydown }: Props = $props();
+function handleKeydown(e: KeyboardEvent): boolean {
+	if (!match) return false;
 
-	let selectedIndex = $state(0);
-
-	interface AutocompleteMatch {
-		query: string;
-		start: number;
-		end: number;
-		results: EmoteInfo[];
+	if (e.key === 'ArrowDown') {
+		e.preventDefault();
+		selectedIndex = (selectedIndex + 1) % match.results.length;
+		return true;
 	}
-
-	const match = $derived.by((): AutocompleteMatch | null => {
-		const textBeforeCursor = inputValue.slice(0, cursorPosition);
-		const colonIdx = textBeforeCursor.lastIndexOf(':');
-		if (colonIdx === -1) return null;
-
-		const query = textBeforeCursor.slice(colonIdx + 1);
-		if (query.length < 2 || !/^[a-zA-Z0-9_]+$/.test(query)) return null;
-
-		const lowerQuery = query.toLowerCase();
-		const results = emoteStore.emotes.filter(e =>
-			e.name.toLowerCase().startsWith(lowerQuery)
-		).slice(0, 8);
-
-		if (results.length === 0) return null;
-
-		return {
-			query,
-			start: colonIdx,
-			end: cursorPosition,
-			results
-		};
-	});
-
-	$effect(() => {
-		if (match) {
-			selectedIndex = Math.min(selectedIndex, match.results.length - 1);
-		}
-	});
-
-	function handleKeydown(e: KeyboardEvent): boolean {
-		if (!match) return false;
-
-		if (e.key === 'ArrowDown') {
-			e.preventDefault();
-			selectedIndex = (selectedIndex + 1) % match.results.length;
-			return true;
-		}
-		if (e.key === 'ArrowUp') {
-			e.preventDefault();
-			selectedIndex = (selectedIndex - 1 + match.results.length) % match.results.length;
-			return true;
-		}
-		if (e.key === 'Enter' || e.key === 'Tab') {
-			e.preventDefault();
-			selectEmote(match.results[selectedIndex]);
-			return true;
-		}
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			return true;
-		}
-		return false;
+	if (e.key === 'ArrowUp') {
+		e.preventDefault();
+		selectedIndex =
+			(selectedIndex - 1 + match.results.length) % match.results.length;
+		return true;
 	}
-
-	// Register handler with parent
-	$effect(() => {
-		onKeydown(handleKeydown);
-	});
-
-	function selectEmote(emote: EmoteInfo) {
-		if (!match) return;
-		onSelect(`:${emote.name}:`, match.start, match.end);
-		selectedIndex = 0;
+	if (e.key === 'Enter' || e.key === 'Tab') {
+		e.preventDefault();
+		selectEmote(match.results[selectedIndex]);
+		return true;
 	}
+	if (e.key === 'Escape') {
+		e.preventDefault();
+		return true;
+	}
+	return false;
+}
+
+// Register handler with parent
+$effect(() => {
+	onKeydown(handleKeydown);
+});
+
+function selectEmote(emote: EmoteInfo) {
+	if (!match) return;
+	onSelect(`:${emote.name}:`, match.start, match.end);
+	selectedIndex = 0;
+}
 </script>
 
 {#if match}

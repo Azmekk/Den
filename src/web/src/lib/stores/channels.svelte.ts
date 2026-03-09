@@ -8,7 +8,7 @@ function createChannels() {
 
 	async function fetch() {
 		const res = await globalThis.fetch('/api/channels', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` }
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
 		});
 		if (res.ok) {
 			channels = await res.json();
@@ -23,14 +23,26 @@ function createChannels() {
 		websocket.send({ type: 'subscribe', channel_id: id });
 	}
 
+	function deselect() {
+		if (selectedChannelId) {
+			websocket.send({ type: 'unsubscribe', channel_id: selectedChannelId });
+		}
+		selectedChannelId = null;
+	}
+
 	return {
-		get channels() { return channels; },
-		get selectedChannelId() { return selectedChannelId; },
+		get channels() {
+			return channels;
+		},
+		get selectedChannelId() {
+			return selectedChannelId;
+		},
 		get selectedChannel() {
 			return channels.find((c) => c.id === selectedChannelId) ?? null;
 		},
 		fetch,
-		select
+		select,
+		deselect,
 	};
 }
 

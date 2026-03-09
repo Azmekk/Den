@@ -1,27 +1,26 @@
 <script lang="ts">
-	import { usersStore } from '$lib/stores/users.svelte';
-	import { presence } from '$lib/stores/presence.svelte';
+import { auth } from '$lib/stores/auth.svelte';
+import { dmStore } from '$lib/stores/dms.svelte';
+import { presence } from '$lib/stores/presence.svelte';
+import { usersStore } from '$lib/stores/users.svelte';
+import { getUserColor } from '$lib/utils';
+import UserContextMenu from './UserContextMenu.svelte';
+import UserProfilePopover from './UserProfilePopover.svelte';
 
-	const USER_COLORS = [
-		'#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e',
-		'#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7',
-		'#ec4899', '#f43f5e'
-	];
+const onlineUsers = $derived(
+	usersStore.users.filter((u) => presence.isOnline(u.id)),
+);
+const offlineUsers = $derived(
+	usersStore.users.filter((u) => !presence.isOnline(u.id)),
+);
 
-	function userColor(username: string): string {
-		let hash = 0;
-		for (let i = 0; i < username.length; i++) {
-			hash = username.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		return USER_COLORS[Math.abs(hash) % USER_COLORS.length];
+async function openDM(userId: string) {
+	if (userId === auth.user?.id) return;
+	const pair = await dmStore.createOrGetDM(userId);
+	if (pair) {
+		dmStore.select(pair.id);
 	}
-
-	const onlineUsers = $derived(
-		usersStore.users.filter((u) => presence.isOnline(u.id))
-	);
-	const offlineUsers = $derived(
-		usersStore.users.filter((u) => !presence.isOnline(u.id))
-	);
+}
 </script>
 
 <aside class="flex w-60 flex-col border-l border-border bg-card">
@@ -38,18 +37,31 @@
 					Online — {onlineUsers.length}
 				</p>
 				{#each onlineUsers as user (user.id)}
-					<div class="flex items-center gap-2 rounded px-2 py-1.5">
-						<div class="relative">
-							<div
-								class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
-								style="background-color: {userColor(user.username)}"
-							>
-								{user.username.charAt(0).toUpperCase()}
+					<UserContextMenu isSelf={user.id === auth.user?.id} onMessage={() => openDM(user.id)}>
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							onclick={() => openDM(user.id)}
+							class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
+						>
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div onclick={(e: MouseEvent) => e.stopPropagation()}>
+								<UserProfilePopover username={user.username} displayName={user.display_name} color={getUserColor(user)}>
+									<div class="relative">
+										<div
+											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+										<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-green-500"></div>
+									</div>
+								</UserProfilePopover>
 							</div>
-							<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-green-500"></div>
+							<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>
 						</div>
-						<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>
-					</div>
+					</UserContextMenu>
 				{/each}
 			</div>
 		{/if}
@@ -60,18 +72,31 @@
 					Offline — {offlineUsers.length}
 				</p>
 				{#each offlineUsers as user (user.id)}
-					<div class="flex items-center gap-2 rounded px-2 py-1.5 opacity-50">
-						<div class="relative">
-							<div
-								class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
-								style="background-color: {userColor(user.username)}"
-							>
-								{user.username.charAt(0).toUpperCase()}
+					<UserContextMenu isSelf={user.id === auth.user?.id} onMessage={() => openDM(user.id)}>
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							onclick={() => openDM(user.id)}
+							class="flex w-full items-center gap-2 rounded px-2 py-1.5 opacity-50 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
+						>
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div onclick={(e: MouseEvent) => e.stopPropagation()}>
+								<UserProfilePopover username={user.username} displayName={user.display_name} color={getUserColor(user)}>
+									<div class="relative">
+										<div
+											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+										<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-gray-500"></div>
+									</div>
+								</UserProfilePopover>
 							</div>
-							<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-gray-500"></div>
+							<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>
 						</div>
-						<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>
-					</div>
+					</UserContextMenu>
 				{/each}
 			</div>
 		{/if}

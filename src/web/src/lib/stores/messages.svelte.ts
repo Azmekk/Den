@@ -20,7 +20,7 @@ function createMessages() {
 		if (loadedChannels.has(channelId)) return;
 
 		const res = await globalThis.fetch(`/api/channels/${channelId}/messages`, {
-			headers: { Authorization: `Bearer ${auth.accessToken}` }
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
 		});
 		if (!res.ok) return;
 		const data = await res.json();
@@ -45,11 +45,11 @@ function createMessages() {
 		try {
 			const params = new URLSearchParams({
 				before_time: oldest.created_at,
-				before_id: oldest.id
+				before_id: oldest.id,
 			});
 			const res = await globalThis.fetch(
 				`/api/channels/${channelId}/messages?${params}`,
-				{ headers: { Authorization: `Bearer ${auth.accessToken}` } }
+				{ headers: { Authorization: `Bearer ${auth.accessToken}` } },
 			);
 			if (!res.ok) return;
 			const data = await res.json();
@@ -68,18 +68,21 @@ function createMessages() {
 	}
 
 	function handleNewMessage(data: any) {
+		const channelId = data.channel_id as string;
+		if (!channelId) return;
 		const msg: MessageInfo = {
 			id: data.id,
-			channel_id: data.channel_id,
+			channel_id: channelId,
 			user_id: data.user_id,
 			username: data.username,
 			content: data.content,
+			pinned: data.pinned ?? false,
 			created_at: data.created_at,
-			edited_at: data.edited_at
+			edited_at: data.edited_at,
 		};
 		const newMap = new Map(messagesByChannel);
-		const existing = newMap.get(msg.channel_id) ?? [];
-		newMap.set(msg.channel_id, [...existing, msg]);
+		const existing = newMap.get(channelId) ?? [];
+		newMap.set(channelId, [...existing, msg]);
 		messagesByChannel = newMap;
 	}
 
@@ -92,8 +95,10 @@ function createMessages() {
 		newMap.set(
 			channelId,
 			msgs.map((m) =>
-				m.id === data.id ? { ...m, content: data.content, edited_at: data.edited_at } : m
-			)
+				m.id === data.id
+					? { ...m, content: data.content, edited_at: data.edited_at }
+					: m,
+			),
 		);
 		messagesByChannel = newMap;
 	}
@@ -106,7 +111,23 @@ function createMessages() {
 		const newMap = new Map(messagesByChannel);
 		newMap.set(
 			channelId,
-			msgs.filter((m) => m.id !== data.id)
+			msgs.filter((m) => m.id !== data.id),
+		);
+		messagesByChannel = newMap;
+	}
+
+	function updatePinStatus(
+		channelId: string,
+		messageId: string,
+		pinned: boolean,
+	) {
+		const msgs = messagesByChannel.get(channelId);
+		if (!msgs) return;
+
+		const newMap = new Map(messagesByChannel);
+		newMap.set(
+			channelId,
+			msgs.map((m) => (m.id === messageId ? { ...m, pinned } : m)),
 		);
 		messagesByChannel = newMap;
 	}
@@ -115,20 +136,23 @@ function createMessages() {
 		websocket.send({
 			type: 'send_message',
 			channel_id: channelId,
-			content
+			content,
 		});
 	}
 
 	return {
 		getMessages,
 		hasMore,
-		get loadingOlder() { return loadingOlder; },
+		get loadingOlder() {
+			return loadingOlder;
+		},
 		fetchHistory,
 		fetchOlder,
 		handleNewMessage,
 		handleEditMessage,
 		handleDeleteMessage,
-		sendMessage
+		updatePinStatus,
+		sendMessage,
 	};
 }
 

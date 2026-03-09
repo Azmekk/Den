@@ -8,13 +8,24 @@ export interface ChannelInfo {
 
 export interface MessageInfo {
 	id: string;
-	channel_id: string;
+	channel_id?: string;
+	dm_pair_id?: string;
 	user_id: string;
 	username: string;
 	display_name?: string;
 	content: string;
+	pinned?: boolean;
 	created_at: string;
 	edited_at?: string;
+}
+
+export interface DMPairInfo {
+	id: string;
+	other_user_id: string;
+	other_username: string;
+	other_display_name?: string;
+	other_avatar_url?: string;
+	created_at: string;
 }
 
 export interface UserInfo {
@@ -22,6 +33,7 @@ export interface UserInfo {
 	username: string;
 	display_name?: string;
 	avatar_url?: string;
+	color?: string;
 	is_admin: boolean;
 }
 

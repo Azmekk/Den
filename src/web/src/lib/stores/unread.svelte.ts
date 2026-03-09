@@ -7,15 +7,17 @@ function createUnread() {
 
 	async function fetch() {
 		const res = await globalThis.fetch('/api/channels/unread', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` }
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
 		});
 		if (res.ok) {
 			const data: UnreadInfo[] = await res.json();
 			const newUnread = new Map<string, number>();
 			const newMentions = new Map<string, number>();
 			for (const item of data) {
-				if (item.unread_count > 0) newUnread.set(item.channel_id, item.unread_count);
-				if (item.mention_count > 0) newMentions.set(item.channel_id, item.mention_count);
+				if (item.unread_count > 0)
+					newUnread.set(item.channel_id, item.unread_count);
+				if (item.mention_count > 0)
+					newMentions.set(item.channel_id, item.mention_count);
 			}
 			unreadCounts = newUnread;
 			mentionCounts = newMentions;
@@ -43,7 +45,7 @@ function createUnread() {
 
 		await globalThis.fetch(`/api/channels/${channelId}/read`, {
 			method: 'PUT',
-			headers: { Authorization: `Bearer ${auth.accessToken}` }
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
 		});
 	}
 
@@ -56,14 +58,18 @@ function createUnread() {
 	}
 
 	return {
-		get unreadCounts() { return unreadCounts; },
-		get mentionCounts() { return mentionCounts; },
+		get unreadCounts() {
+			return unreadCounts;
+		},
+		get mentionCounts() {
+			return mentionCounts;
+		},
 		fetch,
 		increment,
 		incrementMention,
 		markRead,
 		getUnread,
-		getMentions
+		getMentions,
 	};
 }
 

@@ -31,25 +31,30 @@ func NewMessageService(queries *db.Queries, emoteSvc *EmoteService) *MessageServ
 }
 
 type MessageInfo struct {
-	ID          uuid.UUID `json:"id"`
-	ChannelID   uuid.UUID `json:"channel_id"`
-	UserID      uuid.UUID `json:"user_id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name,omitempty"`
-	AvatarURL   string    `json:"avatar_url,omitempty"`
-	Content     string    `json:"content"`
-	EditedAt    string    `json:"edited_at,omitempty"`
-	CreatedAt   string    `json:"created_at"`
+	ID          uuid.UUID  `json:"id"`
+	ChannelID   *uuid.UUID `json:"channel_id,omitempty"`
+	DMPairID    *uuid.UUID `json:"dm_pair_id,omitempty"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name,omitempty"`
+	AvatarURL   string     `json:"avatar_url,omitempty"`
+	Content     string     `json:"content"`
+	Pinned      bool       `json:"pinned"`
+	EditedAt    string     `json:"edited_at,omitempty"`
+	CreatedAt   string     `json:"created_at"`
 }
 
 func messageInfoFromRow(row db.GetLatestMessagesByChannelRow) MessageInfo {
 	info := MessageInfo{
 		ID:        row.ID,
-		ChannelID: row.ChannelID.UUID,
 		UserID:    row.UserID,
 		Username:  row.Username,
 		Content:   row.Content,
+		Pinned:    row.Pinned,
 		CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if row.ChannelID.Valid {
+		info.ChannelID = &row.ChannelID.UUID
 	}
 	if row.DisplayName.Valid {
 		info.DisplayName = row.DisplayName.String
@@ -66,11 +71,38 @@ func messageInfoFromRow(row db.GetLatestMessagesByChannelRow) MessageInfo {
 func messageInfoFromCursorRow(row db.GetMessagesByChannelRow) MessageInfo {
 	info := MessageInfo{
 		ID:        row.ID,
-		ChannelID: row.ChannelID.UUID,
 		UserID:    row.UserID,
 		Username:  row.Username,
 		Content:   row.Content,
+		Pinned:    row.Pinned,
 		CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if row.ChannelID.Valid {
+		info.ChannelID = &row.ChannelID.UUID
+	}
+	if row.DisplayName.Valid {
+		info.DisplayName = row.DisplayName.String
+	}
+	if row.AvatarUrl.Valid {
+		info.AvatarURL = row.AvatarUrl.String
+	}
+	if row.EditedAt.Valid {
+		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+	}
+	return info
+}
+
+func messageInfoFromPinnedChannelRow(row db.GetPinnedMessagesByChannelRow) MessageInfo {
+	info := MessageInfo{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		Username:  row.Username,
+		Content:   row.Content,
+		Pinned:    row.Pinned,
+		CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if row.ChannelID.Valid {
+		info.ChannelID = &row.ChannelID.UUID
 	}
 	if row.DisplayName.Valid {
 		info.DisplayName = row.DisplayName.String
@@ -96,7 +128,7 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 		content = EscapeContent(content)
 	}
 
-	content, mentionedIDs, _ := s.resolveMentions(ctx, content)
+	content, mentionedIDs, mentionedEveryone := s.resolveMentions(ctx, content)
 
 	msg, err := s.queries.CreateMessage(ctx, db.CreateMessageParams{
 		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
@@ -127,8 +159,12 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 		"user_id":            userID,
 		"username":           username,
 		"content":            msg.Content,
+		"pinned":             false,
 		"created_at":         msg.CreatedAt.Format(time.RFC3339Nano),
 		"mentioned_user_ids": mentionedStrings,
+	}
+	if mentionedEveryone {
+		envelope["mentioned_everyone"] = true
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
@@ -137,10 +173,10 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 	return data, mentionedIDs, nil
 }
 
-func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, error) {
+func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, uuid.UUID, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > 2000 {
-		return nil, uuid.Nil, ErrInvalidInput
+		return nil, uuid.Nil, uuid.Nil, ErrInvalidInput
 	}
 
 	if s.emoteSvc != nil {
@@ -149,18 +185,18 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 		content = EscapeContent(content)
 	}
 
-	content, mentionedIDs, _ := s.resolveMentions(ctx, content)
+	content, mentionedIDs, mentionedEveryone := s.resolveMentions(ctx, content)
 
 	existing, err := s.queries.GetMessageByID(ctx, messageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, uuid.Nil, ErrMessageNotFound
+			return nil, uuid.Nil, uuid.Nil, ErrMessageNotFound
 		}
-		return nil, uuid.Nil, err
+		return nil, uuid.Nil, uuid.Nil, err
 	}
 
 	if existing.UserID != userID {
-		return nil, uuid.Nil, ErrForbidden
+		return nil, uuid.Nil, uuid.Nil, ErrForbidden
 	}
 
 	updated, err := s.queries.UpdateMessageContent(ctx, db.UpdateMessageContentParams{
@@ -168,7 +204,7 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 		Content: content,
 	})
 	if err != nil {
-		return nil, uuid.Nil, err
+		return nil, uuid.Nil, uuid.Nil, err
 	}
 
 	// Re-resolve mentions: delete old, insert new
@@ -186,39 +222,48 @@ func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid
 	}
 
 	channelID := existing.ChannelID.UUID
+	dmPairID := existing.DmPairID.UUID
 	envelope := map[string]any{
 		"type":               "edit_message",
 		"id":                 updated.ID,
-		"channel_id":         channelID,
 		"content":            updated.Content,
 		"edited_at":          updated.EditedAt.Time.Format(time.RFC3339Nano),
 		"mentioned_user_ids": mentionedStrings,
 	}
+	if mentionedEveryone {
+		envelope["mentioned_everyone"] = true
+	}
+	if existing.ChannelID.Valid {
+		envelope["channel_id"] = channelID
+	}
+	if existing.DmPairID.Valid {
+		envelope["dm_pair_id"] = dmPairID
+	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, uuid.Nil, err
+		return nil, uuid.Nil, uuid.Nil, err
 	}
-	return data, channelID, nil
+	return data, channelID, dmPairID, nil
 }
 
-func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, error) {
+func (s *MessageService) DeleteMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) (uuid.UUID, uuid.UUID, error) {
 	existing, err := s.queries.GetMessageByID(ctx, messageID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return uuid.Nil, ErrMessageNotFound
+			return uuid.Nil, uuid.Nil, ErrMessageNotFound
 		}
-		return uuid.Nil, err
+		return uuid.Nil, uuid.Nil, err
 	}
 
 	if existing.UserID != userID && !isAdmin {
-		return uuid.Nil, ErrForbidden
+		return uuid.Nil, uuid.Nil, ErrForbidden
 	}
 
 	if err := s.queries.DeleteMessage(ctx, messageID); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, uuid.Nil, err
 	}
 
-	return existing.ChannelID.UUID, nil
+	return existing.ChannelID.UUID, existing.DmPairID.UUID, nil
 }
 
 func (s *MessageService) GetHistory(ctx context.Context, channelID uuid.UUID, beforeTime *time.Time, beforeID *uuid.UUID) ([]MessageInfo, bool, error) {
@@ -251,41 +296,156 @@ func (s *MessageService) GetHistory(ctx context.Context, channelID uuid.UUID, be
 	return messages, len(rows) == 50, nil
 }
 
-// resolveMentions finds @username patterns and replaces them with <mention:uuid> tokens.
-func (s *MessageService) resolveMentions(ctx context.Context, content string) (string, []uuid.UUID, error) {
-	matches := mentionPattern.FindAllStringSubmatchIndex(content, -1)
-	if len(matches) == 0 {
-		return content, nil, nil
+func (s *MessageService) PinMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) ([]byte, error) {
+	existing, err := s.queries.GetMessageByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMessageNotFound
+		}
+		return nil, err
 	}
 
-	// Collect unique usernames
+	// DM messages: only participants can pin (admin bypass not allowed)
+	if existing.DmPairID.Valid {
+		pair, err := s.queries.GetDMPair(ctx, existing.DmPairID.UUID)
+		if err != nil {
+			return nil, err
+		}
+		if userID != pair.UserA && userID != pair.UserB {
+			return nil, ErrForbidden
+		}
+	} else if existing.UserID != userID && !isAdmin {
+		return nil, ErrForbidden
+	}
+
+	msg, err := s.queries.SetMessagePinned(ctx, db.SetMessagePinnedParams{
+		ID:     messageID,
+		Pinned: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	envelope := map[string]any{
+		"type":   "pin_message",
+		"id":     msg.ID,
+		"pinned": true,
+	}
+	if msg.ChannelID.Valid {
+		envelope["channel_id"] = msg.ChannelID.UUID
+	}
+	if msg.DmPairID.Valid {
+		envelope["dm_pair_id"] = msg.DmPairID.UUID
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *MessageService) UnpinMessage(ctx context.Context, messageID, userID uuid.UUID, isAdmin bool) ([]byte, error) {
+	existing, err := s.queries.GetMessageByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMessageNotFound
+		}
+		return nil, err
+	}
+
+	// DM messages: only participants can unpin (admin bypass not allowed)
+	if existing.DmPairID.Valid {
+		pair, err := s.queries.GetDMPair(ctx, existing.DmPairID.UUID)
+		if err != nil {
+			return nil, err
+		}
+		if userID != pair.UserA && userID != pair.UserB {
+			return nil, ErrForbidden
+		}
+	} else if existing.UserID != userID && !isAdmin {
+		return nil, ErrForbidden
+	}
+
+	msg, err := s.queries.SetMessagePinned(ctx, db.SetMessagePinnedParams{
+		ID:     messageID,
+		Pinned: false,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	envelope := map[string]any{
+		"type":   "unpin_message",
+		"id":     msg.ID,
+		"pinned": false,
+	}
+	if msg.ChannelID.Valid {
+		envelope["channel_id"] = msg.ChannelID.UUID
+	}
+	if msg.DmPairID.Valid {
+		envelope["dm_pair_id"] = msg.DmPairID.UUID
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *MessageService) GetPinnedMessages(ctx context.Context, channelID uuid.UUID) ([]MessageInfo, error) {
+	rows, err := s.queries.GetPinnedMessagesByChannel(ctx, uuid.NullUUID{UUID: channelID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]MessageInfo, len(rows))
+	for i, row := range rows {
+		messages[i] = messageInfoFromPinnedChannelRow(row)
+	}
+	return messages, nil
+}
+
+// resolveMentions finds @username patterns and replaces them with <mention:uuid> tokens.
+// Returns the resolved content, mentioned user IDs, and whether @everyone was mentioned.
+func (s *MessageService) resolveMentions(ctx context.Context, content string) (string, []uuid.UUID, bool) {
+	matches := mentionPattern.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return content, nil, false
+	}
+
+	// Collect unique usernames (excluding "everyone")
 	nameSet := make(map[string]bool)
 	for _, m := range matches {
 		name := content[m[2]:m[3]]
-		nameSet[name] = true
+		if strings.ToLower(name) != "everyone" {
+			nameSet[name] = true
+		}
 	}
 	names := make([]string, 0, len(nameSet))
 	for n := range nameSet {
 		names = append(names, n)
 	}
 
-	users, err := s.queries.GetUsersByUsernames(ctx, names)
-	if err != nil {
-		return content, nil, err
-	}
-
-	nameToID := make(map[string]uuid.UUID, len(users))
-	for _, u := range users {
-		nameToID[u.Username] = u.ID
+	nameToID := make(map[string]uuid.UUID)
+	if len(names) > 0 {
+		users, err := s.queries.GetUsersByUsernames(ctx, names)
+		if err == nil {
+			for _, u := range users {
+				nameToID[u.Username] = u.ID
+			}
+		}
 	}
 
 	// Replace from end to start to preserve indices
 	var mentionedIDs []uuid.UUID
+	mentionedEveryone := false
 	seen := make(map[uuid.UUID]bool)
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		name := content[m[2]:m[3]]
-		if id, ok := nameToID[name]; ok {
+		if strings.ToLower(name) == "everyone" {
+			content = content[:m[0]] + "<mention:everyone>" + content[m[1]:]
+			mentionedEveryone = true
+		} else if id, ok := nameToID[name]; ok {
 			token := "<mention:" + id.String() + ">"
 			content = content[:m[0]] + token + content[m[1]:]
 			if !seen[id] {
@@ -295,5 +455,5 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string) (s
 		}
 	}
 
-	return content, mentionedIDs, nil
+	return content, mentionedIDs, mentionedEveryone
 }

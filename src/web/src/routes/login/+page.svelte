@@ -1,30 +1,30 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth.svelte';
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+import { onMount } from 'svelte';
+import { goto } from '$app/navigation';
+import { auth } from '$lib/stores/auth.svelte';
 
-	let username = $state('');
-	let password = $state('');
-	let error = $state('');
-	let loading = $state(false);
+let username = $state('');
+let password = $state('');
+let error = $state('');
+let loading = $state(false);
 
-	onMount(() => {
-		if (auth.isLoggedIn) goto('/');
-	});
+onMount(() => {
+	if (auth.isLoggedIn) goto('/');
+});
 
-	async function handleSubmit(e: Event) {
-		e.preventDefault();
-		error = '';
-		loading = true;
-		try {
-			await auth.login(username, password);
-			goto('/');
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'login failed';
-		} finally {
-			loading = false;
-		}
+async function handleSubmit(e: Event) {
+	e.preventDefault();
+	error = '';
+	loading = true;
+	try {
+		await auth.login(username, password);
+		goto('/');
+	} catch (err) {
+		error = err instanceof Error ? err.message : 'login failed';
+	} finally {
+		loading = false;
 	}
+}
 </script>
 
 <div class="flex min-h-screen items-center justify-center px-4">

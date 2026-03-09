@@ -6,7 +6,9 @@ interface TypingEntry {
 }
 
 function createTyping() {
-	let typingByChannel = $state<Map<string, Map<string, TypingEntry>>>(new Map());
+	let typingByChannel = $state<Map<string, Map<string, TypingEntry>>>(
+		new Map(),
+	);
 	let lastSentAt = 0;
 
 	function handleTypingStart(data: any) {
@@ -19,7 +21,7 @@ function createTyping() {
 			next.set(channelId, new Map());
 		}
 
-		const channelTyping = new Map(next.get(channelId)!);
+		const channelTyping = new Map(next.get(channelId) ?? new Map());
 
 		// Clear existing timeout for this user
 		const existing = channelTyping.get(userId);
@@ -103,7 +105,7 @@ function createTyping() {
 		sendTyping,
 		stopTyping,
 		getTypingUsers,
-		clearChannel
+		clearChannel,
 	};
 }
 

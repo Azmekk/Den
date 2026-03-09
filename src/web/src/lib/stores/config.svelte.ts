@@ -12,8 +12,10 @@ function createConfig() {
 	}
 
 	return {
-		get uploadsEnabled() { return uploadsEnabled; },
-		fetch
+		get uploadsEnabled() {
+			return uploadsEnabled;
+		},
+		fetch,
 	};
 }
 

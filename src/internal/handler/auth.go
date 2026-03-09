@@ -1,20 +1,23 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/Azmekk/den/internal/httputil"
 	"github.com/Azmekk/den/internal/middleware"
 	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/ws"
 )
 
 type AuthHandler struct {
 	svc *service.AuthService
+	hub *ws.Hub
 }
 
-func NewAuthHandler(svc *service.AuthService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *service.AuthService, hub *ws.Hub) *AuthHandler {
+	return &AuthHandler{svc: svc, hub: hub}
 }
 
 type registerRequest struct {
@@ -59,6 +62,16 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// Broadcast new user to all connected clients
+	envelope, _ := json.Marshal(map[string]any{
+		"type":         "user_registered",
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"is_admin":     user.IsAdmin,
+	})
+	h.hub.BroadcastGlobal(envelope)
 
 	httputil.SetRefreshTokenCookie(w, tokens.RefreshToken)
 	httputil.WriteJSON(w, http.StatusOK, authResponse{

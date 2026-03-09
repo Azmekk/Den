@@ -35,6 +35,34 @@ func (q *Queries) CountMessages(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createDMMessage = `-- name: CreateDMMessage :one
+INSERT INTO messages (dm_pair_id, user_id, content)
+VALUES ($1, $2, $3)
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+`
+
+type CreateDMMessageParams struct {
+	DmPairID uuid.NullUUID
+	UserID   uuid.UUID
+	Content  string
+}
+
+func (q *Queries) CreateDMMessage(ctx context.Context, arg CreateDMMessageParams) (Message, error) {
+	row := q.db.QueryRowContext(ctx, createDMMessage, arg.DmPairID, arg.UserID, arg.Content)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.DmPairID,
+		&i.UserID,
+		&i.Content,
+		&i.Pinned,
+		&i.EditedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content)
 VALUES ($1, $2, $3)
@@ -86,6 +114,137 @@ WHERE id IN (
 func (q *Queries) DeleteOldestMessages(ctx context.Context, limit int32) error {
 	_, err := q.db.ExecContext(ctx, deleteOldestMessages, limit)
 	return err
+}
+
+const getDMMessagesByPair = `-- name: GetDMMessagesByPair :many
+SELECT sub.id, sub.dm_pair_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.dm_pair_id = $1
+    AND (m.created_at < $2 OR (m.created_at = $2 AND m.id < $3))
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC
+`
+
+type GetDMMessagesByPairParams struct {
+	DmPairID   uuid.NullUUID
+	BeforeTime time.Time
+	BeforeID   uuid.UUID
+}
+
+type GetDMMessagesByPairRow struct {
+	ID          uuid.UUID
+	DmPairID    uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetDMMessagesByPair(ctx context.Context, arg GetDMMessagesByPairParams) ([]GetDMMessagesByPairRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDMMessagesByPair, arg.DmPairID, arg.BeforeTime, arg.BeforeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDMMessagesByPairRow
+	for rows.Next() {
+		var i GetDMMessagesByPairRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DmPairID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLatestDMMessages = `-- name: GetLatestDMMessages :many
+SELECT sub.id, sub.dm_pair_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+         u.username, u.display_name, u.avatar_url
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  WHERE m.dm_pair_id = $1
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 50
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC
+`
+
+type GetLatestDMMessagesRow struct {
+	ID          uuid.UUID
+	DmPairID    uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetLatestDMMessages(ctx context.Context, dmPairID uuid.NullUUID) ([]GetLatestDMMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getLatestDMMessages, dmPairID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLatestDMMessagesRow
+	for rows.Next() {
+		var i GetLatestDMMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DmPairID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLatestMessagesByChannel = `-- name: GetLatestMessagesByChannel :many
@@ -238,6 +397,144 @@ func (q *Queries) GetMessagesByChannel(ctx context.Context, arg GetMessagesByCha
 		return nil, err
 	}
 	return items, nil
+}
+
+const getPinnedDMMessages = `-- name: GetPinnedDMMessages :many
+SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+       u.username, u.display_name, u.avatar_url
+FROM messages m
+JOIN users u ON u.id = m.user_id
+WHERE m.dm_pair_id = $1 AND m.pinned = true
+ORDER BY m.created_at DESC
+`
+
+type GetPinnedDMMessagesRow struct {
+	ID          uuid.UUID
+	DmPairID    uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.NullUUID) ([]GetPinnedDMMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPinnedDMMessages, dmPairID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPinnedDMMessagesRow
+	for rows.Next() {
+		var i GetPinnedDMMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DmPairID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPinnedMessagesByChannel = `-- name: GetPinnedMessagesByChannel :many
+SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+       u.username, u.display_name, u.avatar_url
+FROM messages m
+JOIN users u ON u.id = m.user_id
+WHERE m.channel_id = $1 AND m.pinned = true
+ORDER BY m.created_at DESC
+`
+
+type GetPinnedMessagesByChannelRow struct {
+	ID          uuid.UUID
+	ChannelID   uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetPinnedMessagesByChannel(ctx context.Context, channelID uuid.NullUUID) ([]GetPinnedMessagesByChannelRow, error) {
+	rows, err := q.db.QueryContext(ctx, getPinnedMessagesByChannel, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPinnedMessagesByChannelRow
+	for rows.Next() {
+		var i GetPinnedMessagesByChannelRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setMessagePinned = `-- name: SetMessagePinned :one
+UPDATE messages SET pinned = $2 WHERE id = $1
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+`
+
+type SetMessagePinnedParams struct {
+	ID     uuid.UUID
+	Pinned bool
+}
+
+func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (Message, error) {
+	row := q.db.QueryRowContext(ctx, setMessagePinned, arg.ID, arg.Pinned)
+	var i Message
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.DmPairID,
+		&i.UserID,
+		&i.Content,
+		&i.Pinned,
+		&i.EditedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateMessageContent = `-- name: UpdateMessageContent :one
