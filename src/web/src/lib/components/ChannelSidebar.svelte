@@ -39,11 +39,13 @@ let customColorInput = $state('');
 function selectChannel(id: string) {
 	dmStore.deselect();
 	channelStore.select(id);
+	layoutStore.sidebarTab = 'server';
 	onNavigate?.();
 }
 
 function selectDM(dmId: string) {
 	dmStore.select(dmId);
+	layoutStore.sidebarTab = 'messages';
 	onNavigate?.();
 }
 
@@ -85,21 +87,29 @@ const tab = $derived(layoutStore.sidebarTab);
 	<div class="flex h-12 items-center border-b border-border shrink-0">
 		<button
 			onclick={() => layoutStore.sidebarTab = 'server'}
-			class="flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'server'
+			class="relative flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'server'
 				? 'border-primary text-foreground'
 				: 'border-transparent text-muted-foreground hover:text-foreground'}"
 		>
 			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h10"/></svg>
 			Server
+			{#if unreadStore.mentionCounts.size > 0}
+				<span class="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500"></span>
+			{:else if unreadStore.unreadCounts.size > 0}
+				<span class="absolute top-2 right-2 h-2 w-2 rounded-full bg-white"></span>
+			{/if}
 		</button>
 		<button
 			onclick={() => layoutStore.sidebarTab = 'messages'}
-			class="flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'messages'
+			class="relative flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'messages'
 				? 'border-primary text-foreground'
 				: 'border-transparent text-muted-foreground hover:text-foreground'}"
 		>
 			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
 			Messages
+			{#if dmStore.hasAnyUnread()}
+				<span class="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500"></span>
+			{/if}
 		</button>
 	</div>
 
@@ -135,11 +145,14 @@ const tab = $derived(layoutStore.sidebarTab);
 				<p class="px-2 py-1 text-sm text-muted-foreground">No conversations yet</p>
 			{:else}
 				{#each dmStore.conversations as dm (dm.id)}
+					{@const dmUnread = dmStore.getDMUnread(dm.id)}
 					<button
 						onclick={() => selectDM(dm.id)}
 						class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors {dmStore.selectedDMId === dm.id
 							? 'bg-secondary text-foreground font-medium'
-							: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+							: dmUnread > 0
+								? 'text-foreground font-semibold hover:bg-secondary/50'
+								: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
 					>
 						<div
 							class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-medium text-white shrink-0"
@@ -148,6 +161,9 @@ const tab = $derived(layoutStore.sidebarTab);
 							{dm.other_username.charAt(0).toUpperCase()}
 						</div>
 						<span class="flex-1 truncate">{dm.other_display_name || dm.other_username}</span>
+						{#if dmUnread > 0 && dmStore.selectedDMId !== dm.id}
+							<span class="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">{dmUnread}</span>
+						{/if}
 					</button>
 				{/each}
 			{/if}
