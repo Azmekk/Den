@@ -16,6 +16,7 @@ src/web/build/
 
 # Environment
 .env
+settings.local.json
 
 # OS
 .DS_Store
