@@ -831,15 +831,15 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] `MAX_BUCKET_STORAGE` env var (e.g. `1GB`, `500MB`) parsed at startup, default unlimited
 - [ ] Verify: Upload works under limit, returns 413 when limit would be exceeded
 
-### Run 16 — Admin-Configurable Message Limits
-- [ ] **Message count limit:** Admin-configurable max total messages across the instance (replaces hardcoded concept from plan)
-- [ ] Background cleanup job: when limit is exceeded, delete oldest N messages (pinned messages exempt)
-- [ ] Admin UI: current message count vs limit, manual cleanup trigger, configurable threshold
-- [ ] **Message character limit:** Admin-configurable max characters per message (currently hardcoded at 2000)
-- [ ] Backend: read character limit from admin settings instead of constant in `message_service.go` and `dm_service.go`
-- [ ] Frontend: enforce character limit in message input (show counter, disable send when exceeded)
-- [ ] Persist both settings to DB (admin settings table or similar — currently in-memory only)
-- [ ] Verify: Admin can change both limits; message cleanup runs when count limit exceeded; oversized messages rejected
+### Run 16 — Admin-Configurable Message Limits ✅
+- [x] **Message count limit:** Admin-configurable max total messages across the instance (replaces hardcoded concept from plan)
+- [x] Background cleanup job: when limit is exceeded, delete oldest N messages (pinned messages exempt)
+- [x] Admin UI: current message count vs limit, manual cleanup trigger, configurable threshold
+- [x] **Message character limit:** Admin-configurable max characters per message (currently hardcoded at 2000)
+- [x] Backend: read character limit from admin settings instead of constant in `message_service.go` and `dm_service.go`
+- [x] Frontend: enforce character limit in message input (show counter, disable send when exceeded)
+- [x] Persist both settings to DB (admin settings table or similar — currently in-memory only)
+- [x] Verify: Admin can change both limits; message cleanup runs when count limit exceeded; oversized messages rejected
 
 ### Run 17 — Admin Media Manager
 - [ ] Backend: `GET /api/admin/media` — list all media uploads with metadata (uploader, filename, size, type, upload date, expiry)

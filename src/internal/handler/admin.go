@@ -123,12 +123,26 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		OpenRegistration *bool   `json:"open_registration"`
 		InstanceName     *string `json:"instance_name"`
+		MaxMessages      *int64  `json:"max_messages"`
+		MaxMessageChars  *int    `json:"max_message_chars"`
 	}
 	if err := httputil.DecodeJSON(r, &req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	h.svc.UpdateSettings(req.OpenRegistration, req.InstanceName)
+	if req.MaxMessages != nil && *req.MaxMessages < 0 {
+		httputil.WriteError(w, http.StatusBadRequest, "max_messages must be >= 0")
+		return
+	}
+	if req.MaxMessageChars != nil && (*req.MaxMessageChars < 1 || *req.MaxMessageChars > 10000) {
+		httputil.WriteError(w, http.StatusBadRequest, "max_message_chars must be between 1 and 10000")
+		return
+	}
+
+	if err := h.svc.UpdateSettings(r.Context(), req.OpenRegistration, req.InstanceName, req.MaxMessages, req.MaxMessageChars); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to update settings")
+		return
+	}
 	httputil.WriteJSON(w, http.StatusOK, h.svc.GetSettings())
 }

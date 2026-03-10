@@ -47,6 +47,8 @@ export interface AdminStats {
 export interface AdminSettings {
 	open_registration: boolean;
 	instance_name: string;
+	max_messages: number;
+	max_message_chars: number;
 }
 
 export interface EmoteInfo {
@@ -58,6 +60,7 @@ export interface EmoteInfo {
 export interface AppConfig {
 	uploads_enabled: boolean;
 	voice_enabled?: boolean;
+	max_message_chars: number;
 }
 
 export interface SearchResult {

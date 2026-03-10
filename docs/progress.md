@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
+**Last completed run:** Run 16 — Admin-Configurable Message Limits
 **Last deviation:** Composite Krisp + Noise Gate Processor
-**Next run:** Run 15
+**Next run:** Run 17
 
 ---
 
@@ -453,6 +453,24 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - No new dependencies, no migrations
 - `go build` passes clean
 
+### Run 16 (2026-03-11) — Admin-Configurable Message Limits
+- **Migration 000010**: Created `admin_settings` single-row table with `CHECK (id = 1)` — stores `open_registration`, `instance_name`, `max_messages`, `max_message_chars`
+- **sqlc queries**: `GetAdminSettings` and `UpdateAdminSettings` for the new table
+- **AdminService refactor**: Added `sync.RWMutex`-protected `maxMessages` and `maxMessageChars` cache fields. `LoadSettings(ctx)` seeds from DB at startup. `GetSettings()` returns all 4 fields. `UpdateSettings()` writes to DB + updates cache + syncs AuthService. `RunMessageCleanupLoop` now reads `maxMessages` from cache each tick (0 = unlimited skip). Removed `maxMessages` parameter.
+- **MessageService & DMService**: Added `getMaxChars func() int` field, replaced hardcoded `2000` with `s.getMaxChars()` in `SendMessage`, `EditMessage`, and `SendDMMessage`
+- **ConfigHandler**: Added `getMaxChars func() int` field, exposes `max_message_chars` in `GET /api/config`
+- **AdminHandler**: `UpdateSettings` now accepts `max_messages` and `max_message_chars` with validation (max_messages >= 0, max_message_chars 1–10000), writes to DB via service
+- **main.go**: `adminSvc.LoadSettings()` called at startup before creating message/DM services. Removed `MAX_MESSAGES` env var block. Cleanup loop uses DB-backed limit.
+- **Frontend types**: `AdminSettings` and `AppConfig` interfaces updated with new fields
+- **Config store**: Added `maxMessageChars` state populated from `/api/config`
+- **Admin page**: Two new setting cards (Max Messages, Max Message Characters) in Settings tab with number inputs
+- **MessageArea**: Character counter shown below textarea when typing, turns red when over limit, send button disabled when exceeded
+- All migrations applied through 000010, `sqlc generate` clean, backend and frontend build clean
+
+### Deviation — Emote Upload Auto-Resize (2026-03-11)
+- **Frontend emote upload now auto-resizes**: Static images are resized to 128x128 max and converted to WebP client-side via `convertToWebP()` before uploading. Animated GIFs pass through as-is (canvas can't handle animation). File input accepts `image/*` instead of just PNG/GIF/WebP. Label updated to reflect auto-resize behavior.
+- **Backend unchanged**: Still validates ≤128x128, ≤256KB, PNG/GIF/WebP — acts as safety net.
+
 ## Known Deviations from Plan
 
 - **No Makefile or gofer.json** — Both had Windows/MSYS path translation issues with Docker volume mounts. Commands documented in CLAUDE.md instead.
@@ -465,7 +483,7 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 
 ## Notes for Next Run
 
-- Postgres is running on port 5440, all migrations applied through 000009
+- Postgres is running on port 5440, all migrations applied through 000010
 - Auth is fully wired frontend-to-backend: login, register, refresh, logout all work through the Vite proxy
 - `MSYS_NO_PATHCONV=1` prefix needed for Docker commands with volume mounts in Git Bash
 - **Go module root is `src/`** — build with `cd src && go build -o ../bin/den .`, run with `cd src && go run .`

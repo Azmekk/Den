@@ -784,12 +784,19 @@ function handleDrop(e: DragEvent) {
 				<button
 					onclick={sendMsg}
 					class="shrink-0 h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-					disabled={!messageInput.trim() && attachments.length === 0}
+					disabled={(!messageInput.trim() && attachments.length === 0) || messageInput.length > configStore.maxMessageChars}
 					title="Send message"
 				>
 					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
 				</button>
 			</div>
+			{#if messageInput.length > 0}
+				<div class="flex justify-end px-1 pt-1">
+					<span class="text-xs {messageInput.length > configStore.maxMessageChars ? 'text-destructive font-medium' : 'text-muted-foreground'}">
+						{messageInput.length}/{configStore.maxMessageChars}
+					</span>
+				</div>
+			{/if}
 		</div>
 		<!-- Delete confirmation dialog -->
 		{#if deletingMessage}

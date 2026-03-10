@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,12 +21,40 @@ var (
 )
 
 type AdminService struct {
-	queries *db.Queries
-	authSvc *AuthService
+	queries         *db.Queries
+	authSvc         *AuthService
+	mu              sync.RWMutex
+	maxMessages     int64
+	maxMessageChars int
 }
 
 func NewAdminService(queries *db.Queries, authSvc *AuthService) *AdminService {
-	return &AdminService{queries: queries, authSvc: authSvc}
+	return &AdminService{
+		queries:         queries,
+		authSvc:         authSvc,
+		maxMessages:     100000,
+		maxMessageChars: 2000,
+	}
+}
+
+func (s *AdminService) LoadSettings(ctx context.Context) error {
+	row, err := s.queries.GetAdminSettings(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.maxMessages = int64(row.MaxMessages)
+	s.maxMessageChars = int(row.MaxMessageChars)
+	s.mu.Unlock()
+	s.authSvc.SetOpenRegistration(row.OpenRegistration)
+	s.authSvc.SetInstanceName(row.InstanceName)
+	return nil
+}
+
+func (s *AdminService) GetMaxMessageChars() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maxMessageChars
 }
 
 func (s *AdminService) ListUsers(ctx context.Context) ([]PublicUserInfo, error) {
@@ -117,13 +146,19 @@ func (s *AdminService) DeleteOldestMessages(ctx context.Context, count int32) er
 }
 
 func (s *AdminService) GetSettings() map[string]any {
+	s.mu.RLock()
+	maxMsg := s.maxMessages
+	maxChars := s.maxMessageChars
+	s.mu.RUnlock()
 	return map[string]any{
 		"open_registration": s.authSvc.IsOpenRegistration(),
 		"instance_name":     s.authSvc.GetInstanceName(),
+		"max_messages":      maxMsg,
+		"max_message_chars": maxChars,
 	}
 }
 
-func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, maxMessages int64, batchSize int32, interval time.Duration) {
+func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int32, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -131,6 +166,12 @@ func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, maxMessages in
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.mu.RLock()
+			maxMessages := s.maxMessages
+			s.mu.RUnlock()
+			if maxMessages <= 0 {
+				continue
+			}
 			count, err := s.queries.CountMessages(ctx)
 			if err != nil {
 				log.Printf("message cleanup: count error: %v", err)
@@ -147,11 +188,42 @@ func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, maxMessages in
 	}
 }
 
-func (s *AdminService) UpdateSettings(openRegistration *bool, instanceName *string) {
+func (s *AdminService) UpdateSettings(ctx context.Context, openRegistration *bool, instanceName *string, maxMessages *int64, maxMessageChars *int) error {
+	// Read current values
+	current := s.GetSettings()
+	or := current["open_registration"].(bool)
+	in := current["instance_name"].(string)
+	mm := current["max_messages"].(int64)
+	mc := current["max_message_chars"].(int)
+
 	if openRegistration != nil {
-		s.authSvc.SetOpenRegistration(*openRegistration)
+		or = *openRegistration
 	}
 	if instanceName != nil {
-		s.authSvc.SetInstanceName(*instanceName)
+		in = *instanceName
 	}
+	if maxMessages != nil {
+		mm = *maxMessages
+	}
+	if maxMessageChars != nil {
+		mc = *maxMessageChars
+	}
+
+	err := s.queries.UpdateAdminSettings(ctx, db.UpdateAdminSettingsParams{
+		OpenRegistration: or,
+		InstanceName:     in,
+		MaxMessages:      int32(mm),
+		MaxMessageChars:  int32(mc),
+	})
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.maxMessages = mm
+	s.maxMessageChars = mc
+	s.mu.Unlock()
+	s.authSvc.SetOpenRegistration(or)
+	s.authSvc.SetInstanceName(in)
+	return nil
 }
