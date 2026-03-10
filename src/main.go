@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -65,10 +64,13 @@ func main() {
 	authSvc := service.NewAuthService(queries, jwtSecret, openRegistration)
 	channelSvc := service.NewChannelService(queries)
 	emoteSvc := service.NewEmoteService(queries, bucketSvc)
-	messageSvc := service.NewMessageService(queries, emoteSvc)
-	dmSvc := service.NewDMService(queries, emoteSvc)
-	userSvc := service.NewUserService(queries)
 	adminSvc := service.NewAdminService(queries, authSvc)
+	if err := adminSvc.LoadSettings(context.Background()); err != nil {
+		log.Fatalf("failed to load admin settings: %v", err)
+	}
+	messageSvc := service.NewMessageService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
+	dmSvc := service.NewDMService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
+	userSvc := service.NewUserService(queries)
 
 	var mediaSvc *service.MediaService
 	if bucketSvc != nil {
@@ -90,18 +92,11 @@ func main() {
 		log.Println("voice channels disabled (LIVEKIT_* env vars not set)")
 	}
 
-	maxMessages := int64(100000)
-	if v := os.Getenv("MAX_MESSAGES"); v != "" {
-		parsed, err := strconv.ParseInt(v, 10, 64)
-		if err == nil && parsed > 0 {
-			maxMessages = parsed
-		}
-	}
-	if maxMessages > 0 {
+	{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go adminSvc.RunMessageCleanupLoop(ctx, maxMessages, 5000, 1*time.Hour)
-		log.Printf("message cleanup enabled (max %d messages, hourly check)", maxMessages)
+		go adminSvc.RunMessageCleanupLoop(ctx, 5000, 1*time.Hour)
+		log.Println("message cleanup loop started (hourly check, limit from DB)")
 	}
 
 	hub := ws.NewHub()

@@ -3,6 +3,7 @@ import { onMount } from 'svelte';
 import { goto } from '$app/navigation';
 import { auth } from '$lib/stores/auth.svelte';
 import { configStore } from '$lib/stores/config.svelte';
+import { convertToWebP, isAnimatedGif } from '$lib/media';
 import type {
 	AdminSettings,
 	AdminStats,
@@ -39,8 +40,11 @@ let cleanupLoading = $state(false);
 let settings = $state<AdminSettings>({
 	open_registration: true,
 	instance_name: 'Den',
+	max_messages: 100000,
+	max_message_chars: 2000,
 });
 let settingsLoading = $state(false);
+let settingsSaved = $state(false);
 
 // Emotes
 let emotes = $state<EmoteInfo[]>([]);
@@ -216,6 +220,7 @@ async function cleanupMessages() {
 
 async function saveSettings() {
 	error = '';
+	settingsSaved = false;
 	settingsLoading = true;
 	try {
 		const res = await fetch('/api/admin/settings', {
@@ -223,7 +228,13 @@ async function saveSettings() {
 			headers: headers(),
 			body: JSON.stringify(settings),
 		});
-		if (res.ok) settings = await res.json();
+		if (res.ok) {
+			settings = await res.json();
+			settingsSaved = true;
+			setTimeout(() => (settingsSaved = false), 3000);
+		} else {
+			error = 'Failed to save settings';
+		}
 	} finally {
 		settingsLoading = false;
 	}
@@ -244,9 +255,18 @@ async function uploadEmote() {
 	error = '';
 	emoteUploading = true;
 	try {
+		let fileToUpload: Blob = emoteFile;
+		let filename = emoteFile.name;
+
+		// Resize and convert to WebP (animated GIFs pass through as-is)
+		if (!(await isAnimatedGif(emoteFile))) {
+			fileToUpload = await convertToWebP(emoteFile, 128, 128);
+			filename = 'emote.webp';
+		}
+
 		const formData = new FormData();
 		formData.append('name', emoteForm.name);
-		formData.append('image', emoteFile);
+		formData.append('image', fileToUpload, filename);
 		const res = await fetch('/api/emotes', {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${auth.accessToken}` },
@@ -535,13 +555,41 @@ function switchTab(tab: typeof activeTab) {
 					</div>
 				</div>
 
-				<button
-					onclick={saveSettings}
-					disabled={settingsLoading}
-					class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-				>
-					{settingsLoading ? 'Saving...' : 'Save Settings'}
-				</button>
+				<div class="rounded-lg border border-border p-4">
+					<h3 class="mb-1 text-sm font-medium text-foreground">Max Messages</h3>
+					<p class="mb-3 text-sm text-muted-foreground">Maximum messages to keep. Oldest non-pinned messages are auto-deleted. 0 = unlimited.</p>
+					<input
+						type="number"
+						bind:value={settings.max_messages}
+						min="0"
+						class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+					/>
+				</div>
+
+				<div class="rounded-lg border border-border p-4">
+					<h3 class="mb-1 text-sm font-medium text-foreground">Max Message Characters</h3>
+					<p class="mb-3 text-sm text-muted-foreground">Maximum characters per message.</p>
+					<input
+						type="number"
+						bind:value={settings.max_message_chars}
+						min="1"
+						max="10000"
+						class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+					/>
+				</div>
+
+				<div class="flex items-center gap-3">
+					<button
+						onclick={saveSettings}
+						disabled={settingsLoading}
+						class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+					>
+						{settingsLoading ? 'Saving...' : 'Save Settings'}
+					</button>
+					{#if settingsSaved}
+						<span class="text-sm text-green-500 font-medium">Settings saved</span>
+					{/if}
+				</div>
 			</div>
 
 		{:else if activeTab === 'emotes'}
@@ -561,11 +609,11 @@ function switchTab(tab: typeof activeTab) {
 								/>
 							</div>
 							<div class="flex-1">
-								<label for="emote-file" class="mb-1 block text-xs text-muted-foreground">Image (PNG, GIF, WebP, max 128x128, 256KB)</label>
+								<label for="emote-file" class="mb-1 block text-xs text-muted-foreground">Image (auto-resized to 128x128, animated GIFs kept as-is)</label>
 								<input
 									id="emote-file"
 									type="file"
-									accept="image/png,image/gif,image/webp"
+									accept="image/*"
 									onchange={(e) => { emoteFile = (e.target as HTMLInputElement).files?.[0] ?? null; }}
 									class="w-full text-sm text-foreground file:mr-2 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:text-foreground"
 								/>

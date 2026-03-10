@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type AdminSetting struct {
+	ID               int32
+	OpenRegistration bool
+	InstanceName     string
+	MaxMessages      int32
+	MaxMessageChars  int32
+	UpdatedAt        time.Time
+}
+
 type Channel struct {
 	ID        uuid.UUID
 	Name      string

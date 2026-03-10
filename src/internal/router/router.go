@@ -20,7 +20,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	userH := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminH := handler.NewAdminHandler(adminSvc)
 	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
-	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil)
+	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars)
 	dmH := handler.NewDMHandler(dmSvc)
 	var mediaH *handler.MediaHandler
 	if mediaSvc != nil {

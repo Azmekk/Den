@@ -22,12 +22,13 @@ var (
 )
 
 type MessageService struct {
-	queries  *db.Queries
-	emoteSvc *EmoteService
+	queries     *db.Queries
+	emoteSvc    *EmoteService
+	getMaxChars func() int
 }
 
-func NewMessageService(queries *db.Queries, emoteSvc *EmoteService) *MessageService {
-	return &MessageService{queries: queries, emoteSvc: emoteSvc}
+func NewMessageService(queries *db.Queries, emoteSvc *EmoteService, getMaxChars func() int) *MessageService {
+	return &MessageService{queries: queries, emoteSvc: emoteSvc, getMaxChars: getMaxChars}
 }
 
 type MessageInfo struct {
@@ -118,7 +119,7 @@ func messageInfoFromPinnedChannelRow(row db.GetPinnedMessagesByChannelRow) Messa
 
 func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error) {
 	content = strings.TrimSpace(content)
-	if content == "" || len(content) > 2000 {
+	if content == "" || len(content) > s.getMaxChars() {
 		return nil, nil, ErrInvalidInput
 	}
 
@@ -175,7 +176,7 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 
 func (s *MessageService) EditMessage(ctx context.Context, messageID, userID uuid.UUID, content string) ([]byte, uuid.UUID, uuid.UUID, error) {
 	content = strings.TrimSpace(content)
-	if content == "" || len(content) > 2000 {
+	if content == "" || len(content) > s.getMaxChars() {
 		return nil, uuid.Nil, uuid.Nil, ErrInvalidInput
 	}
 

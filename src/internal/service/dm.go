@@ -20,12 +20,13 @@ var (
 )
 
 type DMService struct {
-	queries  *db.Queries
-	emoteSvc *EmoteService
+	queries     *db.Queries
+	emoteSvc    *EmoteService
+	getMaxChars func() int
 }
 
-func NewDMService(queries *db.Queries, emoteSvc *EmoteService) *DMService {
-	return &DMService{queries: queries, emoteSvc: emoteSvc}
+func NewDMService(queries *db.Queries, emoteSvc *EmoteService, getMaxChars func() int) *DMService {
+	return &DMService{queries: queries, emoteSvc: emoteSvc, getMaxChars: getMaxChars}
 }
 
 type DMPairInfo struct {
@@ -147,7 +148,7 @@ func (s *DMService) GetDMHistory(ctx context.Context, dmPairID uuid.UUID, before
 
 func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error) {
 	content = strings.TrimSpace(content)
-	if content == "" || len(content) > 2000 {
+	if content == "" || len(content) > s.getMaxChars() {
 		return nil, nil, ErrInvalidInput
 	}
 
