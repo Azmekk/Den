@@ -31,14 +31,20 @@ import { voiceStore } from '$lib/stores/voice.svelte';
 					</div>
 					{#if voiceStore.noiseGateEnabled}
 						<div class="mt-1.5 flex items-center gap-2">
-							<input
-								type="range"
-								min="0"
-								max="100"
-								value={voiceStore.noiseGateThreshold}
-								oninput={(e) => voiceStore.setNoiseGateThreshold(Number((e.target as HTMLInputElement).value))}
-								class="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-secondary accent-primary"
-							/>
+							<div class="relative flex-1">
+								<div
+									class="pointer-events-none absolute top-1/2 left-0 h-1.5 rounded-full transition-all duration-75 {voiceStore.micLevel > voiceStore.noiseGateThreshold ? 'bg-green-500/50' : 'bg-yellow-500/40'}"
+									style="width: {voiceStore.micLevel}%; transform: translateY(-50%);"
+								></div>
+								<input
+									type="range"
+									min="0"
+									max="100"
+									value={voiceStore.noiseGateThreshold}
+									oninput={(e) => voiceStore.setNoiseGateThreshold(Number((e.target as HTMLInputElement).value))}
+									class="relative h-1.5 w-full cursor-pointer appearance-none rounded-full bg-secondary accent-primary"
+								/>
+							</div>
 							<span class="w-7 text-right text-xs text-muted-foreground">{voiceStore.noiseGateThreshold}</span>
 						</div>
 					{/if}

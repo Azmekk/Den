@@ -793,6 +793,14 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] `handleActiveSpeakers` excludes local user — speaking state driven exclusively by noise gate (already applied in Run 12)
 - **⚠ None of these fixes resolved the issues. Noise gate, noise cancellation, echo cancellation, and speaking indicator are all still broken. Needs deeper investigation.**
 
+### Deviation — Voice Fixes: Stereo, Noise Gate Scaling, Mic Level, Sound Guards
+- [x] Stereo playback: shared AudioContext with ChannelSplitter(1) → ChannelMerger(2) upmix for remote audio
+- [x] Noise gate scaling: RMS multiplier 1000→3000 for better threshold slider range (useful range now ~15–50 instead of 5–10)
+- [x] Mic level indicator: `onLevelChange` callback in noise gate, reactive `micLevel` in voice store, level bar behind threshold slider
+- [x] Sound guards: join/leave sounds only play when local user is in a voice channel
+- **Working:** Noise gate, stereo playback, mic level indicator, sound guards
+- **Still broken:** Echo cancellation (stereo upmix mutes `<audio>` element, breaking browser echo reference), noise suppression (needs testing with noise gate disabled — may work but masked by gate pipeline)
+
 ### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
 - [ ] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)
 - [ ] Delete old avatar from bucket when uploading a new one (in `UpdateAvatar()`, delete previous bucket key before storing new file — prevents orphaned files when format changes e.g. PNG→WebP)

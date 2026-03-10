@@ -9,7 +9,7 @@ import {
 } from 'livekit-client';
 import { auth } from './auth.svelte';
 import { websocket } from './websocket.svelte';
-import { createNoiseGate, type NoiseGate } from '$lib/voice/noise-gate';
+import { createNoiseGateProcessor, type NoiseGateProcessor } from '$lib/voice/noise-gate';
 import { playJoinSound, playLeaveSound } from '$lib/voice/sounds';
 
 const STORAGE_KEY = 'den_voice_settings';
@@ -56,10 +56,12 @@ function createVoiceStore() {
 	let noiseGateThreshold = $state(initial.noiseGateThreshold);
 	let noiseCancellationEnabled = $state(initial.noiseCancellationEnabled);
 	let echoCancellationEnabled = $state(initial.echoCancellationEnabled);
+	let micLevel = $state(0);
 
 	let room: Room | null = null;
-	let noiseGate: NoiseGate | null = null;
+	let noiseGateProcessor: NoiseGateProcessor | null = null;
 	let audioContainer: HTMLDivElement | null = null;
+	let sharedAudioCtx: AudioContext | null = null;
 
 	function getAudioContainer(): HTMLDivElement {
 		if (!audioContainer) {
@@ -79,6 +81,12 @@ function createVoiceStore() {
 	function handleVoiceStateUpdate(data: any) {
 		const states = data.voice_states as Record<string, string[]> | undefined;
 		const newStates = new Map(Object.entries(states ?? {}));
+
+		// Only play sounds when local user is in a voice channel
+		if (!currentChannelId) {
+			voiceStates = newStates;
+			return;
+		}
 
 		// Play sounds when other users join/leave
 		const myId = auth.user?.id;
@@ -155,7 +163,7 @@ function createVoiceStore() {
 			});
 
 			// Set up noise gate if enabled
-			setupNoiseGate();
+			await setupNoiseGate();
 
 			// Apply muted state
 			if (isMuted) {
@@ -183,9 +191,12 @@ function createVoiceStore() {
 	async function leave() {
 		playLeaveSound();
 		speakingUserIds = new Set();
-		if (noiseGate) {
-			noiseGate.destroy();
-			noiseGate = null;
+		if (noiseGateProcessor && room) {
+			const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+			if (micPub?.track) {
+				await micPub.track.stopProcessor();
+			}
+			noiseGateProcessor = null;
 		}
 		if (room) {
 			room.disconnect();
@@ -195,6 +206,12 @@ function createVoiceStore() {
 		if (audioContainer) {
 			audioContainer.innerHTML = '';
 		}
+		// Close shared audio context
+		if (sharedAudioCtx) {
+			sharedAudioCtx.close();
+			sharedAudioCtx = null;
+		}
+		micLevel = 0;
 		if (currentChannelId) {
 			websocket.send({ type: 'voice_leave', channel_id: currentChannelId });
 			currentChannelId = null;
@@ -215,33 +232,38 @@ function createVoiceStore() {
 		}
 	}
 
+	function getSharedAudioCtx(): AudioContext {
+		if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+			sharedAudioCtx = new AudioContext();
+		}
+		if (sharedAudioCtx.state === 'suspended') {
+			sharedAudioCtx.resume();
+		}
+		return sharedAudioCtx;
+	}
+
 	function handleTrackSubscribed(
 		track: RemoteTrack,
 		_publication: RemoteTrackPublication,
 		_participant: RemoteParticipant,
 	) {
 		if (track.kind === Track.Kind.Audio) {
-			const stream = track.mediaStream;
-			if (stream) {
-				// Route through Web Audio API to ensure mono mic audio plays in both ears
-				const ctx = new AudioContext();
-				const source = ctx.createMediaStreamSource(stream);
-				const splitter = ctx.createChannelSplitter(1);
-				const merger = ctx.createChannelMerger(2);
-				source.connect(splitter);
-				splitter.connect(merger, 0, 0);
-				splitter.connect(merger, 0, 1);
-				merger.connect(ctx.destination);
-				// Store context for cleanup
-				const el = track.attach();
-				el.muted = true; // Mute the element — audio plays via Web Audio
-				el.dataset.audioCtx = 'managed';
-				(el as any).__audioCtx = ctx;
-				getAudioContainer().appendChild(el);
-			} else {
-				const el = track.attach();
-				getAudioContainer().appendChild(el);
-			}
+			const el = track.attach();
+			el.muted = true; // mute the element; we route audio through Web Audio API
+			getAudioContainer().appendChild(el);
+
+			// Upmix mono to stereo via Web Audio
+			const ctx = getSharedAudioCtx();
+			const source = ctx.createMediaStreamSource(track.mediaStream!);
+			const splitter = ctx.createChannelSplitter(1);
+			const merger = ctx.createChannelMerger(2);
+			source.connect(splitter);
+			splitter.connect(merger, 0, 0);
+			splitter.connect(merger, 0, 1);
+			merger.connect(ctx.destination);
+
+			// Store source on element for cleanup
+			(el as any).__voiceSourceNode = source;
 		}
 	}
 
@@ -251,8 +273,8 @@ function createVoiceStore() {
 		_participant: RemoteParticipant,
 	) {
 		track.detach().forEach((el) => {
-			const ctx = (el as any).__audioCtx as AudioContext | undefined;
-			if (ctx) ctx.close();
+			const source = (el as any).__voiceSourceNode as AudioNode | undefined;
+			source?.disconnect();
 			el.remove();
 		});
 	}
@@ -264,39 +286,55 @@ function createVoiceStore() {
 			currentChannelId = null;
 		}
 		isMuted = false;
-		if (noiseGate) {
-			noiseGate.destroy();
-			noiseGate = null;
-		}
+		micLevel = 0;
+		noiseGateProcessor = null;
 		room = null;
+		if (sharedAudioCtx) {
+			sharedAudioCtx.close();
+			sharedAudioCtx = null;
+		}
 	}
 
 	function handleActiveSpeakers(speakers: Participant[]) {
 		const myId = auth.user?.id;
 		const next = new Set<string>();
-		// Only track remote users from LiveKit — local user is driven by noise gate
 		for (const s of speakers) {
-			if (s.identity && s.identity !== myId) next.add(s.identity);
+			if (!s.identity) continue;
+			if (s.identity === myId) {
+				// When noise gate is active, local speaking is driven by the gate callback
+				if (noiseGateEnabled && noiseGateProcessor) {
+					// Preserve gate-driven state
+					if (speakingUserIds.has(myId)) next.add(myId);
+				} else {
+					// No noise gate — use LiveKit's server-side VAD
+					next.add(myId);
+				}
+			} else {
+				next.add(s.identity);
+			}
 		}
-		// Preserve local user's state (exclusively managed by noise gate callback)
-		if (myId && speakingUserIds.has(myId)) {
+		// If local user is not in LiveKit's speakers list but gate says speaking, preserve it
+		if (myId && noiseGateEnabled && noiseGateProcessor && speakingUserIds.has(myId)) {
 			next.add(myId);
 		}
 		speakingUserIds = next;
 	}
 
-	function setupNoiseGate() {
-		if (noiseGate) {
-			noiseGate.destroy();
-			noiseGate = null;
-		}
-		if (!noiseGateEnabled || !room) return;
+	async function setupNoiseGate() {
+		if (!room) return;
 
 		const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-		if (!micPub?.track?.mediaStream) return;
+		if (!micPub?.track) return;
 
-		noiseGate = createNoiseGate(
-			micPub.track.mediaStream,
+		// Stop existing processor
+		if (noiseGateProcessor) {
+			await micPub.track.stopProcessor();
+			noiseGateProcessor = null;
+		}
+
+		if (!noiseGateEnabled) return;
+
+		noiseGateProcessor = createNoiseGateProcessor(
 			noiseGateThreshold,
 			(open) => {
 				if (!room || isMuted) return;
@@ -306,13 +344,11 @@ function createVoiceStore() {
 					if (open) next.add(myId); else next.delete(myId);
 					speakingUserIds = next;
 				}
-				const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-				const msTrack = pub?.track?.mediaStreamTrack;
-				if (msTrack) {
-					msTrack.enabled = open;
-				}
 			},
+			(level) => { micLevel = level; },
 		);
+
+		await micPub.track.setProcessor(noiseGateProcessor);
 	}
 
 	function persistAndApply() {
@@ -324,41 +360,18 @@ function createVoiceStore() {
 		});
 	}
 
-	function setNoiseGateEnabled(v: boolean) {
+	async function setNoiseGateEnabled(v: boolean) {
 		noiseGateEnabled = v;
+		if (!v) micLevel = 0;
 		persistAndApply();
-		if (v) {
-			setupNoiseGate();
-		} else if (noiseGate) {
-			noiseGate.destroy();
-			noiseGate = null;
-			// Re-enable track if it was gate-muted
-			if (room && !isMuted) {
-				const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-				const msTrack = pub?.track?.mediaStreamTrack;
-				if (msTrack) msTrack.enabled = true;
-				const myId = auth.user?.id;
-				if (myId) {
-					const next = new Set(speakingUserIds);
-					next.add(myId);
-					speakingUserIds = next;
-				}
-			}
-		} else if (!v && room && !isMuted) {
-			const myId = auth.user?.id;
-			if (myId) {
-				const next = new Set(speakingUserIds);
-				next.add(myId);
-				speakingUserIds = next;
-			}
-		}
+		await setupNoiseGate();
 	}
 
 	function setNoiseGateThreshold(v: number) {
 		noiseGateThreshold = v;
 		persistAndApply();
-		if (noiseGate) {
-			noiseGate.setThreshold(v);
+		if (noiseGateProcessor) {
+			noiseGateProcessor.setThreshold(v);
 		}
 	}
 
@@ -376,12 +389,18 @@ function createVoiceStore() {
 
 	async function republishMic() {
 		if (!room || isMuted) return;
+		// Stop processor before disabling mic
+		const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+		if (micPub?.track && noiseGateProcessor) {
+			await micPub.track.stopProcessor();
+			noiseGateProcessor = null;
+		}
 		await room.localParticipant.setMicrophoneEnabled(false);
 		await room.localParticipant.setMicrophoneEnabled(true, {
 			echoCancellation: echoCancellationEnabled,
 			noiseSuppression: noiseCancellationEnabled,
 		});
-		setupNoiseGate();
+		await setupNoiseGate();
 	}
 
 	function getParticipants(channelId: string): string[] {
@@ -398,6 +417,7 @@ function createVoiceStore() {
 		get noiseGateThreshold() { return noiseGateThreshold; },
 		get noiseCancellationEnabled() { return noiseCancellationEnabled; },
 		get echoCancellationEnabled() { return echoCancellationEnabled; },
+		get micLevel() { return micLevel; },
 		handleVoiceStateInitial,
 		handleVoiceStateUpdate,
 		join,

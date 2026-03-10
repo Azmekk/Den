@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 12 — Voice Channels with LiveKit
-**Last deviation:** Fix Voice Audio: Noise Gate & Speaking Indicator
+**Last deviation:** Voice Fixes: Stereo, Noise Gate Scaling, Mic Level, Sound Guards
 **Next run:** Run 13
 
 ---
@@ -413,6 +413,15 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Static/background noise**: Resolved by noise gate fix — gate now properly cuts audio below threshold (including static between speech). Browser constraints (`noiseSuppression`, `echoCancellation`) were already correctly passed.
 - `bun run build` passes clean
 - **⚠ None of these fixes resolved the issues. Noise gate, noise cancellation, echo cancellation, and speaking indicator are all still broken. Needs deeper investigation.**
+
+### Deviation (2026-03-10) — Voice Fixes: Stereo, Noise Gate Scaling, Mic Level, Sound Guards
+- **Stereo playback**: Remote audio routed through shared `AudioContext` with `ChannelSplitter(1)` → `ChannelMerger(2)`, duplicating mono to both L/R channels. `<audio>` element muted (LiveKit bookkeeping only). Shared context closed on leave/disconnect.
+- **Noise gate scaling**: RMS multiplier changed from `1000` → `3000`. Old useful threshold range of 5–10 now maps to ~15–30. Default threshold kept at 20.
+- **Mic level indicator**: Added `onLevelChange` callback to noise gate processor (called every 50ms with clamped 0–100 level). Voice store exposes reactive `micLevel`. `AudioSettingsPopover` renders a colored bar (green above threshold, yellow below) behind the threshold slider.
+- **Sound guards**: `handleVoiceStateUpdate` returns early when `currentChannelId` is null — no more phantom join/leave sounds when not in voice.
+- **Working:** Noise gate, stereo playback, mic level indicator, sound guards, speaking indicator
+- **Still broken:** Echo cancellation (muted `<audio>` element breaks browser's echo reference signal), noise suppression (untested with noise gate disabled — may work but needs verification)
+- `bun run build` passes clean
 
 ## Known Deviations from Plan
 
