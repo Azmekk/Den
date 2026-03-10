@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -56,7 +57,7 @@ func main() {
 	if bucketSvc != nil {
 		log.Println("bucket storage configured")
 	} else {
-		log.Println("bucket storage not configured, emote uploads disabled")
+		log.Println("bucket storage not configured, uploads disabled")
 	}
 
 	authSvc := service.NewAuthService(queries, jwtSecret, openRegistration)
@@ -67,6 +68,15 @@ func main() {
 	userSvc := service.NewUserService(queries)
 	adminSvc := service.NewAdminService(queries, authSvc)
 
+	var mediaSvc *service.MediaService
+	if bucketSvc != nil {
+		mediaSvc = service.NewMediaService(queries, bucketSvc)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go mediaSvc.RunCleanupLoop(ctx)
+		log.Println("media upload enabled, cleanup loop started")
+	}
+
 	hub := ws.NewHub()
 	go hub.Run()
 
@@ -75,7 +85,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, hub, staticFS, bucketSvc != nil)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

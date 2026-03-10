@@ -199,6 +199,32 @@ func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) erro
 	return err
 }
 
+const updateUserAvatarUrl = `-- name: UpdateUserAvatarUrl :one
+UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+`
+
+type UpdateUserAvatarUrlParams struct {
+	ID        uuid.UUID
+	AvatarUrl sql.NullString
+}
+
+func (q *Queries) UpdateUserAvatarUrl(ctx context.Context, arg UpdateUserAvatarUrlParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserAvatarUrl, arg.ID, arg.AvatarUrl)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+	)
+	return i, err
+}
+
 const updateUserColor = `-- name: UpdateUserColor :one
 UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
 `

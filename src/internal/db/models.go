@@ -41,6 +41,16 @@ type DmPair struct {
 	CreatedAt time.Time
 }
 
+type MediaUpload struct {
+	ID          uuid.UUID
+	UploaderID  uuid.UUID
+	BucketKey   string
+	ContentHash string
+	MediaType   string
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
 type Message struct {
 	ID        uuid.UUID
 	ChannelID uuid.NullUUID

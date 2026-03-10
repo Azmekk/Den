@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 10 — Search
-**Last deviation:** Enhanced Search: User Filter, Jump-to-Message, Jump to Latest
-**Next run:** Run 11
+**Last completed run:** Run 11 — Media Embeds & Media Upload
+**Last deviation:** Fix Bucket Path Duplication + Hide Embedded URLs
+**Next run:** Run 12
 
 ---
 
@@ -325,6 +325,37 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **+page.svelte**: Channel switch effect tracks previous channel ID and calls `clearJumped()` on the old channel so returning re-fetches latest
 - `go build` and `bun run build` both pass clean
 
+### Run 11 (2026-03-10) — Media Embeds & Media Upload
+- **Migration 000009**: `media_uploads` table with `content_hash TEXT NOT NULL` for SHA-256 dedup, indexes on `expires_at` and `content_hash`
+- **sqlc queries**: `media_uploads.sql` with InsertMediaUpload, GetMediaUploadByHash, ExtendMediaUploadExpiry, GetExpiredMediaUploads, DeleteMediaUploadsByIDs; `UpdateUserAvatarUrl` added to `users.sql`
+- **MediaService** (`service/media.go`): UploadImage (WebP/PNG/JPEG/GIF, 25MB, SHA-256 dedup), UploadVideo (MP4/WebM, 100MB, SHA-256 dedup), UpdateAvatar (5MB, stored permanently under `avatars/{user-uuid}.{ext}`), CleanupExpired (hourly goroutine), format detection via magic bytes
+- **MediaHandler** (`handler/media.go`): `POST /api/upload/image` and `POST /api/upload/video`, returns `{ "url": "..." }`
+- **UserHandler**: Added `UploadAvatar` (`POST /api/users/me/avatar`) with `user_updated` WS broadcast; `GetAvatar` (`GET /api/users/{id}/avatar`) redirects to bucket URL
+- **UserService**: Added `Queries()` accessor and `GetAvatarURL()` method
+- **Router**: Added media upload routes (conditional on mediaSvc != nil), avatar routes (authenticated + public)
+- **main.go**: Creates MediaService when bucket configured, starts cleanup goroutine with context
+- **Frontend WebP conversion** (`media.ts`): `convertToWebP()` converts images client-side via Canvas API (quality 85%), `isAnimatedGif()` detects multi-frame GIFs (kept as-is), `isImageFile()`/`isVideoFile()` helpers
+- **MessageContent.svelte**: Rewrote with URL detection — scans text parts for `https?://` URLs, renders inline embeds below message text. Image URLs → `<img>`, video URLs → `<video controls>`, YouTube → clickable thumbnail that loads iframe. `onerror` handlers show "Media expired" placeholder
+- **MessageArea.svelte**: Added paperclip upload button (visible when `configStore.uploadsEnabled`), hidden file input, `uploadFile()` (converts images to WebP, POSTs to API, inserts URL into message input), drag-and-drop handlers with visual border highlight, avatar display in non-grouped messages (img with fallback div)
+- **MemberList.svelte**: Avatar `<img>` with onerror fallback for both online and offline user lists
+- **UserProfilePopover.svelte**: Added `avatarUrl` prop, shows avatar image with fallback to colored initial circle
+- **AvatarCropModal.svelte**: Uses cropperjs v2 (web components, no CSS import needed), square aspect ratio selection, crops to 128×128 canvas, converts to WebP via `canvas.toBlob`, POSTs to `/api/users/me/avatar`, updates local user store
+- **ChannelSidebar.svelte**: Clickable avatar in user panel (opens file picker when uploads enabled), shows current avatar with fallback; AvatarCropModal rendered at bottom
+- **+page.svelte**: `handleUserUpdated` extended to handle `avatar_url` field in WS events
+- **Design decisions**:
+  - Frontend WebP conversion (no CGo dependency on backend) — backend validates format and stores as-is
+  - SHA-256 content hash dedup — reuses existing bucket key and extends expiry for duplicate uploads
+  - cropperjs v2 (web components) — no CSS import needed, `$toCanvas()` API for cropping
+  - Client-side URL detection — no server-side oEmbed/OG fetching (plan deviation — simpler, no external HTTP calls)
+  - `avatar_url` column already existed from migration 000001 (no new migration needed)
+- `go build` and `bun run build` both pass clean
+
+### Deviation (2026-03-10) — Fix Bucket Path Duplication + Hide Embedded URLs
+- **Bucket `UsePathStyle`**: Added `UsePathStyle: true` to `s3.Options` in `service/bucket.go` — AWS SDK v2 defaults to virtual-hosted style addressing which doesn't work with S3-compatible services like R2 (prepends bucket name as path prefix to key, causing `den-dev/images/xxx.webp` instead of `images/xxx.webp`)
+- **Hide embedded URLs from text**: Added `embedUrls` derived Set in `MessageContent.svelte` containing all URLs that render as media embeds; wrapped the URL `<a>` tag in `{#if !embedUrls.has(part.value)}` so embedded URLs (images, videos, YouTube, Tenor, Giphy) are hidden from the message text — only the embed preview shows below
+- Existing misplaced objects in R2 (under `den-dev/images/...` key) need manual cleanup
+- `go build` and `bun run build` both pass clean
+
 ## Known Deviations from Plan
 
 - **No Makefile or gofer.json** — Both had Windows/MSYS path translation issues with Docker volume mounts. Commands documented in CLAUDE.md instead.
@@ -337,7 +368,7 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 
 ## Notes for Next Run
 
-- Postgres is running on port 5440, all migrations applied through 000007
+- Postgres is running on port 5440, all migrations applied through 000009
 - Auth is fully wired frontend-to-backend: login, register, refresh, logout all work through the Vite proxy
 - `MSYS_NO_PATHCONV=1` prefix needed for Docker commands with volume mounts in Git Bash
 - **Go module root is `src/`** — build with `cd src && go build -o ../bin/den .`, run with `cd src && go run .`

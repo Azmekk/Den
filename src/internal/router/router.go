@@ -13,15 +13,19 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
 	authH := handler.NewAuthHandler(authSvc, hub)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc, hub)
-	userH := handler.NewUserHandler(userSvc, hub)
+	userH := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminH := handler.NewAdminHandler(adminSvc)
 	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
 	configH := handler.NewConfigHandler(bucketConfigured)
 	dmH := handler.NewDMHandler(dmSvc)
+	var mediaH *handler.MediaHandler
+	if mediaSvc != nil {
+		mediaH = handler.NewMediaHandler(mediaSvc)
+	}
 
 	r := chi.NewRouter()
 
@@ -40,6 +44,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		r.Post("/logout", authH.Logout)
 		r.Get("/config", configH.GetConfig)
 		r.Get("/emotes/{id}/image", emoteH.ServeImage)
+		r.Get("/users/{id}/avatar", userH.GetAvatar)
 
 		// Authenticated
 		r.Group(func(r chi.Router) {
@@ -64,7 +69,12 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Get("/users", userH.List)
 			r.Put("/users/me/display-name", userH.UpdateDisplayName)
 			r.Put("/users/me/color", userH.UpdateColor)
+			r.Post("/users/me/avatar", userH.UploadAvatar)
 			r.Get("/emotes", emoteH.List)
+			if mediaH != nil {
+				r.Post("/upload/image", mediaH.UploadImage)
+				r.Post("/upload/video", mediaH.UploadVideo)
+			}
 
 			// Admin only
 			r.Group(func(r chi.Router) {

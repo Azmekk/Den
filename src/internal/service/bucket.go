@@ -38,6 +38,7 @@ func NewBucketService() *BucketService {
 		BaseEndpoint: aws.String(endpoint),
 		Region:       region,
 		Credentials:  credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		UsePathStyle: true,
 	})
 
 	return &BucketService{

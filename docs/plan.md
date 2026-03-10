@@ -693,23 +693,27 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Frontend: SearchPalette — user filter UI with dropdown, jump-to-message on result click
 - [x] Frontend: +page.svelte — clear jumped state on channel switch
 
-### Run 11 — Media Embeds & Media Upload (bucket storage)
-- [ ] Backend URL extractor and oEmbed/OG fetcher with in-memory cache
-- [ ] Embed metadata returned alongside message objects
-- [ ] Frontend embed renderer (image, YouTube iframe, GIF, video, generic link card)
-- [ ] Backend: `POST /api/upload/image` — validate, convert to WebP, store in bucket under `images/{uuid}.webp`, insert into `media_uploads` with 24h expiry (max 25 MB)
-- [ ] Backend: `POST /api/upload/video` — validate format + size (max 100 MB), store as-is in bucket under `videos/{uuid}.{ext}`, insert into `media_uploads` with 24h expiry
-- [ ] Backend: background cleanup goroutine — runs hourly, deletes expired images and videos from bucket + removes `media_uploads` DB rows
-- [ ] Migration: add `media_uploads` table
-- [ ] Frontend: paperclip button in message bar (only shown when uploads enabled via `GET /api/config`) + drag-and-drop onto message area (desktop)
-- [ ] Frontend: video player for uploaded/embedded videos (native `<video>` tag, max height 400px)
-- [ ] Frontend: "media expired" placeholder when image/video URL no longer resolves (both are ephemeral)
-- [ ] Backend: profile picture upload — `POST /api/users/me/avatar`, user crops/positions in frontend, server converts to 128×128 WebP, store under `avatars/{user-uuid}.webp` (permanent, max 5 MB)
-- [ ] Backend: `GET /api/users/{id}/avatar` — redirect to bucket URL
-- [ ] Migration: add `avatar_filename` column to `users` table
-- [ ] Frontend: profile settings — avatar upload with crop/position UI (hidden when uploads disabled), preview, fallback to initial+color circle
-- [ ] Frontend: display avatars in message list and member list (with fallback)
-- [ ] Verify: Upload image via paperclip → appears in message; upload video → plays inline; upload profile pic → displays in chat; after 24h media expires → placeholder shown; disable bucket → upload UI hidden, text chat works normally
+### Run 11 — Media Embeds & Media Upload (bucket storage) (DONE)
+- [x] Frontend client-side URL detection and inline embed rendering (images, videos, YouTube thumbnails → iframe on click)
+- [x] Backend: `POST /api/upload/image` — validate format via magic bytes (WebP/PNG/JPEG/GIF), SHA-256 dedup, store in bucket under `images/{uuid}.{ext}`, insert into `media_uploads` with 24h expiry (max 25 MB)
+- [x] Backend: `POST /api/upload/video` — validate format (MP4/WebM via magic bytes), SHA-256 dedup, store in bucket under `videos/{uuid}.{ext}`, insert into `media_uploads` with 24h expiry (max 100 MB)
+- [x] Backend: background cleanup goroutine — runs hourly, deletes expired images and videos from bucket + removes `media_uploads` DB rows
+- [x] Migration 000009: `media_uploads` table with `content_hash` column for dedup, indexes on `expires_at` and `content_hash`
+- [x] Frontend: paperclip button in message bar (only shown when uploads enabled via `configStore.uploadsEnabled`) + drag-and-drop onto message area
+- [x] Frontend: WebP conversion utility (`convertToWebP`) — converts images client-side before upload, skips animated GIFs
+- [x] Frontend: video player for uploaded/embedded videos (native `<video>` tag, max height 400px)
+- [x] Frontend: "media expired" placeholder when image/video URL no longer resolves (onerror handler)
+- [x] Backend: profile picture upload — `POST /api/users/me/avatar`, frontend crops via cropperjs v2 to 128×128, converts to WebP, server validates and stores under `avatars/{user-uuid}.{ext}` (permanent, max 5 MB)
+- [x] Backend: `GET /api/users/{id}/avatar` — redirect to bucket URL (public route)
+- [x] No new migration needed for `avatar_url` — column already exists from migration 000001
+- [x] Frontend: avatar crop modal with cropperjs v2 (square aspect ratio, 128×128 output)
+- [x] Frontend: avatar display in messages, member list, user profile popover, and sidebar (with fallback to initial+color circle)
+- [x] Frontend: avatar upload trigger in ChannelSidebar settings (click avatar to change, hidden when uploads disabled)
+- [x] WebSocket `user_updated` event extended with `avatar_url` field for real-time avatar updates
+
+### Deviation — Fix Bucket Path Duplication + Hide Embedded URLs (DONE)
+- [x] Added `UsePathStyle: true` to S3 client options in `service/bucket.go` (fixes R2 path duplication)
+- [x] Added `embedUrls` derived Set in `MessageContent.svelte` to hide embedded URLs from message text
 
 ### Run 12 — Voice Channels
 - [ ] LiveKit token minting in Go backend
