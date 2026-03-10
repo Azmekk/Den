@@ -3,11 +3,13 @@ import { Popover } from 'bits-ui';
 import { goto } from '$app/navigation';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
+import { configStore } from '$lib/stores/config.svelte';
 import { dmStore } from '$lib/stores/dms.svelte';
 import { layoutStore } from '$lib/stores/layout.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 import { getUserColor, userColorFromHash, USER_COLORS } from '$lib/utils';
+import AvatarCropModal from './AvatarCropModal.svelte';
 
 interface Props {
 	onNavigate?: () => void;
@@ -35,6 +37,25 @@ let editingDisplayName = $state(false);
 let displayNameInput = $state('');
 let colorPickerOpen = $state(false);
 let customColorInput = $state('');
+let avatarCropOpen = $state(false);
+let avatarFile: File | null = $state(null);
+let avatarInputEl: HTMLInputElement | undefined = $state();
+
+const currentAvatarUrl = $derived(currentUser?.avatar_url);
+
+function handleAvatarFileSelect(e: Event) {
+	const input = e.target as HTMLInputElement;
+	const file = input.files?.[0];
+	if (file) {
+		avatarFile = file;
+		avatarCropOpen = true;
+	}
+	input.value = '';
+}
+
+function handleAvatarCropClose() {
+	avatarFile = null;
+}
 
 function selectChannel(id: string) {
 	dmStore.deselect();
@@ -172,11 +193,43 @@ const tab = $derived(layoutStore.sidebarTab);
 
 	<div class="border-t border-border p-3">
 		<div class="flex items-center gap-2">
+			{#if configStore.uploadsEnabled}
+				<input
+					bind:this={avatarInputEl}
+					type="file"
+					accept="image/*"
+					class="hidden"
+					onchange={handleAvatarFileSelect}
+				/>
+			{/if}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium text-white shrink-0"
-				style="background-color: {avatarColor}"
+				class="shrink-0 {configStore.uploadsEnabled ? 'cursor-pointer hover:opacity-80' : ''}"
+				onclick={() => { if (configStore.uploadsEnabled) avatarInputEl?.click(); }}
+				onkeydown={(e) => { if (configStore.uploadsEnabled && (e.key === 'Enter' || e.key === ' ')) avatarInputEl?.click(); }}
+				title={configStore.uploadsEnabled ? 'Change avatar' : undefined}
 			>
-				{auth.user?.username?.charAt(0).toUpperCase()}
+				{#if currentAvatarUrl}
+					<img
+						src={currentAvatarUrl}
+						alt={auth.user?.username}
+						class="h-8 w-8 rounded-full object-cover"
+						onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+					/>
+					<div
+						class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium text-white hidden"
+						style="background-color: {avatarColor}"
+					>
+						{auth.user?.username?.charAt(0).toUpperCase()}
+					</div>
+				{:else}
+					<div
+						class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium text-white"
+						style="background-color: {avatarColor}"
+					>
+						{auth.user?.username?.charAt(0).toUpperCase()}
+					</div>
+				{/if}
 			</div>
 			<div class="flex-1 min-w-0">
 				{#if editingDisplayName}
@@ -283,3 +336,5 @@ const tab = $derived(layoutStore.sidebarTab);
 		</div>
 	</div>
 </div>
+
+<AvatarCropModal bind:open={avatarCropOpen} file={avatarFile} onClose={handleAvatarCropClose} />

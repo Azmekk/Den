@@ -145,6 +145,7 @@ onMount(() => {
 		if ('display_name' in data)
 			fields.display_name = data.display_name || undefined;
 		if ('color' in data) fields.color = data.color || undefined;
+		if ('avatar_url' in data) fields.avatar_url = data.avatar_url || undefined;
 		usersStore.updateUser(data.id, fields);
 	}
 

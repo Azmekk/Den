@@ -3,7 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/Azmekk/den/internal/httputil"
 	"github.com/Azmekk/den/internal/middleware"
@@ -12,12 +16,13 @@ import (
 )
 
 type UserHandler struct {
-	svc *service.UserService
-	hub *ws.Hub
+	svc      *service.UserService
+	mediaSvc *service.MediaService
+	hub      *ws.Hub
 }
 
-func NewUserHandler(svc *service.UserService, hub *ws.Hub) *UserHandler {
-	return &UserHandler{svc: svc, hub: hub}
+func NewUserHandler(svc *service.UserService, mediaSvc *service.MediaService, hub *ws.Hub) *UserHandler {
+	return &UserHandler{svc: svc, mediaSvc: mediaSvc, hub: hub}
 }
 
 func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -93,4 +98,69 @@ func (h *UserHandler) UpdateColor(w http.ResponseWriter, r *http.Request) {
 	h.hub.BroadcastGlobal(envelope)
 
 	httputil.WriteJSON(w, http.StatusOK, user)
+}
+
+func (h *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
+	if h.mediaSvc == nil || !h.mediaSvc.IsConfigured() {
+		httputil.WriteError(w, http.StatusNotImplemented, "uploads not configured")
+		return
+	}
+
+	if err := r.ParseMultipartForm(5 * 1024 * 1024); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, _, err := r.FormFile("avatar")
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "missing avatar file")
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, 5*1024*1024+1))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+
+	userID := middleware.UserIDFromContext(r.Context())
+	user, err := h.mediaSvc.UpdateAvatar(r.Context(), userID, data, h.svc.Queries())
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMediaTooLarge):
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrMediaBadFormat):
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		default:
+			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+
+	envelope, _ := json.Marshal(map[string]any{
+		"type":       "user_updated",
+		"id":         userID,
+		"avatar_url": user.AvatarURL,
+	})
+	h.hub.BroadcastGlobal(envelope)
+
+	httputil.WriteJSON(w, http.StatusOK, user)
+}
+
+func (h *UserHandler) GetAvatar(w http.ResponseWriter, r *http.Request) {
+	userIDStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	avatarURL, err := h.svc.GetAvatarURL(r.Context(), userID)
+	if err != nil {
+		httputil.WriteError(w, http.StatusNotFound, "no avatar")
+		return
+	}
+
+	http.Redirect(w, r, avatarURL, http.StatusFound)
 }

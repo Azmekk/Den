@@ -21,6 +21,21 @@ func NewUserService(queries *db.Queries) *UserService {
 	return &UserService{queries: queries}
 }
 
+func (s *UserService) Queries() *db.Queries {
+	return s.queries
+}
+
+func (s *UserService) GetAvatarURL(ctx context.Context, userID uuid.UUID) (string, error) {
+	user, err := s.queries.GetUserByID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if !user.AvatarUrl.Valid || user.AvatarUrl.String == "" {
+		return "", fmt.Errorf("no avatar")
+	}
+	return user.AvatarUrl.String, nil
+}
+
 type PublicUserInfo struct {
 	ID          uuid.UUID `json:"id"`
 	Username    string    `json:"username"`

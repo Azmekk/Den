@@ -32,3 +32,6 @@ UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING *
 
 -- name: UpdateUserColor :one
 UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING *;
+
+-- name: UpdateUserAvatarUrl :one
+UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING *;

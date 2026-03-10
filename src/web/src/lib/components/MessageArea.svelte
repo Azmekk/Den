@@ -2,6 +2,7 @@
 import { tick } from 'svelte';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
+import { configStore } from '$lib/stores/config.svelte';
 import { dmStore } from '$lib/stores/dms.svelte';
 import { messageStore } from '$lib/stores/messages.svelte';
 import { pinStore } from '$lib/stores/pins.svelte';
@@ -9,6 +10,7 @@ import { typing } from '$lib/stores/typing.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 import type { MessageInfo } from '$lib/types';
 import { getUserColor, userColorFromHash } from '$lib/utils';
+import { convertToWebP, isImageFile, isVideoFile } from '$lib/media';
 import { layoutStore } from '$lib/stores/layout.svelte';
 import EmoteAutocomplete from './EmoteAutocomplete.svelte';
 import MentionAutocomplete from './MentionAutocomplete.svelte';
@@ -168,6 +170,20 @@ async function scrollToBottom() {
 	}
 }
 
+// Re-scroll when media loads (images/videos change content height after initial render)
+function handleMediaLoad() {
+	if (isNearBottom && messageListEl) {
+		messageListEl.scrollTop = messageListEl.scrollHeight;
+	}
+}
+
+$effect(() => {
+	const el = messageListEl;
+	if (!el) return;
+	el.addEventListener('load', handleMediaLoad, true);
+	return () => el.removeEventListener('load', handleMediaLoad, true);
+});
+
 $effect(() => {
 	const count = messages.length;
 	if (count > prevMessageCount && isNearBottom) {
@@ -179,6 +195,7 @@ $effect(() => {
 $effect(() => {
 	// When channel/DM changes, scroll to bottom
 	if (channelId || dmId) {
+		isNearBottom = true;
 		scrollToBottom();
 	}
 });
@@ -247,8 +264,12 @@ function handleEmoteSelect(shortcode: string, start: number, end: number) {
 }
 
 function sendMsg() {
-	const content = messageInput.trim();
-	if (!content) return;
+	const text = messageInput.trim();
+	const urls = attachments.map((a) => a.url);
+	if (!text && urls.length === 0) return;
+
+	const parts = [text, ...urls].filter(Boolean);
+	const content = parts.join('\n');
 
 	if (isDM && dmId) {
 		dmStore.sendMessage(dmId, content);
@@ -259,12 +280,17 @@ function sendMsg() {
 		return;
 	}
 	messageInput = '';
+	attachments = [];
+}
+
+function removeAttachment(index: number) {
+	attachments = attachments.filter((_, i) => i !== index);
 }
 
 function autoResize(e: Event) {
 	const el = e.target as HTMLTextAreaElement;
 	el.style.height = 'auto';
-	el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+	el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
 }
 
 function canPin(msg: MessageInfo): boolean {
@@ -306,9 +332,85 @@ const mentionFilterIds = $derived(
 		? [auth.user.id, dmConversation.other_user_id]
 		: undefined,
 );
+
+let fileInputEl: HTMLInputElement | undefined = $state();
+let uploading = $state(false);
+let dragOver = $state(false);
+let attachments = $state<{ url: string; type: 'image' | 'video' }[]>([]);
+let plusMenuOpen = $state(false);
+
+function getAvatarUrl(msg: MessageInfo): string | undefined {
+	const user = usersStore.users.find((u) => u.id === msg.user_id);
+	return user?.avatar_url;
+}
+
+async function uploadFile(file: File) {
+	if (uploading) return;
+	uploading = true;
+	try {
+		let body: FormData;
+		let endpoint: string;
+
+		if (isImageFile(file)) {
+			const webp = await convertToWebP(file);
+			body = new FormData();
+			body.append('file', webp, 'image.webp');
+			endpoint = '/api/upload/image';
+		} else if (isVideoFile(file)) {
+			body = new FormData();
+			body.append('file', file, file.name);
+			endpoint = '/api/upload/video';
+		} else {
+			return;
+		}
+
+		const res = await globalThis.fetch(endpoint, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
+			body,
+		});
+
+		if (res.ok) {
+			const data = await res.json();
+			if (data.url) {
+				const type = isImageFile(file) ? 'image' as const : 'video' as const;
+				attachments = [...attachments, { url: data.url, type }];
+			}
+		}
+	} finally {
+		uploading = false;
+		if (fileInputEl) fileInputEl.value = '';
+	}
+}
+
+function handleFileSelect(e: Event) {
+	const input = e.target as HTMLInputElement;
+	const file = input.files?.[0];
+	if (file) uploadFile(file);
+}
+
+function handleDragOver(e: DragEvent) {
+	if (!configStore.uploadsEnabled) return;
+	e.preventDefault();
+	dragOver = true;
+}
+
+function handleDragLeave() {
+	dragOver = false;
+}
+
+function handleDrop(e: DragEvent) {
+	e.preventDefault();
+	dragOver = false;
+	if (!configStore.uploadsEnabled) return;
+	const file = e.dataTransfer?.files[0];
+	if (file && (isImageFile(file) || isVideoFile(file))) {
+		uploadFile(file);
+	}
+}
 </script>
 
-<div class="flex flex-1 flex-col">
+<div class="flex flex-1 flex-col min-w-0">
 	{#if hasActiveView}
 		<!-- Header -->
 		<div class="flex h-12 items-center justify-between border-b border-border px-4">
@@ -363,7 +465,7 @@ const mentionFilterIds = $derived(
 		<div
 			bind:this={messageListEl}
 			onscroll={handleScroll}
-			class="flex-1 overflow-y-auto px-4 py-2"
+			class="flex-1 overflow-y-auto overflow-x-hidden px-4 py-2 min-w-0"
 		>
 			{#if isLoadingOlder}
 				<div class="py-2 text-center text-sm text-muted-foreground">Loading older messages...</div>
@@ -395,10 +497,22 @@ const mentionFilterIds = $derived(
 							</div>
 						{:else}
 							<div data-message-id={msg.id} class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
-									<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
-										<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
-									</div>
+								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} avatarUrl={getAvatarUrl(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
+									{#if getAvatarUrl(msg)}
+										<img
+											src={getAvatarUrl(msg)}
+											alt={msg.username}
+											class="w-8 h-8 rounded-full shrink-0 mt-0.5 cursor-pointer hover:opacity-80 object-cover"
+											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+										/>
+										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80 hidden" style="background-color: {getColorForMessage(msg)}">
+											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
+										</div>
+									{:else}
+										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
+											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
+										</div>
+									{/if}
 								</UserProfilePopover>
 								<div class="flex-1 min-w-0">
 									<div class="flex items-baseline gap-2">
@@ -445,7 +559,14 @@ const mentionFilterIds = $derived(
 		</div>
 
 		<!-- Input -->
-		<div class="relative border-t border-border p-4">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="relative border-t border-border p-2 md:p-4 {dragOver ? 'ring-2 ring-primary ring-inset bg-primary/5' : ''}"
+			ondragover={handleDragOver}
+			ondragenter={handleDragOver}
+			ondragleave={handleDragLeave}
+			ondrop={handleDrop}
+		>
 			<MentionAutocomplete
 				inputValue={messageInput}
 				{cursorPosition}
@@ -460,7 +581,73 @@ const mentionFilterIds = $derived(
 				onSelect={handleEmoteSelect}
 				onKeydown={(handler) => emoteAutocompleteHandler = handler}
 			/>
-			<div class="flex items-end gap-2">
+			{#if attachments.length > 0}
+				<div class="mb-2 flex flex-wrap gap-2">
+					{#each attachments as attachment, i}
+						<div class="relative group">
+							{#if attachment.type === 'image'}
+								<img
+									src={attachment.url}
+									alt="attachment"
+									class="h-20 w-20 rounded-lg object-cover border border-border"
+								/>
+							{:else}
+								<div class="h-20 w-20 rounded-lg border border-border bg-secondary flex items-center justify-center">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+								</div>
+							{/if}
+							<button
+								onclick={() => removeAttachment(i)}
+								class="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow"
+								title="Remove"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			<input
+				bind:this={fileInputEl}
+				type="file"
+				accept="image/*,video/mp4,video/webm"
+				class="hidden"
+				onchange={handleFileSelect}
+			/>
+			<div class="flex items-end gap-1.5 md:gap-2 min-w-0">
+				<div class="relative shrink-0">
+					<button
+						onclick={() => plusMenuOpen = !plusMenuOpen}
+						disabled={uploading}
+						class="h-[38px] w-[38px] flex items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50"
+						title="More actions"
+					>
+						{#if uploading}
+							<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+						{:else}
+							<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+						{/if}
+					</button>
+					{#if plusMenuOpen}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="fixed inset-0 z-40"
+							onclick={() => plusMenuOpen = false}
+							onkeydown={(e) => { if (e.key === 'Escape') plusMenuOpen = false; }}
+						></div>
+						<div class="absolute bottom-full left-0 mb-2 z-50 min-w-[160px] rounded-lg border border-border bg-popover p-1 shadow-lg">
+							{#if configStore.uploadsEnabled}
+								<button
+									onclick={() => { plusMenuOpen = false; fileInputEl?.click(); }}
+									class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+									Upload file
+								</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
 				<textarea
 					bind:this={textareaEl}
 					bind:value={messageInput}
@@ -470,12 +657,12 @@ const mentionFilterIds = $derived(
 					onkeyup={updateCursorPosition}
 					placeholder={placeholderText}
 					rows="1"
-					class="flex-1 min-h-[38px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
+					class="flex-1 min-w-0 min-h-[38px] max-h-[120px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
 				></textarea>
 				<button
 					onclick={sendMsg}
 					class="shrink-0 h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-					disabled={!messageInput.trim()}
+					disabled={!messageInput.trim() && attachments.length === 0}
 					title="Send message"
 				>
 					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>

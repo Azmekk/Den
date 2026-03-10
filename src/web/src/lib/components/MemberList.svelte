@@ -53,6 +53,7 @@ async function openDM(userId: string) {
 							username={user.username}
 							displayName={user.display_name}
 							color={getUserColor(user)}
+							avatarUrl={user.avatar_url}
 							onMessage={() => openDM(user.id)}
 							isSelf={user.id === auth.user?.id}
 						>
@@ -60,12 +61,27 @@ async function openDM(userId: string) {
 								class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
 							>
 								<div class="relative">
-									<div
-										class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
-										style="background-color: {getUserColor(user)}"
-									>
-										{user.username.charAt(0).toUpperCase()}
-									</div>
+									{#if user.avatar_url}
+										<img
+											src={user.avatar_url}
+											alt={user.username}
+											class="h-7 w-7 rounded-full object-cover"
+											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+										/>
+										<div
+											class="h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white hidden"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+									{:else}
+										<div
+											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+									{/if}
 									<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-green-500"></div>
 								</div>
 								<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>
@@ -87,6 +103,7 @@ async function openDM(userId: string) {
 							username={user.username}
 							displayName={user.display_name}
 							color={getUserColor(user)}
+							avatarUrl={user.avatar_url}
 							onMessage={() => openDM(user.id)}
 							isSelf={user.id === auth.user?.id}
 						>
@@ -94,12 +111,27 @@ async function openDM(userId: string) {
 								class="flex w-full items-center gap-2 rounded px-2 py-1.5 opacity-50 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
 							>
 								<div class="relative">
-									<div
-										class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
-										style="background-color: {getUserColor(user)}"
-									>
-										{user.username.charAt(0).toUpperCase()}
-									</div>
+									{#if user.avatar_url}
+										<img
+											src={user.avatar_url}
+											alt={user.username}
+											class="h-7 w-7 rounded-full object-cover"
+											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+										/>
+										<div
+											class="h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white hidden"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+									{:else}
+										<div
+											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											style="background-color: {getUserColor(user)}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+									{/if}
 									<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-gray-500"></div>
 								</div>
 								<span class="truncate text-sm text-foreground">{user.display_name || user.username}</span>

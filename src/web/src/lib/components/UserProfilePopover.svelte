@@ -5,12 +5,13 @@ interface Props {
 	username: string;
 	displayName?: string;
 	color: string;
+	avatarUrl?: string;
 	children: Snippet;
 	onMessage?: () => void;
 	isSelf?: boolean;
 }
 
-let { username, displayName, color, children, onMessage, isSelf = false }: Props = $props();
+let { username, displayName, color, avatarUrl, children, onMessage, isSelf = false }: Props = $props();
 
 let open = $state(false);
 
@@ -55,12 +56,27 @@ function handleMessage() {
 				</button>
 			</div>
 			<div class="flex flex-col items-center gap-3 p-6">
-				<div
-					class="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white"
-					style="background-color: {color}"
-				>
-					{username.charAt(0).toUpperCase()}
-				</div>
+				{#if avatarUrl}
+					<img
+						src={avatarUrl}
+						alt={username}
+						class="h-20 w-20 rounded-full object-cover"
+						onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+					/>
+					<div
+						class="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white hidden"
+						style="background-color: {color}"
+					>
+						{username.charAt(0).toUpperCase()}
+					</div>
+				{:else}
+					<div
+						class="flex h-20 w-20 items-center justify-center rounded-full text-2xl font-bold text-white"
+						style="background-color: {color}"
+					>
+						{username.charAt(0).toUpperCase()}
+					</div>
+				{/if}
 				<div class="text-center">
 					<p class="text-lg font-semibold text-foreground">{displayName || username}</p>
 					<p class="text-sm text-muted-foreground">@{username}</p>
