@@ -369,6 +369,17 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - `unicode-emoji-json@0.8.0` added as dependency
 - `bun run build` passes clean
 
+### Deviation (2026-03-10) — Plan Update: Runs 14–18 & Run 12 Audio Features
+- **Run 12 extended**: Added noise gate, noise cancellation, echo cancellation items + audio settings UI to existing Voice Channels run
+- **Run 14 added**: Avatar Cropper Fix — fix cropperjs positioning bug + delete old avatars from bucket on re-upload
+- **Run 15 added**: Bucket Storage Limit — `file_size` column, pre-upload size check, `MAX_BUCKET_STORAGE` env var, admin UI
+- **Run 16 added**: Admin-Configurable Message Limits — message count limit with background cleanup + character limit per message, persisted to DB
+- **Run 17 added**: Admin Media Manager — list/delete/stats endpoints + admin panel Media tab
+- **Run 18 added**: Tauri Desktop Wrapper — Tauri init, secure auth storage, system tray, native notifications, GitHub Actions cross-platform builds
+- **GIF picker skipped**: Tenor closed to new clients, existing URL embed system preferred
+- **Desktop framework**: Tauri chosen (best CI/CD with official GitHub Action, cross-platform builds)
+- No code changes — plan.md update only
+
 ## Known Deviations from Plan
 
 - **No Makefile or gofer.json** — Both had Windows/MSYS path translation issues with Docker volume mounts. Commands documented in CLAUDE.md instead.
