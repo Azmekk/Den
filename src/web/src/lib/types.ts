@@ -58,6 +58,19 @@ export interface AppConfig {
 	uploads_enabled: boolean;
 }
 
+export interface SearchResult {
+	id: string;
+	channel_id: string;
+	channel_name: string;
+	user_id: string;
+	username: string;
+	display_name?: string;
+	content: string;
+	pinned?: boolean;
+	created_at: string;
+	edited_at?: string;
+}
+
 export interface UnreadInfo {
 	channel_id: string;
 	unread_count: number;

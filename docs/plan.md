@@ -675,10 +675,23 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Pinned messages view per channel
 - [ ] Verify: DMs work between two users, pinned messages persist across reload
 
-### Run 10 — Search
-- [ ] Backend search endpoint with all filter combinations (text, author, date, date range, channel)
-- [ ] Frontend Command palette (Cmd+K) wired to search endpoint
+### Run 10 — Search (DONE)
+- [x] Backend search endpoint with all filter combinations (text, author, date, date range, channel)
+- [x] Frontend Command palette (Cmd+K) wired to search endpoint
 - [ ] Verify: Search by text returns correct results, GIN index is being used (`EXPLAIN ANALYZE`)
+
+### Deviation — Enhanced Search: User Filter, Jump-to-Message, Jump to Latest (DONE)
+- [x] Backend: `GetMessagesAroundTarget` SQL query (25 before + target + 25 after)
+- [x] Backend: `GetMessagesAfterCursor` SQL query (forward pagination, 50 messages)
+- [x] Backend: `GetMessagesAround` and `GetNewer` service methods
+- [x] Backend: `GetMessagesAround` and `GetNewer` handler methods
+- [x] Backend: Routes `GET /channels/{id}/messages/around` and `GET /channels/{id}/messages/newer`
+- [x] Frontend: Message store — `fetchAround`, `fetchNewer`, `jumpToLatest`, `clearJumped`, `scrollTarget`, jumped/hasMoreAfter state
+- [x] Frontend: `handleNewMessage` skips appending when channel is jumped
+- [x] Frontend: CSS `highlight-flash` animation for scroll-to-message
+- [x] Frontend: MessageArea — `data-message-id` attrs, scroll-to-message effect, forward pagination on scroll, "Jump to latest" button
+- [x] Frontend: SearchPalette — user filter UI with dropdown, jump-to-message on result click
+- [x] Frontend: +page.svelte — clear jumped state on channel switch
 
 ### Run 11 — Media Embeds & Media Upload (bucket storage)
 - [ ] Backend URL extractor and oEmbed/OG fetcher with in-memory cache

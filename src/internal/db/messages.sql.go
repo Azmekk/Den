@@ -330,6 +330,161 @@ func (q *Queries) GetMessageByID(ctx context.Context, id uuid.UUID) (Message, er
 	return i, err
 }
 
+const getMessagesAfterCursor = `-- name: GetMessagesAfterCursor :many
+SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+       u.username, u.display_name, u.avatar_url
+FROM messages m
+JOIN users u ON u.id = m.user_id
+WHERE m.channel_id = $1
+  AND (m.created_at > $2 OR (m.created_at = $2 AND m.id > $3))
+ORDER BY m.created_at ASC, m.id ASC
+LIMIT 50
+`
+
+type GetMessagesAfterCursorParams struct {
+	ChannelID uuid.NullUUID
+	AfterTime time.Time
+	AfterID   uuid.UUID
+}
+
+type GetMessagesAfterCursorRow struct {
+	ID          uuid.UUID
+	ChannelID   uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetMessagesAfterCursor(ctx context.Context, arg GetMessagesAfterCursorParams) ([]GetMessagesAfterCursorRow, error) {
+	rows, err := q.db.QueryContext(ctx, getMessagesAfterCursor, arg.ChannelID, arg.AfterTime, arg.AfterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMessagesAfterCursorRow
+	for rows.Next() {
+		var i GetMessagesAfterCursorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getMessagesAroundTarget = `-- name: GetMessagesAroundTarget :many
+SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
+       sub.username, sub.display_name, sub.avatar_url
+FROM (
+  (
+    SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+           u.username, u.display_name, u.avatar_url
+    FROM messages m
+    JOIN users u ON u.id = m.user_id
+    WHERE m.channel_id = $1
+      AND (m.created_at < (SELECT t.created_at FROM messages t WHERE t.id = $2)
+           OR (m.created_at = (SELECT t.created_at FROM messages t WHERE t.id = $2) AND m.id < $2))
+    ORDER BY m.created_at DESC, m.id DESC
+    LIMIT 25
+  )
+  UNION ALL
+  (
+    SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+           u.username, u.display_name, u.avatar_url
+    FROM messages m
+    JOIN users u ON u.id = m.user_id
+    WHERE m.id = $2
+  )
+  UNION ALL
+  (
+    SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+           u.username, u.display_name, u.avatar_url
+    FROM messages m
+    JOIN users u ON u.id = m.user_id
+    WHERE m.channel_id = $1
+      AND (m.created_at > (SELECT t.created_at FROM messages t WHERE t.id = $2)
+           OR (m.created_at = (SELECT t.created_at FROM messages t WHERE t.id = $2) AND m.id > $2))
+    ORDER BY m.created_at ASC, m.id ASC
+    LIMIT 25
+  )
+) sub
+ORDER BY sub.created_at ASC, sub.id ASC
+`
+
+type GetMessagesAroundTargetParams struct {
+	ChannelID uuid.NullUUID
+	TargetID  uuid.UUID
+}
+
+type GetMessagesAroundTargetRow struct {
+	ID          uuid.UUID
+	ChannelID   uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+}
+
+func (q *Queries) GetMessagesAroundTarget(ctx context.Context, arg GetMessagesAroundTargetParams) ([]GetMessagesAroundTargetRow, error) {
+	rows, err := q.db.QueryContext(ctx, getMessagesAroundTarget, arg.ChannelID, arg.TargetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMessagesAroundTargetRow
+	for rows.Next() {
+		var i GetMessagesAroundTargetRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getMessagesByChannel = `-- name: GetMessagesByChannel :many
 SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
        sub.username, sub.display_name, sub.avatar_url
@@ -497,6 +652,85 @@ func (q *Queries) GetPinnedMessagesByChannel(ctx context.Context, channelID uuid
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchMessages = `-- name: SearchMessages :many
+SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
+       u.username, u.display_name, u.avatar_url, c.name AS channel_name
+FROM messages m
+JOIN users u ON u.id = m.user_id
+JOIN channels c ON c.id = m.channel_id
+WHERE m.channel_id IS NOT NULL
+  AND ($1::uuid IS NULL OR m.channel_id = $1)
+  AND ($2::uuid IS NULL OR m.user_id = $2)
+  AND ($3::timestamptz IS NULL OR m.created_at >= $3)
+  AND ($4::timestamptz IS NULL OR m.created_at <= $4)
+  AND ($5::text IS NULL OR to_tsvector('english', m.content) @@ plainto_tsquery('english', $5))
+ORDER BY m.created_at DESC
+LIMIT 50
+`
+
+type SearchMessagesParams struct {
+	ChannelID  uuid.NullUUID
+	AuthorID   uuid.NullUUID
+	AfterTime  sql.NullTime
+	BeforeTime sql.NullTime
+	Query      sql.NullString
+}
+
+type SearchMessagesRow struct {
+	ID          uuid.UUID
+	ChannelID   uuid.NullUUID
+	UserID      uuid.UUID
+	Content     string
+	Pinned      bool
+	EditedAt    sql.NullTime
+	CreatedAt   time.Time
+	Username    string
+	DisplayName sql.NullString
+	AvatarUrl   sql.NullString
+	ChannelName string
+}
+
+func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]SearchMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, searchMessages,
+		arg.ChannelID,
+		arg.AuthorID,
+		arg.AfterTime,
+		arg.BeforeTime,
+		arg.Query,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchMessagesRow
+	for rows.Next() {
+		var i SearchMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.ChannelName,
 		); err != nil {
 			return nil, err
 		}

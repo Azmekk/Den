@@ -404,6 +404,161 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, channelID uuid.U
 	return messages, nil
 }
 
+type SearchResult struct {
+	ID          uuid.UUID `json:"id"`
+	ChannelID   uuid.UUID `json:"channel_id"`
+	ChannelName string    `json:"channel_name"`
+	UserID      uuid.UUID `json:"user_id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name,omitempty"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Content     string    `json:"content"`
+	Pinned      bool      `json:"pinned"`
+	EditedAt    string    `json:"edited_at,omitempty"`
+	CreatedAt   string    `json:"created_at"`
+}
+
+func (s *MessageService) SearchMessages(ctx context.Context, query *string, channelID, authorID *uuid.UUID, afterTime, beforeTime *time.Time) ([]SearchResult, error) {
+	params := db.SearchMessagesParams{}
+	if query != nil {
+		params.Query = sql.NullString{String: *query, Valid: true}
+	}
+	if channelID != nil {
+		params.ChannelID = uuid.NullUUID{UUID: *channelID, Valid: true}
+	}
+	if authorID != nil {
+		params.AuthorID = uuid.NullUUID{UUID: *authorID, Valid: true}
+	}
+	if afterTime != nil {
+		params.AfterTime = sql.NullTime{Time: *afterTime, Valid: true}
+	}
+	if beforeTime != nil {
+		params.BeforeTime = sql.NullTime{Time: *beforeTime, Valid: true}
+	}
+
+	rows, err := s.queries.SearchMessages(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchResult, len(rows))
+	for i, row := range rows {
+		r := SearchResult{
+			ID:          row.ID,
+			ChannelID:   row.ChannelID.UUID,
+			ChannelName: row.ChannelName,
+			UserID:      row.UserID,
+			Username:    row.Username,
+			Content:     row.Content,
+			Pinned:      row.Pinned,
+			CreatedAt:   row.CreatedAt.Format(time.RFC3339Nano),
+		}
+		if row.DisplayName.Valid {
+			r.DisplayName = row.DisplayName.String
+		}
+		if row.AvatarUrl.Valid {
+			r.AvatarURL = row.AvatarUrl.String
+		}
+		if row.EditedAt.Valid {
+			r.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+		}
+		results[i] = r
+	}
+	return results, nil
+}
+
+func messageInfoFromAroundRow(row db.GetMessagesAroundTargetRow) MessageInfo {
+	info := MessageInfo{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		Username:  row.Username,
+		Content:   row.Content,
+		Pinned:    row.Pinned,
+		CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if row.ChannelID.Valid {
+		info.ChannelID = &row.ChannelID.UUID
+	}
+	if row.DisplayName.Valid {
+		info.DisplayName = row.DisplayName.String
+	}
+	if row.AvatarUrl.Valid {
+		info.AvatarURL = row.AvatarUrl.String
+	}
+	if row.EditedAt.Valid {
+		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+	}
+	return info
+}
+
+func messageInfoFromAfterCursorRow(row db.GetMessagesAfterCursorRow) MessageInfo {
+	info := MessageInfo{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		Username:  row.Username,
+		Content:   row.Content,
+		Pinned:    row.Pinned,
+		CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
+	}
+	if row.ChannelID.Valid {
+		info.ChannelID = &row.ChannelID.UUID
+	}
+	if row.DisplayName.Valid {
+		info.DisplayName = row.DisplayName.String
+	}
+	if row.AvatarUrl.Valid {
+		info.AvatarURL = row.AvatarUrl.String
+	}
+	if row.EditedAt.Valid {
+		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+	}
+	return info
+}
+
+func (s *MessageService) GetMessagesAround(ctx context.Context, channelID, targetMessageID uuid.UUID) ([]MessageInfo, bool, bool, error) {
+	rows, err := s.queries.GetMessagesAroundTarget(ctx, db.GetMessagesAroundTargetParams{
+		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
+		TargetID:  targetMessageID,
+	})
+	if err != nil {
+		return nil, false, false, err
+	}
+
+	messages := make([]MessageInfo, len(rows))
+	targetFound := false
+	beforeCount := 0
+	afterCount := 0
+	for i, row := range rows {
+		messages[i] = messageInfoFromAroundRow(row)
+		if row.ID == targetMessageID {
+			targetFound = true
+		} else if !targetFound {
+			beforeCount++
+		} else {
+			afterCount++
+		}
+	}
+
+	return messages, beforeCount == 25, afterCount == 25, nil
+}
+
+func (s *MessageService) GetNewer(ctx context.Context, channelID uuid.UUID, afterTime time.Time, afterID uuid.UUID) ([]MessageInfo, bool, error) {
+	rows, err := s.queries.GetMessagesAfterCursor(ctx, db.GetMessagesAfterCursorParams{
+		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
+		AfterTime: afterTime,
+		AfterID:   afterID,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	messages := make([]MessageInfo, len(rows))
+	for i, row := range rows {
+		messages[i] = messageInfoFromAfterCursorRow(row)
+	}
+	return messages, len(rows) == 50, nil
+}
+
 // resolveMentions finds @username patterns and replaces them with <mention:uuid> tokens.
 // Returns the resolved content, mentioned user IDs, and whether @everyone was mentioned.
 func (s *MessageService) resolveMentions(ctx context.Context, content string) (string, []uuid.UUID, bool) {

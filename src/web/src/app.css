@@ -41,6 +41,14 @@
 	}
 }
 
+@keyframes highlight-flash {
+	0% { background-color: hsl(var(--primary) / 0.2); }
+	100% { background-color: transparent; }
+}
+.highlight-flash {
+	animation: highlight-flash 2s ease-out;
+}
+
 @theme inline {
 	--color-background: hsl(var(--background));
 	--color-foreground: hsl(var(--foreground));

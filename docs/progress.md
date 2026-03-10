@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 9 — DMs & Pinned Messages
-**Last deviation:** Fix DM Opening, Navigation & Token Refresh
-**Next run:** Run 10
+**Last completed run:** Run 10 — Search
+**Last deviation:** Enhanced Search: User Filter, Jump-to-Message, Jump to Latest
+**Next run:** Run 11
 
 ---
 
@@ -275,6 +275,23 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **WebSocket `updateToken`**: Added `updateToken(newToken)` method to `websocket.svelte.ts` that updates the stored token without disconnecting (reconnect logic uses fresh token automatically).
 - `bun run build` passes clean
 
+### Run 10 — Search
+- Added `SearchMessages` sqlc query with `sqlc.narg()` for nullable filter params (channel, author, after, before, text query)
+- `SearchMessagesParams` uses `uuid.NullUUID`, `sql.NullTime`, `sql.NullString` for optional filters
+- `JOIN channels c ON c.id = m.channel_id` naturally excludes DM messages (channel_id is NULL for DMs)
+- `SearchResult` struct in service with `ChannelName` field for display
+- `Search` handler at `GET /api/search` with query params: `q`, `channel`, `author`, `after` (RFC3339), `before` (RFC3339)
+- Requires at least one filter (returns 400 if all empty)
+- Route registered in authenticated group alongside other GET endpoints
+- `SearchResult` TypeScript interface in `types.ts`
+- `SearchPalette.svelte` component using bits-ui `Dialog` + `Command` (shouldFilter=false for server-side search)
+- Debounced search (300ms), min 2 chars, AbortController via request counter for race conditions
+- Results show channel pill, colored author name, truncated content, relative timestamp
+- Clicking a result navigates to the channel and closes the palette
+- Search button (magnifying glass icon) added to `MessageArea` header via `onSearchOpen` prop
+- Global `Cmd/Ctrl+K` keyboard shortcut in `+page.svelte` toggles the search palette
+- `go build` and `bun run build` both pass clean
+
 ### Deviation (2026-03-10) — Fix @-mention autocomplete broken
 - **Missing Import**: Added `import { getUserColor } from '$lib/utils'` to `MentionAutocomplete.svelte` — was used on line 156 but never imported, causing a runtime crash when the autocomplete popup tried to render colored user avatars
 - `bun run build` passes clean
@@ -289,6 +306,24 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - `bun run build` passes clean
 
 ---
+
+### Run 10 (2026-03-10)
+- Used `sqlc.narg()` for nullable params instead of plain `@param::type` (sqlc generates non-nullable types without it)
+- bits-ui `Command` + `Dialog` components used for search palette (both already installed from Run 4)
+- No additional dependencies needed
+- Emote/mention tokens stripped in search result display via regex replacement
+- `plainto_tsquery` used for safe user input (no special tsquery operators)
+
+### Deviation (2026-03-10) — Enhanced Search: User Filter, Jump-to-Message, Jump to Latest
+- **Backend SQL**: Added `GetMessagesAroundTarget` query (CTE with UNION ALL: 25 before + target + 25 after, ordered ASC) and `GetMessagesAfterCursor` query (forward pagination, 50 messages after cursor)
+- **Backend Service**: `GetMessagesAround(ctx, channelID, targetMessageID)` returns messages + `hasMoreBefore`/`hasMoreAfter` booleans (based on whether 25 rows were returned in each direction); `GetNewer(ctx, channelID, afterTime, afterID)` returns newer messages + `hasMore`
+- **Backend Handler/Routes**: `GET /channels/{id}/messages/around?message_id=` and `GET /channels/{id}/messages/newer?after_time=&after_id=` added to authenticated route group
+- **Message Store**: Added jumped state tracking (`jumpedByChannel`, `hasMoreAfterByChannel`, `scrollTarget`, `loadingNewer`); `fetchAround()` loads messages around target and sets jumped state; `fetchNewer()` appends newer messages; `jumpToLatest()` clears jumped state and re-fetches latest; `clearJumped()` resets state for channel navigation; `handleNewMessage()` skips appending when channel is jumped
+- **CSS**: Added `highlight-flash` keyframe animation (primary color fade out over 2s) in `app.css`
+- **MessageArea**: Added `data-message-id` attributes to both grouped and non-grouped message divs; scroll-to-message `$effect` watches `scrollTarget`, scrolls element into view center and adds highlight animation; forward pagination triggers `fetchNewer` when scrolling near bottom in jumped mode; "Jump to latest" floating pill button shown when channel is jumped
+- **SearchPalette**: Added user filter UI — "From: anyone" clickable text opens dropdown of all users (filterable), selecting shows pill with X to clear; search triggers with user filter alone (no text required); `handleSelect` checks if message exists in loaded messages (just scroll) or calls `fetchAround` (load around target); closes dialog after selection
+- **+page.svelte**: Channel switch effect tracks previous channel ID and calls `clearJumped()` on the old channel so returning re-fetches latest
+- `go build` and `bun run build` both pass clean
 
 ## Known Deviations from Plan
 

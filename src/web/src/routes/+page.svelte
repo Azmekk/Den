@@ -20,6 +20,9 @@ import ConnectionBanner from '$lib/components/ConnectionBanner.svelte';
 import MemberList from '$lib/components/MemberList.svelte';
 import MessageArea from '$lib/components/MessageArea.svelte';
 import PinnedMessagesPanel from '$lib/components/PinnedMessagesPanel.svelte';
+import SearchPalette from '$lib/components/SearchPalette.svelte';
+
+let searchOpen = $state(false);
 
 let notificationsMuted = $state(
 	typeof localStorage !== 'undefined' &&
@@ -189,9 +192,17 @@ onMount(() => {
 			});
 		}
 	}
+	function handleKeydown(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+			e.preventDefault();
+			searchOpen = !searchOpen;
+		}
+	}
+	document.addEventListener('keydown', handleKeydown);
 	document.addEventListener('visibilitychange', handleVisibilityChange);
 
 	return () => {
+		document.removeEventListener('keydown', handleKeydown);
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		websocket.off('new_message', handleNewMessage);
 		websocket.off('new_dm', handleNewDM);
@@ -212,10 +223,17 @@ onMount(() => {
 });
 
 // Fetch messages and mark channel read when selected channel changes
+let prevChannelId: string | null = null;
 $effect(() => {
 	const id = channelStore.selectedChannelId;
 	if (id) {
 		untrack(() => {
+			// Clear jumped state of previous channel
+			if (prevChannelId && prevChannelId !== id) {
+				messageStore.clearJumped(prevChannelId);
+			}
+			prevChannelId = id;
+
 			messageStore.fetchHistory(id);
 			unreadStore.markRead(id);
 		});
@@ -276,7 +294,7 @@ function updateMessagePin(
 			</div>
 		{/if}
 
-		<MessageArea />
+		<MessageArea onSearchOpen={() => searchOpen = true} />
 		{#if activeTargetId}
 			<PinnedMessagesPanel targetId={activeTargetId} isDM={isDMMode} />
 		{/if}
@@ -300,4 +318,5 @@ function updateMessagePin(
 			</div>
 		{/if}
 	</div>
+	<SearchPalette bind:open={searchOpen} />
 {/if}

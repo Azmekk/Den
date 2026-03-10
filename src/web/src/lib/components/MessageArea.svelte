@@ -16,6 +16,12 @@ import MessageContent from './MessageContent.svelte';
 import MessageContextMenu from './MessageContextMenu.svelte';
 import UserProfilePopover from './UserProfilePopover.svelte';
 
+interface Props {
+	onSearchOpen?: () => void;
+}
+
+let { onSearchOpen }: Props = $props();
+
 async function openDM(userId: string) {
 	if (userId === auth.user?.id) return;
 	const existing = dmStore.findByUserId(userId);
@@ -116,6 +122,9 @@ function typingText(users: string[]): string {
 	return `${users[0]}, ${users[1]}, and others are typing...`;
 }
 
+const isChannelJumped = $derived(channelId ? messageStore.isJumped(channelId) : false);
+const channelHasMoreAfter = $derived(channelId ? messageStore.hasMoreAfter(channelId) : false);
+
 function handleScroll() {
 	if (!messageListEl) return;
 	const { scrollTop, scrollHeight, clientHeight } = messageListEl;
@@ -123,6 +132,11 @@ function handleScroll() {
 
 	if (scrollTop === 0 && hasMore) {
 		loadOlder();
+	}
+
+	// Forward pagination when near bottom in jumped mode
+	if (isNearBottom && !isDM && channelId && isChannelJumped && channelHasMoreAfter) {
+		loadNewer();
 	}
 }
 
@@ -140,6 +154,11 @@ async function loadOlder() {
 
 	await tick();
 	el.scrollTop = el.scrollHeight - prevScrollHeight;
+}
+
+async function loadNewer() {
+	if (messageStore.loadingNewer || !channelId) return;
+	await messageStore.fetchNewer(channelId);
 }
 
 async function scrollToBottom() {
@@ -162,6 +181,23 @@ $effect(() => {
 	if (channelId || dmId) {
 		scrollToBottom();
 	}
+});
+
+// Scroll-to-message effect
+$effect(() => {
+	const target = messageStore.scrollTarget;
+	if (!target) return;
+	if (target.channelId !== channelId) return;
+
+	tick().then(() => {
+		const el = messageListEl?.querySelector(`[data-message-id="${target.messageId}"]`);
+		if (el) {
+			el.scrollIntoView({ block: 'center' });
+			el.classList.add('highlight-flash');
+			el.addEventListener('animationend', () => el.classList.remove('highlight-flash'), { once: true });
+		}
+		messageStore.scrollTarget = null;
+	});
 });
 
 function hasSelfMention(msg: MessageInfo): boolean {
@@ -295,6 +331,15 @@ const mentionFilterIds = $derived(
 				{/if}
 			</div>
 			<div class="flex items-center gap-1">
+				{#if onSearchOpen}
+					<button
+						onclick={onSearchOpen}
+						class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+						title="Search messages"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+					</button>
+				{/if}
 				<button
 					onclick={() => pinStore.togglePanel()}
 					class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -340,7 +385,7 @@ const mentionFilterIds = $derived(
 					{@const grouped = isGrouped(messages, i)}
 					<MessageContextMenu msg={msg} canPin={canPin(msg)} onTogglePin={() => togglePin(msg)}>
 						{#if grouped}
-							<div class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
+							<div data-message-id={msg.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 								<div class="w-8 flex items-center justify-center shrink-0">
 									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
 								</div>
@@ -349,7 +394,7 @@ const mentionFilterIds = $derived(
 								</div>
 							</div>
 						{:else}
-							<div class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
+							<div data-message-id={msg.id} class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
 									<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
 										<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
@@ -378,6 +423,19 @@ const mentionFilterIds = $derived(
 				{/each}
 			{/if}
 		</div>
+
+		<!-- Jump to latest button -->
+		{#if !isDM && channelId && isChannelJumped}
+			<div class="flex justify-center -mt-4 mb-1 relative z-10">
+				<button
+					onclick={() => { if (channelId) { messageStore.jumpToLatest(channelId); scrollToBottom(); } }}
+					class="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
+				>
+					Jump to latest
+					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+				</button>
+			</div>
+		{/if}
 
 		<!-- Typing indicator -->
 		<div class="h-6 px-4">
