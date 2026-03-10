@@ -192,8 +192,15 @@ func (s *MediaService) UpdateAvatar(ctx context.Context, userID uuid.UUID, fileD
 	if err != nil {
 		return PublicUserInfo{}, ErrMediaBadFormat
 	}
-	// Only allow image formats for avatars (no video)
-	_ = ext
+
+	// Delete old avatar if it exists (prevents orphaned files on format change)
+	user, err := queries.GetUserByID(ctx, userID)
+	if err == nil && user.AvatarUrl.Valid {
+		oldKey := s.bucket.KeyFromURL(user.AvatarUrl.String)
+		if oldKey != "" {
+			_ = s.bucket.Delete(ctx, oldKey)
+		}
+	}
 
 	key := "avatars/" + userID.String() + ext
 	if err := s.bucket.Upload(ctx, key, fileData, contentType); err != nil {
@@ -201,7 +208,7 @@ func (s *MediaService) UpdateAvatar(ctx context.Context, userID uuid.UUID, fileD
 	}
 
 	avatarURL := s.bucket.PublicURL(key)
-	user, err := queries.UpdateUserAvatarUrl(ctx, db.UpdateUserAvatarUrlParams{
+	updated, err := queries.UpdateUserAvatarUrl(ctx, db.UpdateUserAvatarUrlParams{
 		ID:        userID,
 		AvatarUrl: sql.NullString{String: avatarURL, Valid: true},
 	})
@@ -209,5 +216,5 @@ func (s *MediaService) UpdateAvatar(ctx context.Context, userID uuid.UUID, fileD
 		return PublicUserInfo{}, err
 	}
 
-	return publicUserInfoFromDB(user), nil
+	return publicUserInfoFromDB(updated), nil
 }

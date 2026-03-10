@@ -1,11 +1,16 @@
-import { Track, type AudioProcessorOptions, type TrackProcessor } from 'livekit-client';
+import { type AudioProcessorOptions } from 'livekit-client';
 
-export type NoiseGateProcessor = TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> & {
+export interface NoiseGateProcessor {
+	name: string;
+	processedTrack?: MediaStreamTrack;
+	init(opts: AudioProcessorOptions): Promise<void>;
+	restart(opts: AudioProcessorOptions): Promise<void>;
+	destroy(): Promise<void>;
 	setThreshold(value: number): void;
-};
+}
 
 export function createCompositeProcessor(
-	krispProcessor: TrackProcessor<Track.Kind.Audio, AudioProcessorOptions>,
+	krispProcessor: Omit<NoiseGateProcessor, 'setThreshold'>,
 	threshold: number,
 	onGateChange: (open: boolean) => void,
 	onLevelChange?: (level: number) => void,
@@ -20,13 +25,13 @@ export function createCompositeProcessor(
 	let sourceNode: MediaStreamAudioSourceNode | null = null;
 	let destinationNode: MediaStreamAudioDestinationNode | null = null;
 	let interval: ReturnType<typeof setInterval> | null = null;
-	let dataArray: Float32Array | null = null;
+	let dataArray: Float32Array<ArrayBuffer> | null = null;
 
 	function startAnalysis() {
 		if (interval) clearInterval(interval);
 		if (!analyser) return;
 
-		dataArray = new Float32Array(analyser.fftSize);
+		dataArray = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
 
 		interval = setInterval(() => {
 			if (!analyser || !dataArray) return;
@@ -160,13 +165,13 @@ export function createNoiseGateProcessor(
 	let sourceNode: MediaStreamAudioSourceNode | null = null;
 	let destinationNode: MediaStreamAudioDestinationNode | null = null;
 	let interval: ReturnType<typeof setInterval> | null = null;
-	let dataArray: Float32Array | null = null;
+	let dataArray: Float32Array<ArrayBuffer> | null = null;
 
 	function startAnalysis() {
 		if (interval) clearInterval(interval);
 		if (!analyser) return;
 
-		dataArray = new Float32Array(analyser.fftSize);
+		dataArray = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
 
 		interval = setInterval(() => {
 			if (!analyser || !dataArray) return;
