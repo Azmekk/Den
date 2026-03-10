@@ -6,6 +6,7 @@ import { channelStore } from '$lib/stores/channels.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { dmStore } from '$lib/stores/dms.svelte';
 import { layoutStore } from '$lib/stores/layout.svelte';
+import { presence } from '$lib/stores/presence.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 import { getUserColor, userColorFromHash, USER_COLORS } from '$lib/utils';
@@ -145,7 +146,7 @@ const tab = $derived(layoutStore.sidebarTab);
 					{@const mentions = unreadStore.getMentions(channel.id)}
 					<button
 						onclick={() => selectChannel(channel.id)}
-						class="flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition-colors {channelStore.selectedChannelId === channel.id
+						class="flex w-full items-center rounded px-2 py-2 text-left text-sm transition-colors {channelStore.selectedChannelId === channel.id
 							? 'bg-secondary text-foreground font-medium'
 							: unread > 0
 								? 'text-foreground font-semibold hover:bg-secondary/50'
@@ -167,19 +168,24 @@ const tab = $derived(layoutStore.sidebarTab);
 			{:else}
 				{#each dmStore.conversations as dm (dm.id)}
 					{@const dmUnread = dmStore.getDMUnread(dm.id)}
+					{@const dmUser = usersStore.users.find((u) => u.id === dm.other_user_id)}
+					{@const dmColor = dmUser ? getUserColor(dmUser) : userColorFromHash(dm.other_username)}
 					<button
 						onclick={() => selectDM(dm.id)}
-						class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors {dmStore.selectedDMId === dm.id
+						class="flex w-full items-center gap-3 rounded px-2 py-2 text-left text-sm transition-colors {dmStore.selectedDMId === dm.id
 							? 'bg-secondary text-foreground font-medium'
 							: dmUnread > 0
 								? 'text-foreground font-semibold hover:bg-secondary/50'
 								: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
 					>
-						<div
-							class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-medium text-white shrink-0"
-							style="background-color: {userColorFromHash(dm.other_username)}"
-						>
-							{dm.other_username.charAt(0).toUpperCase()}
+						<div class="relative shrink-0">
+							<div
+								class="flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium text-white"
+								style="background-color: {dmColor}"
+							>
+								{dm.other_username.charAt(0).toUpperCase()}
+							</div>
+							<div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card {presence.isOnline(dm.other_user_id) ? 'bg-green-500' : 'bg-gray-500'}"></div>
 						</div>
 						<span class="flex-1 truncate">{dm.other_display_name || dm.other_username}</span>
 						{#if dmUnread > 0 && dmStore.selectedDMId !== dm.id}

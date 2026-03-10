@@ -58,25 +58,25 @@ async function openDM(userId: string) {
 							isSelf={user.id === auth.user?.id}
 						>
 							<div
-								class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
+								class="flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
 							>
 								<div class="relative">
 									{#if user.avatar_url}
 										<img
 											src={user.avatar_url}
 											alt={user.username}
-											class="h-7 w-7 rounded-full object-cover"
+											class="h-8 w-8 rounded-full object-cover"
 											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
 										/>
 										<div
-											class="h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white hidden"
+											class="h-8 w-8 items-center justify-center rounded-full text-xs font-medium text-white hidden"
 											style="background-color: {getUserColor(user)}"
 										>
 											{user.username.charAt(0).toUpperCase()}
 										</div>
 									{:else}
 										<div
-											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium text-white"
 											style="background-color: {getUserColor(user)}"
 										>
 											{user.username.charAt(0).toUpperCase()}
@@ -115,18 +115,18 @@ async function openDM(userId: string) {
 										<img
 											src={user.avatar_url}
 											alt={user.username}
-											class="h-7 w-7 rounded-full object-cover"
+											class="h-8 w-8 rounded-full object-cover"
 											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
 										/>
 										<div
-											class="h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white hidden"
+											class="h-8 w-8 items-center justify-center rounded-full text-xs font-medium text-white hidden"
 											style="background-color: {getUserColor(user)}"
 										>
 											{user.username.charAt(0).toUpperCase()}
 										</div>
 									{:else}
 										<div
-											class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium text-white"
+											class="flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium text-white"
 											style="background-color: {getUserColor(user)}"
 										>
 											{user.username.charAt(0).toUpperCase()}

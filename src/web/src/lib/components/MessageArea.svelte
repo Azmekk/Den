@@ -9,10 +9,13 @@ import { pinStore } from '$lib/stores/pins.svelte';
 import { typing } from '$lib/stores/typing.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 import type { MessageInfo } from '$lib/types';
-import { getUserColor, userColorFromHash } from '$lib/utils';
+import { getUserColor, userColorFromHash, unresolveContent } from '$lib/utils';
 import { convertToWebP, isImageFile, isVideoFile } from '$lib/media';
+import { emoteStore } from '$lib/stores/emotes.svelte';
 import { layoutStore } from '$lib/stores/layout.svelte';
+import { websocket } from '$lib/stores/websocket.svelte';
 import EmoteAutocomplete from './EmoteAutocomplete.svelte';
+import EmotePicker from './EmotePicker.svelte';
 import MentionAutocomplete from './MentionAutocomplete.svelte';
 import MessageContent from './MessageContent.svelte';
 import MessageContextMenu from './MessageContextMenu.svelte';
@@ -338,6 +341,78 @@ let uploading = $state(false);
 let dragOver = $state(false);
 let attachments = $state<{ url: string; type: 'image' | 'video' }[]>([]);
 let plusMenuOpen = $state(false);
+let emojiPickerOpen = $state(false);
+
+// Edit/delete state
+let editingMessageId = $state<string | null>(null);
+let editContent = $state('');
+let editTextareaEl: HTMLTextAreaElement | undefined = $state();
+let deletingMessage = $state<MessageInfo | null>(null);
+
+function startEdit(msg: MessageInfo) {
+	editingMessageId = msg.id;
+	editContent = unresolveContent(msg.content, emoteStore.emoteMap, usersStore.users);
+	tick().then(() => {
+		if (editTextareaEl) {
+			editTextareaEl.focus();
+			editTextareaEl.selectionStart = editTextareaEl.value.length;
+			editTextareaEl.selectionEnd = editTextareaEl.value.length;
+			editTextareaEl.style.height = 'auto';
+			editTextareaEl.style.height = `${Math.min(editTextareaEl.scrollHeight, 120)}px`;
+		}
+	});
+}
+
+function saveEdit() {
+	if (!editingMessageId || !editContent.trim()) {
+		cancelEdit();
+		return;
+	}
+	websocket.send({
+		type: 'edit_message',
+		message_id: editingMessageId,
+		content: editContent.trim(),
+	});
+	cancelEdit();
+}
+
+function cancelEdit() {
+	editingMessageId = null;
+	editContent = '';
+}
+
+function handleEditKeydown(e: KeyboardEvent) {
+	if (e.key === 'Enter' && !e.shiftKey) {
+		e.preventDefault();
+		saveEdit();
+	} else if (e.key === 'Escape') {
+		e.preventDefault();
+		cancelEdit();
+	}
+}
+
+function confirmDelete() {
+	if (!deletingMessage) return;
+	websocket.send({
+		type: 'delete_message',
+		message_id: deletingMessage.id,
+	});
+	deletingMessage = null;
+}
+
+function handlePickerSelect(text: string) {
+	const pos = textareaEl?.selectionStart ?? messageInput.length;
+	messageInput = messageInput.slice(0, pos) + text + messageInput.slice(pos);
+	const newPos = pos + text.length;
+	tick().then(() => {
+		if (textareaEl) {
+			textareaEl.selectionStart = newPos;
+			textareaEl.selectionEnd = newPos;
+			cursorPosition = newPos;
+			textareaEl.focus();
+		}
+	});
+}
 
 function getAvatarUrl(msg: MessageInfo): string | undefined {
 	const user = usersStore.users.find((u) => u.id === msg.user_id);
@@ -485,14 +560,39 @@ function handleDrop(e: DragEvent) {
 			{:else}
 				{#each messages as msg, i (msg.id)}
 					{@const grouped = isGrouped(messages, i)}
-					<MessageContextMenu msg={msg} canPin={canPin(msg)} onTogglePin={() => togglePin(msg)}>
+					<MessageContextMenu
+					msg={msg}
+					canPin={canPin(msg)}
+					canEdit={msg.user_id === auth.user?.id}
+					canDelete={msg.user_id === auth.user?.id || auth.user?.is_admin === true}
+					onTogglePin={() => togglePin(msg)}
+					onEdit={() => startEdit(msg)}
+					onDelete={() => deletingMessage = msg}
+				>
 						{#if grouped}
 							<div data-message-id={msg.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 								<div class="w-8 flex items-center justify-center shrink-0">
 									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
 								</div>
 								<div class="flex-1 min-w-0">
-									<MessageContent content={msg.content} />
+									{#if editingMessageId === msg.id}
+										<div class="py-1">
+											<textarea
+												bind:this={editTextareaEl}
+												bind:value={editContent}
+												onkeydown={handleEditKeydown}
+												oninput={(e) => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }}
+												rows="1"
+												class="w-full min-h-[38px] max-h-[120px] resize-none rounded-lg border border-primary bg-secondary px-3 py-2 text-sm text-foreground focus:outline-none"
+											></textarea>
+											<div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+												<span>Escape to <button class="text-primary hover:underline" onclick={cancelEdit}>cancel</button></span>
+												<span>Enter to <button class="text-primary hover:underline" onclick={saveEdit}>save</button></span>
+											</div>
+										</div>
+									{:else}
+										<MessageContent content={msg.content} />
+									{/if}
 								</div>
 							</div>
 						{:else}
@@ -502,14 +602,14 @@ function handleDrop(e: DragEvent) {
 										<img
 											src={getAvatarUrl(msg)}
 											alt={msg.username}
-											class="w-8 h-8 rounded-full shrink-0 mt-0.5 cursor-pointer hover:opacity-80 object-cover"
+											class="w-8 h-8 rounded-full shrink-0 mt-1.5 cursor-pointer hover:opacity-80 object-cover"
 											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
 										/>
-										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80 hidden" style="background-color: {getColorForMessage(msg)}">
+										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1.5 cursor-pointer hover:opacity-80 hidden" style="background-color: {getColorForMessage(msg)}">
 											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
 										</div>
 									{:else}
-										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
+										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
 											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
 										</div>
 									{/if}
@@ -529,7 +629,24 @@ function handleDrop(e: DragEvent) {
 											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
 										{/if}
 									</div>
-									<MessageContent content={msg.content} />
+									{#if editingMessageId === msg.id}
+										<div class="py-1">
+											<textarea
+												bind:this={editTextareaEl}
+												bind:value={editContent}
+												onkeydown={handleEditKeydown}
+												oninput={(e) => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }}
+												rows="1"
+												class="w-full min-h-[38px] max-h-[120px] resize-none rounded-lg border border-primary bg-secondary px-3 py-2 text-sm text-foreground focus:outline-none"
+											></textarea>
+											<div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+												<span>Escape to <button class="text-primary hover:underline" onclick={cancelEdit}>cancel</button></span>
+												<span>Enter to <button class="text-primary hover:underline" onclick={saveEdit}>save</button></span>
+											</div>
+										</div>
+									{:else}
+										<MessageContent content={msg.content} />
+									{/if}
 								</div>
 							</div>
 						{/if}
@@ -659,6 +776,11 @@ function handleDrop(e: DragEvent) {
 					rows="1"
 					class="flex-1 min-w-0 min-h-[38px] max-h-[120px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
 				></textarea>
+				<EmotePicker
+					onSelect={handlePickerSelect}
+					open={emojiPickerOpen}
+					onOpenChange={(v) => emojiPickerOpen = v}
+				/>
 				<button
 					onclick={sendMsg}
 					class="shrink-0 h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
@@ -669,6 +791,41 @@ function handleDrop(e: DragEvent) {
 				</button>
 			</div>
 		</div>
+		<!-- Delete confirmation dialog -->
+		{#if deletingMessage}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+				onclick={() => deletingMessage = null}
+				onkeydown={(e) => { if (e.key === 'Escape') deletingMessage = null; }}
+			>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="mx-4 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl"
+					onclick={(e) => e.stopPropagation()}
+				>
+					<h3 class="text-lg font-semibold text-foreground">Delete Message</h3>
+					<p class="mt-2 text-sm text-muted-foreground">Are you sure you want to delete this message? This cannot be undone.</p>
+					<div class="mt-2 rounded bg-secondary/50 p-3 text-sm text-foreground/70 max-h-24 overflow-hidden">
+						<MessageContent content={deletingMessage.content} />
+					</div>
+					<div class="mt-4 flex justify-end gap-2">
+						<button
+							onclick={() => deletingMessage = null}
+							class="rounded-lg px-4 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
+						>
+							Cancel
+						</button>
+						<button
+							onclick={confirmDelete}
+							class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+						>
+							Delete
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	{:else}
 		<div class="flex flex-1 items-center justify-center">
 			<div class="text-center">
