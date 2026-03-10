@@ -24,6 +24,7 @@ type createChannelRequest struct {
 	Name     string `json:"name"`
 	Topic    string `json:"topic"`
 	Position int32  `json:"position"`
+	IsVoice  bool   `json:"is_voice"`
 }
 
 type updateChannelRequest struct {
@@ -34,6 +35,24 @@ type updateChannelRequest struct {
 
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	channels, err := h.svc.List(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, channels)
+}
+
+func (h *ChannelHandler) ListVoice(w http.ResponseWriter, r *http.Request) {
+	channels, err := h.svc.ListVoice(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, channels)
+}
+
+func (h *ChannelHandler) ListAll(w http.ResponseWriter, r *http.Request) {
+	channels, err := h.svc.ListAll(r.Context())
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -67,7 +86,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch, err := h.svc.Create(r.Context(), req.Name, req.Topic, req.Position)
+	ch, err := h.svc.Create(r.Context(), req.Name, req.Topic, req.Position, req.IsVoice)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):

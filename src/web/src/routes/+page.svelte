@@ -14,6 +14,7 @@ import { presence } from '$lib/stores/presence.svelte';
 import { typing } from '$lib/stores/typing.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
+import { voiceStore } from '$lib/stores/voice.svelte';
 import { websocket } from '$lib/stores/websocket.svelte';
 import ChannelSidebar from '$lib/components/ChannelSidebar.svelte';
 import ConnectionBanner from '$lib/components/ConnectionBanner.svelte';
@@ -61,6 +62,7 @@ onMount(() => {
 	usersStore.fetch();
 	configStore.fetch();
 	emoteStore.fetch();
+	channelStore.fetchVoice();
 	unreadStore.fetch();
 	dmStore.fetchConversations();
 
@@ -162,6 +164,8 @@ onMount(() => {
 	websocket.on('typing_start', typing.handleTypingStart);
 	websocket.on('typing_stop', typing.handleTypingStop);
 	websocket.on('emote_list_update', emoteStore.refresh);
+	websocket.on('voice_state_initial', voiceStore.handleVoiceStateInitial);
+	websocket.on('voice_state_update', voiceStore.handleVoiceStateUpdate);
 
 	function handleWsOpen() {
 		const id = channelStore.selectedChannelId;
@@ -218,7 +222,10 @@ onMount(() => {
 		websocket.off('typing_start', typing.handleTypingStart);
 		websocket.off('typing_stop', typing.handleTypingStop);
 		websocket.off('emote_list_update', emoteStore.refresh);
+		websocket.off('voice_state_initial', voiceStore.handleVoiceStateInitial);
+		websocket.off('voice_state_update', voiceStore.handleVoiceStateUpdate);
 		websocket.off('open', handleWsOpen);
+		voiceStore.leave();
 		websocket.disconnect();
 	};
 });

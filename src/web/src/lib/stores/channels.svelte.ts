@@ -4,6 +4,7 @@ import { websocket } from './websocket.svelte';
 
 function createChannels() {
 	let channels = $state<ChannelInfo[]>([]);
+	let voiceChannels = $state<ChannelInfo[]>([]);
 	let selectedChannelId = $state<string | null>(null);
 
 	async function fetch() {
@@ -12,6 +13,15 @@ function createChannels() {
 		});
 		if (res.ok) {
 			channels = await res.json();
+		}
+	}
+
+	async function fetchVoice() {
+		const res = await globalThis.fetch('/api/channels/voice', {
+			headers: { Authorization: `Bearer ${auth.accessToken}` },
+		});
+		if (res.ok) {
+			voiceChannels = await res.json();
 		}
 	}
 
@@ -34,6 +44,12 @@ function createChannels() {
 		get channels() {
 			return channels;
 		},
+		get voiceChannels() {
+			return voiceChannels;
+		},
+		get sortedVoiceChannels() {
+			return [...voiceChannels].sort((a, b) => a.position - b.position);
+		},
 		get selectedChannelId() {
 			return selectedChannelId;
 		},
@@ -41,6 +57,7 @@ function createChannels() {
 			return channels.find((c) => c.id === selectedChannelId) ?? null;
 		},
 		fetch,
+		fetchVoice,
 		select,
 		deselect,
 	};

@@ -9,8 +9,10 @@ import { layoutStore } from '$lib/stores/layout.svelte';
 import { presence } from '$lib/stores/presence.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
+import { voiceStore } from '$lib/stores/voice.svelte';
 import { getUserColor, userColorFromHash, USER_COLORS } from '$lib/utils';
 import AvatarCropModal from './AvatarCropModal.svelte';
+import VoiceConnectionBar from './VoiceConnectionBar.svelte';
 
 interface Props {
 	onNavigate?: () => void;
@@ -162,6 +164,43 @@ const tab = $derived(layoutStore.sidebarTab);
 					</button>
 				{/each}
 			{/if}
+
+			{#if configStore.voiceEnabled && channelStore.sortedVoiceChannels.length > 0}
+				<div class="mt-3 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+					Voice Channels
+				</div>
+				{#each channelStore.sortedVoiceChannels as channel (channel.id)}
+					{@const participants = voiceStore.getParticipants(channel.id)}
+					<button
+						onclick={() => { voiceStore.join(channel.id); onNavigate?.(); }}
+						class="flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition-colors {voiceStore.currentChannelId === channel.id
+							? 'bg-secondary text-foreground font-medium'
+							: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1.5 shrink-0 text-muted-foreground"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+						<span class="flex-1 truncate">{channel.name}</span>
+					</button>
+					{#if participants.length > 0}
+						<div class="ml-6 mb-1">
+							{#each participants as uid}
+								{@const user = usersStore.users.find((u) => u.id === uid)}
+								{#if user}
+									{@const color = getUserColor(user)}
+									<div class="flex items-center gap-1.5 py-0.5 px-1">
+										<div
+											class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow"
+											style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
+										>
+											{user.username.charAt(0).toUpperCase()}
+										</div>
+										<span class="text-xs text-muted-foreground truncate">{user.display_name || user.username}</span>
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{/if}
+				{/each}
+			{/if}
 		{:else}
 			{#if dmStore.conversations.length === 0}
 				<p class="px-2 py-1 text-sm text-muted-foreground">No conversations yet</p>
@@ -196,6 +235,8 @@ const tab = $derived(layoutStore.sidebarTab);
 			{/if}
 		{/if}
 	</nav>
+
+	<VoiceConnectionBar />
 
 	<div class="border-t border-border p-3">
 		<div class="flex items-center gap-2">
