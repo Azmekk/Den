@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 12 — Voice Channels with LiveKit
+**Last completed run:** Run 13 — Polish & Deployment
 **Last deviation:** Composite Krisp + Noise Gate Processor
-**Next run:** Run 13
+**Next run:** Run 14
 
 ---
 
@@ -437,6 +437,13 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Voice store simplified**: Removed `krispProcessor` and `speakingDetector` variables, replaced by single `noiseGateProcessor` ref. Three modes: Krisp + noise gate (composite, recommended), Krisp only (wrapped with no-op setThreshold), noise gate only (standalone, unchanged).
 - **UI**: Noise gate toggle now always visible in AudioSettingsPopover (was hidden when Krisp active). Users can disable gate for Krisp-only mode or enable both. Threshold slider shown when noise gate is enabled.
 - `bun run build` passes clean
+
+### Run 13 (2026-03-10) — Polish & Deployment
+- **Touch targets**: Added `min-w-11 min-h-11` (44px) to all header icon buttons in MessageArea (hamburger, search, pinned, members). Added `min-h-11` to member list rows (online + offline). Bumped voice channel items from `py-1.5` to `py-2` with `min-h-11`. Added `touch-action: manipulation` globally in app.css to prevent 300ms tap delay.
+- **Message cleanup background job**: Added `RunMessageCleanupLoop(ctx, maxMessages, batchSize, interval)` to `AdminService`. Runs hourly, counts messages, deletes oldest unpinned when count exceeds limit. Wired in `main.go` with `MAX_MESSAGES` env var (default 100,000). Deletes `count - max + batchSize/2` to avoid thrashing.
+- **Nginx config**: Rewrote `nginx.conf` — added MIME types include, gzip compression, `client_max_body_size 50m`, security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`), proper `/api/ws` WebSocket location with 24h timeouts, `X-Forwarded-Proto` trust from outer proxy, `real_ip_header`. HTTP-only (port 80), designed for external TLS-terminating reverse proxy.
+- **Dropped**: PWA manifest (Tauri desktop wrapper planned in Run 18), Certbot (external reverse proxy handles TLS)
+- `go build` and `bun run build` both pass clean
 
 ## Known Deviations from Plan
 

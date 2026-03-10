@@ -28,6 +28,7 @@
 @layer base {
 	* {
 		border-color: hsl(var(--border));
+		touch-action: manipulation;
 	}
 
 	body {

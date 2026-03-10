@@ -58,7 +58,7 @@ async function openDM(userId: string) {
 							isSelf={user.id === auth.user?.id}
 						>
 							<div
-								class="flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
+								class="flex w-full items-center gap-3 rounded px-2 py-2 min-h-11 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
 							>
 								<div class="relative">
 									{#if user.avatar_url}
@@ -108,7 +108,7 @@ async function openDM(userId: string) {
 							isSelf={user.id === auth.user?.id}
 						>
 							<div
-								class="flex w-full items-center gap-2 rounded px-2 py-1.5 opacity-50 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
+								class="flex w-full items-center gap-2 rounded px-2 py-1.5 min-h-11 opacity-50 text-left transition-colors {user.id === auth.user?.id ? '' : 'hover:bg-secondary/50 cursor-pointer'}"
 							>
 								<div class="relative">
 									{#if user.avatar_url}
