@@ -34,3 +34,43 @@ export function getUserColor(user: {
 }): string {
 	return user.color || userColorFromHash(user.username);
 }
+
+/**
+ * Reverse-resolve stored message content back to user-friendly editable text.
+ * Converts `<emote:uuid>` → `:emote_name:`, `<mention:uuid>` → `@username`,
+ * `<mention:everyone>` → `@everyone`, and unescapes HTML entities.
+ */
+export function unresolveContent(
+	content: string,
+	emoteMap: Map<string, { name: string }>,
+	users: { id: string; username: string }[],
+): string {
+	let result = content;
+
+	// Resolve emote tokens
+	result = result.replace(
+		/<emote:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})>/g,
+		(_, id) => {
+			const emote = emoteMap.get(id);
+			return emote ? `:${emote.name}:` : ':unknown:';
+		},
+	);
+
+	// Resolve mention tokens
+	result = result.replace(
+		/<mention:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|everyone)>/g,
+		(_, id) => {
+			if (id === 'everyone') return '@everyone';
+			const user = users.find((u) => u.id === id);
+			return user ? `@${user.username}` : '@unknown';
+		},
+	);
+
+	// Unescape HTML entities
+	result = result
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&');
+
+	return result;
+}

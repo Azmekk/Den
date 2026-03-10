@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 11 — Media Embeds & Media Upload
-**Last deviation:** Fix Bucket Path Duplication + Hide Embedded URLs
+**Last deviation:** Emoji Picker, Message Edit/Delete, DM Sizing
 **Next run:** Run 12
 
 ---
@@ -355,6 +355,19 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Hide embedded URLs from text**: Added `embedUrls` derived Set in `MessageContent.svelte` containing all URLs that render as media embeds; wrapped the URL `<a>` tag in `{#if !embedUrls.has(part.value)}` so embedded URLs (images, videos, YouTube, Tenor, Giphy) are hidden from the message text — only the embed preview shows below
 - Existing misplaced objects in R2 (under `den-dev/images/...` key) need manual cleanup
 - `go build` and `bun run build` both pass clean
+
+### Deviation (2026-03-10) — Emoji Picker, Message Edit/Delete, DM Sizing
+- **DM Sidebar Sizing**: `ChannelSidebar.svelte` DM avatar circles changed from `h-5 w-5 text-[10px]` to `h-6 w-6 text-xs` (20px → 24px) for better readability
+- **MessageContextMenu**: Extended with `canEdit`, `canDelete`, `onEdit`, `onDelete` props. Edit shown for author only, Delete shown for author or admin (styled destructive red)
+- **Inline Message Editing**: `editingMessageId`/`editContent` state in MessageArea. `startEdit()` calls `unresolveContent()` to convert stored tokens back to user-friendly text. Textarea replaces MessageContent, Enter saves via `edit_message` WS, Escape cancels
+- **Delete Confirmation**: Modal overlay with message preview, Cancel/Delete buttons. Sends `delete_message` via WS
+- **`unresolveContent()`**: New utility in `$lib/utils.ts` — reverse-resolves `<emote:uuid>` → `:name:`, `<mention:uuid>` → `@username`, `<mention:everyone>` → `@everyone`, unescapes `&lt;`/`&gt;`/`&amp;`
+- **Emoji/Emote Picker**: New `EmotePicker.svelte` component using bits-ui `Popover`. Search bar, category sidebar tabs (9 unicode categories + custom), 8-column grid layout. Custom emotes shown first, then unicode. Lazy-loads emoji data on first open via dynamic import
+- **Emoji Data Helper**: New `$lib/data/emoji-data.ts` — imports `unicode-emoji-json`, groups by category, generates shortcodes, caches result. `searchEmojis()` searches across all categories
+- **EmoteAutocomplete Extended**: Now matches both custom emotes (priority) and unicode emojis when typing `:shortcode`. Custom emotes insert `:name:`, unicode emojis insert the raw character. Lazy-loads emoji data on first autocomplete trigger
+- **Picker Integration**: Smiley face button between textarea and send button in MessageArea. `handlePickerSelect()` inserts at cursor position
+- `unicode-emoji-json@0.8.0` added as dependency
+- `bun run build` passes clean
 
 ## Known Deviations from Plan
 

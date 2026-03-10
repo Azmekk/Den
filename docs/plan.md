@@ -715,6 +715,18 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Added `UsePathStyle: true` to S3 client options in `service/bucket.go` (fixes R2 path duplication)
 - [x] Added `embedUrls` derived Set in `MessageContent.svelte` to hide embedded URLs from message text
 
+### Deviation — Emoji Picker, Message Edit/Delete, DM Sizing (DONE)
+- [x] DM sidebar avatar sizing: `h-5 w-5 text-[10px]` → `h-6 w-6 text-xs` for better readability
+- [x] Message context menu: Edit/Delete actions with permission checks (edit: author only, delete: author or admin)
+- [x] Inline message editing: textarea replaces content, Enter to save, Escape to cancel, sends `edit_message` via WS
+- [x] Delete confirmation dialog: modal with message preview, sends `delete_message` via WS
+- [x] `unresolveContent()` utility: converts `<emote:uuid>` → `:name:`, `<mention:uuid>` → `@username`, unescapes HTML
+- [x] Emoji/emote picker: bits-ui Popover with search, category tabs, custom emotes + unicode emojis
+- [x] `unicode-emoji-json` package for lightweight emoji data (~40KB gzipped)
+- [x] Emoji data helper: lazy-loaded categories, search function, shortcode generation
+- [x] EmoteAutocomplete extended: `:shortcode` now matches both custom emotes and unicode emojis
+- [x] Unicode emoji inserts raw character (not shortcode), custom emote inserts `:name:`
+
 ### Run 12 — Voice Channels
 - [ ] LiveKit token minting in Go backend
 - [ ] Voice channel presence tracked over WebSocket
