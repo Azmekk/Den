@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -64,6 +65,15 @@ func (b *BucketService) Delete(ctx context.Context, key string) error {
 		Key:    aws.String(key),
 	})
 	return err
+}
+
+// KeyFromURL extracts the bucket key from a full public URL.
+// Returns empty string if the URL doesn't match the expected prefix.
+func (b *BucketService) KeyFromURL(url string) string {
+	if b.publicURL != "" {
+		return strings.TrimPrefix(url, b.publicURL+"/")
+	}
+	return strings.TrimPrefix(url, "/")
 }
 
 func (b *BucketService) PublicURL(key string) string {

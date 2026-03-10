@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 13 — Polish & Deployment
+**Last completed run:** Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
 **Last deviation:** Composite Krisp + Noise Gate Processor
-**Next run:** Run 14
+**Next run:** Run 15
 
 ---
 
@@ -444,6 +444,14 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Nginx config**: Rewrote `nginx.conf` — added MIME types include, gzip compression, `client_max_body_size 50m`, security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`), proper `/api/ws` WebSocket location with 24h timeouts, `X-Forwarded-Proto` trust from outer proxy, `real_ip_header`. HTTP-only (port 80), designed for external TLS-terminating reverse proxy.
 - **Dropped**: PWA manifest (Tauri desktop wrapper planned in Run 18), Certbot (external reverse proxy handles TLS)
 - `go build` and `bun run build` both pass clean
+
+### Run 14 (2026-03-11) — Avatar Cropper Fix & Old Avatar Cleanup
+- **Cropper CSS import**: Added `import 'cropperjs/dist/cropper.css'` to `AvatarCropModal.svelte` — cropperjs v2 web components need the stylesheet imported explicitly for proper rendering
+- **Removed constraining CSS**: Removed `class="block max-w-full"` from the `<img>` element — cropperjs v2 manages image sizing internally, constraining classes break its positioning
+- **Old avatar cleanup**: `UpdateAvatar()` in `media.go` now fetches the user's current `avatar_url` via `queries.GetUserByID()` before uploading. If an existing avatar exists, extracts the bucket key via new `KeyFromURL()` method and deletes it before uploading the new file
+- **`KeyFromURL()` helper**: Added to `BucketService` in `bucket.go` — strips the `publicURL` prefix from a full URL to extract the bucket key
+- No new dependencies, no migrations
+- `go build` passes clean
 
 ## Known Deviations from Plan
 

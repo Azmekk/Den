@@ -92,21 +92,19 @@ function createVoiceStore() {
 			return;
 		}
 
-		// Play sounds when other users join/leave
+		// Play sounds when other users join/leave the SAME channel
 		const myId = auth.user?.id;
-		const oldAll = new Set<string>();
-		const newAll = new Set<string>();
-		for (const users of voiceStates.values()) for (const u of users) oldAll.add(u);
-		for (const users of newStates.values()) for (const u of users) newAll.add(u);
+		const oldInChannel = new Set(voiceStates.get(currentChannelId) ?? []);
+		const newInChannel = new Set(newStates.get(currentChannelId) ?? []);
 
-		for (const uid of newAll) {
-			if (uid !== myId && !oldAll.has(uid)) {
+		for (const uid of newInChannel) {
+			if (uid !== myId && !oldInChannel.has(uid)) {
 				playJoinSound();
 				break;
 			}
 		}
-		for (const uid of oldAll) {
-			if (uid !== myId && !newAll.has(uid)) {
+		for (const uid of oldInChannel) {
+			if (uid !== myId && !newInChannel.has(uid)) {
 				playLeaveSound();
 				break;
 			}
@@ -192,8 +190,8 @@ function createVoiceStore() {
 		}
 	}
 
-	async function leave() {
-		playLeaveSound();
+	async function leave(silent = false) {
+		if (currentChannelId && !silent) playLeaveSound();
 		speakingUserIds = new Set();
 		cleanupProcessors();
 		if (room) {
@@ -386,7 +384,8 @@ function createVoiceStore() {
 						}) as NoiseGateProcessor;
 					}
 
-					await micPub.track.setProcessor(noiseGateProcessor);
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					await micPub.track.setProcessor(noiseGateProcessor as any);
 					krispActive = true;
 					return;
 				}
@@ -402,7 +401,8 @@ function createVoiceStore() {
 				onSpeakingChange,
 				onLevelChange,
 			);
-			await micPub.track.setProcessor(noiseGateProcessor);
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			await micPub.track.setProcessor(noiseGateProcessor as any);
 		}
 	}
 

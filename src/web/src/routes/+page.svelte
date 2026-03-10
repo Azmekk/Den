@@ -225,7 +225,7 @@ onMount(() => {
 		websocket.off('voice_state_initial', voiceStore.handleVoiceStateInitial);
 		websocket.off('voice_state_update', voiceStore.handleVoiceStateUpdate);
 		websocket.off('open', handleWsOpen);
-		voiceStore.leave();
+		voiceStore.leave(true);
 		websocket.disconnect();
 	};
 });

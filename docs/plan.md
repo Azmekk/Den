@@ -817,10 +817,10 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Noise gate toggle always visible in AudioSettingsPopover (no longer hidden when Krisp active)
 - [x] `bun run build` passes clean
 
-### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
-- [ ] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)
-- [ ] Delete old avatar from bucket when uploading a new one (in `UpdateAvatar()`, delete previous bucket key before storing new file — prevents orphaned files when format changes e.g. PNG→WebP)
-- [ ] Verify: Cropper displays image correctly, old avatar file is removed from bucket after re-upload
+### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup ✅
+- [x] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)
+- [x] Delete old avatar from bucket when uploading a new one (in `UpdateAvatar()`, delete previous bucket key before storing new file — prevents orphaned files when format changes e.g. PNG→WebP)
+- [x] Verify: Cropper displays image correctly, old avatar file is removed from bucket after re-upload
 
 ### Run 15 — Bucket Storage Limit
 - [ ] Migration: add `file_size BIGINT NOT NULL` column to `media_uploads` table
