@@ -801,6 +801,22 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - **Working:** Noise gate, stereo playback, mic level indicator, sound guards
 - **Still broken:** Echo cancellation (stereo upmix mutes `<audio>` element, breaking browser echo reference), noise suppression (needs testing with noise gate disabled — may work but masked by gate pipeline)
 
+### Deviation — Fix Echo Cancellation via MediaStreamAudioDestinationNode
+- [x] Route stereo upmix pipeline to `MediaStreamAudioDestinationNode` instead of `ctx.destination`
+- [x] Set destination's `.stream` as `el.srcObject` (replaces original mono stream with stereo)
+- [x] Leave `<audio>` element unmuted — browser echo canceller has proper reference signal
+- [x] Clean up `MediaStreamAudioDestinationNode` in `handleTrackUnsubscribed`
+- **Fixed:** Echo cancellation now works (unmuted `<audio>` element provides reference signal)
+- **Needs verification:** Noise suppression with noise gate disabled, stereo still works through new pipeline
+
+### Deviation — Composite Krisp + Noise Gate Processor (DONE)
+- [x] Created `createCompositeProcessor()` in `noise-gate.ts` — chains Krisp → Noise Gate in single TrackProcessor
+- [x] Removed `createSpeakingDetector()` — composite gate handles level monitoring + gain gating internally
+- [x] Simplified voice store: single `noiseGateProcessor` ref replaces separate `krispProcessor` + `speakingDetector`
+- [x] Three modes: composite (Krisp+gate), Krisp-only (wrapped), standalone gate (fallback)
+- [x] Noise gate toggle always visible in AudioSettingsPopover (no longer hidden when Krisp active)
+- [x] `bun run build` passes clean
+
 ### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
 - [ ] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)
 - [ ] Delete old avatar from bucket when uploading a new one (in `UpdateAvatar()`, delete previous bucket key before storing new file — prevents orphaned files when format changes e.g. PNG→WebP)

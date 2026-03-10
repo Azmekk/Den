@@ -9,7 +9,7 @@ import {
 } from 'livekit-client';
 import { auth } from './auth.svelte';
 import { websocket } from './websocket.svelte';
-import { createNoiseGateProcessor, type NoiseGateProcessor } from '$lib/voice/noise-gate';
+import { createNoiseGateProcessor, createCompositeProcessor, type NoiseGateProcessor } from '$lib/voice/noise-gate';
 import { playJoinSound, playLeaveSound } from '$lib/voice/sounds';
 
 const STORAGE_KEY = 'den_voice_settings';
@@ -19,6 +19,7 @@ interface VoiceSettings {
 	noiseGateThreshold: number;
 	noiseCancellationEnabled: boolean;
 	echoCancellationEnabled: boolean;
+	krispEnabled: boolean;
 }
 
 function loadSettings(): VoiceSettings {
@@ -37,6 +38,7 @@ function defaultSettings(): VoiceSettings {
 		noiseGateThreshold: 20,
 		noiseCancellationEnabled: true,
 		echoCancellationEnabled: true,
+		krispEnabled: true,
 	};
 }
 
@@ -56,6 +58,8 @@ function createVoiceStore() {
 	let noiseGateThreshold = $state(initial.noiseGateThreshold);
 	let noiseCancellationEnabled = $state(initial.noiseCancellationEnabled);
 	let echoCancellationEnabled = $state(initial.echoCancellationEnabled);
+	let krispEnabled = $state(initial.krispEnabled);
+	let krispActive = $state(false);
 	let micLevel = $state(0);
 
 	let room: Room | null = null;
@@ -159,11 +163,11 @@ function createVoiceStore() {
 			// Publish microphone with current settings
 			await room.localParticipant.setMicrophoneEnabled(true, {
 				echoCancellation: echoCancellationEnabled,
-				noiseSuppression: noiseCancellationEnabled,
+				noiseSuppression: krispEnabled ? false : noiseCancellationEnabled,
 			});
 
-			// Set up noise gate if enabled
-			await setupNoiseGate();
+			// Set up audio processing (Krisp or noise gate)
+			await setupAudioProcessing();
 
 			// Apply muted state
 			if (isMuted) {
@@ -191,13 +195,7 @@ function createVoiceStore() {
 	async function leave() {
 		playLeaveSound();
 		speakingUserIds = new Set();
-		if (noiseGateProcessor && room) {
-			const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-			if (micPub?.track) {
-				await micPub.track.stopProcessor();
-			}
-			noiseGateProcessor = null;
-		}
+		cleanupProcessors();
 		if (room) {
 			room.disconnect();
 			room = null;
@@ -217,6 +215,17 @@ function createVoiceStore() {
 			currentChannelId = null;
 		}
 		isMuted = false;
+	}
+
+	function cleanupProcessors() {
+		if (room) {
+			const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+			if (micPub?.track && noiseGateProcessor) {
+				micPub.track.stopProcessor();
+			}
+		}
+		noiseGateProcessor = null;
+		krispActive = false;
 	}
 
 	async function toggleMute() {
@@ -249,21 +258,27 @@ function createVoiceStore() {
 	) {
 		if (track.kind === Track.Kind.Audio) {
 			const el = track.attach();
-			el.muted = true; // mute the element; we route audio through Web Audio API
 			getAudioContainer().appendChild(el);
 
-			// Upmix mono to stereo via Web Audio
+			// Upmix mono to stereo via Web Audio, routed back to the <audio> element
+			// so the browser's echo canceller has a reference signal.
 			const ctx = getSharedAudioCtx();
 			const source = ctx.createMediaStreamSource(track.mediaStream!);
 			const splitter = ctx.createChannelSplitter(1);
 			const merger = ctx.createChannelMerger(2);
+			const streamDest = ctx.createMediaStreamDestination();
 			source.connect(splitter);
 			splitter.connect(merger, 0, 0);
 			splitter.connect(merger, 0, 1);
-			merger.connect(ctx.destination);
+			merger.connect(streamDest);
 
-			// Store source on element for cleanup
+			// Replace the element's source with the stereo-upmixed stream
+			el.srcObject = streamDest.stream;
+			el.play();
+
+			// Store nodes on element for cleanup
 			(el as any).__voiceSourceNode = source;
+			(el as any).__voiceStreamDest = streamDest;
 		}
 	}
 
@@ -274,7 +289,9 @@ function createVoiceStore() {
 	) {
 		track.detach().forEach((el) => {
 			const source = (el as any).__voiceSourceNode as AudioNode | undefined;
+			const streamDest = (el as any).__voiceStreamDest as AudioNode | undefined;
 			source?.disconnect();
+			streamDest?.disconnect();
 			el.remove();
 		});
 	}
@@ -288,6 +305,7 @@ function createVoiceStore() {
 		isMuted = false;
 		micLevel = 0;
 		noiseGateProcessor = null;
+		krispActive = false;
 		room = null;
 		if (sharedAudioCtx) {
 			sharedAudioCtx.close();
@@ -297,16 +315,15 @@ function createVoiceStore() {
 
 	function handleActiveSpeakers(speakers: Participant[]) {
 		const myId = auth.user?.id;
+		const hasLocalProcessor = noiseGateProcessor != null;
 		const next = new Set<string>();
 		for (const s of speakers) {
 			if (!s.identity) continue;
 			if (s.identity === myId) {
-				// When noise gate is active, local speaking is driven by the gate callback
-				if (noiseGateEnabled && noiseGateProcessor) {
-					// Preserve gate-driven state
+				// When a local processor is active, local speaking is driven by the gate callback
+				if (hasLocalProcessor) {
 					if (speakingUserIds.has(myId)) next.add(myId);
 				} else {
-					// No noise gate — use LiveKit's server-side VAD
 					next.add(myId);
 				}
 			} else {
@@ -314,41 +331,79 @@ function createVoiceStore() {
 			}
 		}
 		// If local user is not in LiveKit's speakers list but gate says speaking, preserve it
-		if (myId && noiseGateEnabled && noiseGateProcessor && speakingUserIds.has(myId)) {
+		if (myId && hasLocalProcessor && speakingUserIds.has(myId)) {
 			next.add(myId);
 		}
 		speakingUserIds = next;
 	}
 
-	async function setupNoiseGate() {
+	function onSpeakingChange(open: boolean) {
+		if (!room || isMuted) return;
+		const myId = auth.user?.id;
+		if (myId) {
+			const next = new Set(speakingUserIds);
+			if (open) next.add(myId); else next.delete(myId);
+			speakingUserIds = next;
+		}
+	}
+
+	function onLevelChange(level: number) {
+		micLevel = level;
+	}
+
+	async function setupAudioProcessing() {
 		if (!room) return;
 
 		const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
 		if (!micPub?.track) return;
 
-		// Stop existing processor
+		// Clean up existing processor
 		if (noiseGateProcessor) {
 			await micPub.track.stopProcessor();
 			noiseGateProcessor = null;
+			krispActive = false;
 		}
 
-		if (!noiseGateEnabled) return;
+		// Try Krisp first
+		if (krispEnabled) {
+			try {
+				const { KrispNoiseFilter, isKrispNoiseFilterSupported } = await import('@livekit/krisp-noise-filter');
+				if (isKrispNoiseFilterSupported()) {
+					const krisp = KrispNoiseFilter();
 
-		noiseGateProcessor = createNoiseGateProcessor(
-			noiseGateThreshold,
-			(open) => {
-				if (!room || isMuted) return;
-				const myId = auth.user?.id;
-				if (myId) {
-					const next = new Set(speakingUserIds);
-					if (open) next.add(myId); else next.delete(myId);
-					speakingUserIds = next;
+					if (noiseGateEnabled) {
+						// Composite: Krisp → Noise Gate
+						noiseGateProcessor = createCompositeProcessor(
+							krisp,
+							noiseGateThreshold,
+							onSpeakingChange,
+							onLevelChange,
+						);
+					} else {
+						// Krisp only — wrap as NoiseGateProcessor for uniform handling
+						noiseGateProcessor = Object.assign(krisp, {
+							setThreshold(_v: number) { /* no-op for krisp-only */ },
+						}) as NoiseGateProcessor;
+					}
+
+					await micPub.track.setProcessor(noiseGateProcessor);
+					krispActive = true;
+					return;
 				}
-			},
-			(level) => { micLevel = level; },
-		);
+			} catch (err) {
+				console.warn('Krisp noise filter not available, falling back to noise gate:', err);
+			}
+		}
 
-		await micPub.track.setProcessor(noiseGateProcessor);
+		// Fallback: noise gate processor
+		if (noiseGateEnabled) {
+			noiseGateProcessor = createNoiseGateProcessor(
+				noiseGateThreshold,
+				onSpeakingChange,
+				onLevelChange,
+			);
+			await micPub.track.setProcessor(noiseGateProcessor);
+		}
 	}
 
 	function persistAndApply() {
@@ -357,6 +412,7 @@ function createVoiceStore() {
 			noiseGateThreshold,
 			noiseCancellationEnabled,
 			echoCancellationEnabled,
+			krispEnabled,
 		});
 	}
 
@@ -364,7 +420,7 @@ function createVoiceStore() {
 		noiseGateEnabled = v;
 		if (!v) micLevel = 0;
 		persistAndApply();
-		await setupNoiseGate();
+		await setupAudioProcessing();
 	}
 
 	function setNoiseGateThreshold(v: number) {
@@ -378,7 +434,9 @@ function createVoiceStore() {
 	async function setNoiseCancellationEnabled(v: boolean) {
 		noiseCancellationEnabled = v;
 		persistAndApply();
-		await republishMic();
+		if (!krispActive) {
+			await republishMic();
+		}
 	}
 
 	async function setEchoCancellationEnabled(v: boolean) {
@@ -387,20 +445,24 @@ function createVoiceStore() {
 		await republishMic();
 	}
 
+	async function setKrispEnabled(v: boolean) {
+		krispEnabled = v;
+		persistAndApply();
+		if (room && !isMuted) {
+			await republishMic();
+		}
+	}
+
 	async function republishMic() {
 		if (!room || isMuted) return;
-		// Stop processor before disabling mic
-		const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-		if (micPub?.track && noiseGateProcessor) {
-			await micPub.track.stopProcessor();
-			noiseGateProcessor = null;
-		}
+		// Clean up before republish
+		cleanupProcessors();
 		await room.localParticipant.setMicrophoneEnabled(false);
 		await room.localParticipant.setMicrophoneEnabled(true, {
 			echoCancellation: echoCancellationEnabled,
-			noiseSuppression: noiseCancellationEnabled,
+			noiseSuppression: krispActive || krispEnabled ? false : noiseCancellationEnabled,
 		});
-		await setupNoiseGate();
+		await setupAudioProcessing();
 	}
 
 	function getParticipants(channelId: string): string[] {
@@ -417,6 +479,8 @@ function createVoiceStore() {
 		get noiseGateThreshold() { return noiseGateThreshold; },
 		get noiseCancellationEnabled() { return noiseCancellationEnabled; },
 		get echoCancellationEnabled() { return echoCancellationEnabled; },
+		get krispEnabled() { return krispEnabled; },
+		get krispActive() { return krispActive; },
 		get micLevel() { return micLevel; },
 		handleVoiceStateInitial,
 		handleVoiceStateUpdate,
@@ -428,6 +492,7 @@ function createVoiceStore() {
 		setNoiseGateThreshold,
 		setNoiseCancellationEnabled,
 		setEchoCancellationEnabled,
+		setKrispEnabled,
 	};
 }
 

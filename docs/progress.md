@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 12 — Voice Channels with LiveKit
-**Last deviation:** Voice Fixes: Stereo, Noise Gate Scaling, Mic Level, Sound Guards
+**Last deviation:** Composite Krisp + Noise Gate Processor
 **Next run:** Run 13
 
 ---
@@ -421,6 +421,21 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Sound guards**: `handleVoiceStateUpdate` returns early when `currentChannelId` is null — no more phantom join/leave sounds when not in voice.
 - **Working:** Noise gate, stereo playback, mic level indicator, sound guards, speaking indicator
 - **Still broken:** Echo cancellation (muted `<audio>` element breaks browser's echo reference signal), noise suppression (untested with noise gate disabled — may work but needs verification)
+- `bun run build` passes clean
+
+### Deviation (2026-03-10) — Fix Echo Cancellation via MediaStreamAudioDestinationNode
+- **Problem**: Previous stereo fix muted the `<audio>` element and routed audio through `ctx.destination` directly. The browser's echo canceller correlates audio played through `<audio>` elements with mic input — a muted element provides no reference signal, so echoes passed through uncancelled.
+- **Fix**: Changed `handleTrackSubscribed` to route the stereo upmix pipeline (`source → splitter → merger`) to a `MediaStreamAudioDestinationNode` instead of `ctx.destination`. The destination node's `.stream` is set as `el.srcObject`, replacing the original mono stream with stereo. The `<audio>` element is left unmuted and plays normally, giving the browser's echo canceller a proper reference signal.
+- **Cleanup**: `handleTrackUnsubscribed` now also disconnects the stored `MediaStreamAudioDestinationNode` alongside the source node.
+- **No changes** to `leave()`/`handleDisconnect()` — shared AudioContext cleanup was already correct.
+- `bun run build` passes clean
+
+### Deviation (2026-03-10) — Composite Krisp + Noise Gate Processor
+- **Problem**: Krisp as sole track processor left residual crackles audible between speech — no gain gating to fully mute artifacts when user isn't speaking.
+- **Composite processor** (`createCompositeProcessor` in `noise-gate.ts`): Chains Krisp → Noise Gate in a single `TrackProcessor`. On `init()`/`restart()`, calls `krispProcessor.init()` first, then feeds `krispProcessor.processedTrack` into the noise gate Web Audio pipeline (source → analyser → gain → destination). Composite's `processedTrack` is the gate output.
+- **Removed `createSpeakingDetector()`**: No longer needed — the composite's noise gate handles both level monitoring and gain gating internally.
+- **Voice store simplified**: Removed `krispProcessor` and `speakingDetector` variables, replaced by single `noiseGateProcessor` ref. Three modes: Krisp + noise gate (composite, recommended), Krisp only (wrapped with no-op setThreshold), noise gate only (standalone, unchanged).
+- **UI**: Noise gate toggle now always visible in AudioSettingsPopover (was hidden when Krisp active). Users can disable gate for Krisp-only mode or enable both. Threshold slider shown when noise gate is enabled.
 - `bun run build` passes clean
 
 ## Known Deviations from Plan
