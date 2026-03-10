@@ -14,7 +14,7 @@ import (
 
 const createChannel = `-- name: CreateChannel :one
 INSERT INTO channels (name, topic, position, is_voice)
-VALUES ($1, $2, $3, false)
+VALUES ($1, $2, $3, $4)
 RETURNING id, name, topic, is_voice, position, created_at
 `
 
@@ -22,10 +22,16 @@ type CreateChannelParams struct {
 	Name     string
 	Topic    sql.NullString
 	Position int32
+	IsVoice  bool
 }
 
 func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (Channel, error) {
-	row := q.db.QueryRowContext(ctx, createChannel, arg.Name, arg.Topic, arg.Position)
+	row := q.db.QueryRowContext(ctx, createChannel,
+		arg.Name,
+		arg.Topic,
+		arg.Position,
+		arg.IsVoice,
+	)
 	var i Channel
 	err := row.Scan(
 		&i.ID,
@@ -67,6 +73,41 @@ func (q *Queries) GetChannel(ctx context.Context, id uuid.UUID) (Channel, error)
 	return i, err
 }
 
+const listAllChannels = `-- name: ListAllChannels :many
+SELECT id, name, topic, is_voice, position, created_at FROM channels
+ORDER BY position ASC, created_at ASC
+`
+
+func (q *Queries) ListAllChannels(ctx context.Context) ([]Channel, error) {
+	rows, err := q.db.QueryContext(ctx, listAllChannels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Channel
+	for rows.Next() {
+		var i Channel
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Topic,
+			&i.IsVoice,
+			&i.Position,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannels = `-- name: ListChannels :many
 SELECT id, name, topic, is_voice, position, created_at FROM channels
 WHERE is_voice = false
@@ -75,6 +116,42 @@ ORDER BY position ASC, created_at ASC
 
 func (q *Queries) ListChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := q.db.QueryContext(ctx, listChannels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Channel
+	for rows.Next() {
+		var i Channel
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Topic,
+			&i.IsVoice,
+			&i.Position,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVoiceChannels = `-- name: ListVoiceChannels :many
+SELECT id, name, topic, is_voice, position, created_at FROM channels
+WHERE is_voice = true
+ORDER BY position ASC, created_at ASC
+`
+
+func (q *Queries) ListVoiceChannels(ctx context.Context) ([]Channel, error) {
+	rows, err := q.db.QueryContext(ctx, listVoiceChannels)
 	if err != nil {
 		return nil, err
 	}

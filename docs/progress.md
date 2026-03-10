@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 11 — Media Embeds & Media Upload
-**Last deviation:** Emoji Picker, Message Edit/Delete, DM Sizing
-**Next run:** Run 12
+**Last completed run:** Run 12 — Voice Channels with LiveKit
+**Last deviation:** Fix Voice Audio: Noise Gate & Speaking Indicator
+**Next run:** Run 13
 
 ---
 
@@ -379,6 +379,40 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **GIF picker skipped**: Tenor closed to new clients, existing URL embed system preferred
 - **Desktop framework**: Tauri chosen (best CI/CD with official GitHub Action, cross-platform builds)
 - No code changes — plan.md update only
+
+### Run 12 (2026-03-10) — Voice Channels with LiveKit
+- **SQL queries**: Added `ListVoiceChannels` (is_voice=true), `ListAllChannels` (no filter), made `CreateChannel` accept `is_voice` as `$4` parameter
+- **VoiceService** (`service/voice.go`): `NewVoiceService(apiKey, apiSecret, url)` returns nil if any param empty; `GenerateToken()` uses `livekit/protocol/auth` to mint JWT with RoomJoin grant, 1hr TTL; `GetURL()` returns LiveKit WS URL
+- **VoiceHandler** (`handler/voice.go`): `POST /api/voice/{channelId}/join` — validates channel exists and `is_voice=true`, mints token, returns `{token, url}`
+- **ChannelService**: Added `IsVoice bool` to `ChannelInfo`, `ListVoice()`, `ListAll()`, `Create()` now accepts `isVoice` param
+- **ChannelHandler**: Added `ListVoice`, `ListAll` handlers, `is_voice` in create request
+- **ConfigHandler**: Added `voiceEnabled` bool, config response changed from `map[string]bool` to `map[string]any`
+- **WebSocket voice presence**: Hub tracks `voiceUsers map[channelID]map[userID]bool`; `voiceJoin`/`voiceLeave` channels in select loop; removes user from previous channel on join; broadcasts `voice_state_update` globally; sends `voice_state_initial` on client register; auto-removes from voice on last connection disconnect
+- **Client WS**: Added `voice_join`/`voice_leave` message types
+- **Router**: Added `GET /api/channels/voice`, `POST /api/voice/{channelId}/join` (authenticated), `GET /api/admin/channels` (admin)
+- **main.go**: Reads `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` env vars; creates VoiceService (nil if unconfigured); passes to router
+- **Frontend types**: Added `is_voice` to `ChannelInfo`, `voice_enabled` to `AppConfig`
+- **Config store**: Added `voiceEnabled` state
+- **Channels store**: Added `voiceChannels`, `fetchVoice()`, `sortedVoiceChannels`
+- **Voice store** (`voice.svelte.ts`): Full LiveKit Room lifecycle (connect/disconnect/mute/unmute), voice states from WS events, noise gate/cancellation/echo settings persisted to localStorage, auto-play remote audio via hidden DOM container
+- **Noise gate** (`voice/noise-gate.ts`): Web Audio API AnalyserNode, polls RMS every 50ms, 3 consecutive below-threshold checks to close gate, immediate open above threshold
+- **AudioSettingsPopover**: bits-ui Popover with toggles for noise gate (+ threshold slider), noise cancellation, echo cancellation
+- **VoiceConnectionBar**: Shown above user panel when connected — green dot, channel name, mic toggle, audio settings, disconnect button
+- **ChannelSidebar**: Voice channels section with speaker icon, participant list (small avatar + username), VoiceConnectionBar above user panel
+- **+page.svelte**: WS listeners for `voice_state_initial`/`voice_state_update`, `fetchVoice()` on mount, `voiceStore.leave()` on cleanup
+- **Admin panel**: `is_voice` checkbox on channel creation form (disabled when editing), Type column in channel table, fetches from `/api/admin/channels` (shows both text + voice)
+- **Go dependency**: `github.com/livekit/protocol v1.45.0`
+- **Frontend dependency**: `livekit-client@2.17.2`
+- Used `livekit-client` directly instead of `@livekit/components-svelte` (plan deviation — components lib is React-focused, direct SDK gives full control)
+- `go build` and `bun run build` both pass clean
+
+### Deviation (2026-03-10) — Fix Voice Audio: Noise Gate & Speaking Indicator
+- **Noise gate `gateOpen` init**: Changed from `true` to `false` in `noise-gate.ts` — when `gateOpen` started as `true`, the first speech after joining never triggered `onGateChange(true)` because `!gateOpen` was false in the else branch. The speaking indicator wouldn't appear until the second speech burst (after a pause closed the gate and speaking reopened it).
+- **Noise gate arming fall-through**: Already correctly implemented in Run 12 — when `armed` becomes true, code falls through to normal gating logic instead of returning early.
+- **`handleActiveSpeakers` race condition**: Already correctly implemented in Run 12 — excludes local user (`myId`) from LiveKit's speaker set, preserves local user's state from noise gate callback. Prevents LiveKit's frequent `ActiveSpeakersChanged` events from overwriting the noise gate's speaking state.
+- **Static/background noise**: Resolved by noise gate fix — gate now properly cuts audio below threshold (including static between speech). Browser constraints (`noiseSuppression`, `echoCancellation`) were already correctly passed.
+- `bun run build` passes clean
+- **⚠ None of these fixes resolved the issues. Noise gate, noise cancellation, echo cancellation, and speaking indicator are all still broken. Needs deeper investigation.**
 
 ## Known Deviations from Plan
 

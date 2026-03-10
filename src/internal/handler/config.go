@@ -8,14 +8,16 @@ import (
 
 type ConfigHandler struct {
 	uploadsEnabled bool
+	voiceEnabled   bool
 }
 
-func NewConfigHandler(uploadsEnabled bool) *ConfigHandler {
-	return &ConfigHandler{uploadsEnabled: uploadsEnabled}
+func NewConfigHandler(uploadsEnabled, voiceEnabled bool) *ConfigHandler {
+	return &ConfigHandler{uploadsEnabled: uploadsEnabled, voiceEnabled: voiceEnabled}
 }
 
 func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, map[string]bool{
+	httputil.WriteJSON(w, http.StatusOK, map[string]any{
 		"uploads_enabled": h.uploadsEnabled,
+		"voice_enabled":   h.voiceEnabled,
 	})
 }

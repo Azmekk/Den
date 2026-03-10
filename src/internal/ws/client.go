@@ -191,6 +191,12 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			c.hub.BroadcastGlobal(data)
 		}
 
+	case "voice_join":
+		c.hub.VoiceJoin(c, msg.ChannelID)
+
+	case "voice_leave":
+		c.hub.VoiceLeave(c)
+
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{
 			"type":       "typing_start",

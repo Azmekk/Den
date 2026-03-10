@@ -13,18 +13,22 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
 	authH := handler.NewAuthHandler(authSvc, hub)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc, hub)
 	userH := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminH := handler.NewAdminHandler(adminSvc)
 	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
-	configH := handler.NewConfigHandler(bucketConfigured)
+	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil)
 	dmH := handler.NewDMHandler(dmSvc)
 	var mediaH *handler.MediaHandler
 	if mediaSvc != nil {
 		mediaH = handler.NewMediaHandler(mediaSvc)
+	}
+	var voiceH *handler.VoiceHandler
+	if voiceSvc != nil {
+		voiceH = handler.NewVoiceHandler(voiceSvc, channelSvc)
 	}
 
 	r := chi.NewRouter()
@@ -52,6 +56,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Get("/me", authH.Me)
 			r.Post("/change-password", authH.ChangePassword)
 			r.Get("/channels", channelH.List)
+			r.Get("/channels/voice", channelH.ListVoice)
 			r.Get("/channels/unread", channelH.GetUnreadCounts)
 			r.Get("/channels/{id}", channelH.Get)
 			r.Put("/channels/{id}/read", channelH.MarkRead)
@@ -75,6 +80,9 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				r.Post("/upload/image", mediaH.UploadImage)
 				r.Post("/upload/video", mediaH.UploadVideo)
 			}
+			if voiceH != nil {
+				r.Post("/voice/{channelId}/join", voiceH.Join)
+			}
 
 			// Admin only
 			r.Group(func(r chi.Router) {
@@ -85,6 +93,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				r.Post("/emotes", emoteH.Create)
 				r.Delete("/emotes/{id}", emoteH.Delete)
 
+				r.Get("/admin/channels", channelH.ListAll)
 				r.Route("/admin", func(r chi.Router) {
 					r.Get("/users", adminH.ListUsers)
 					r.Put("/users/{id}/admin", adminH.SetAdmin)

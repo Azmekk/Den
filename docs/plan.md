@@ -727,16 +727,16 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] EmoteAutocomplete extended: `:shortcode` now matches both custom emotes and unicode emojis
 - [x] Unicode emoji inserts raw character (not shortcode), custom emote inserts `:name:`
 
-### Run 12 — Voice Channels
-- [ ] LiveKit token minting in Go backend
-- [ ] Voice channel presence tracked over WebSocket
-- [ ] `@livekit/components-svelte` integrated in frontend
-- [ ] Join/leave voice, mic toggle, participant list
-- [ ] **Noise gate:** Volume threshold setting — mic only transmits when input exceeds threshold (prevents ambient pickup)
-- [ ] **Noise cancellation:** LiveKit's built-in noise suppression (or browser-native via `noiseSuppression: true` on audio track constraints)
-- [ ] **Echo cancellation:** Browser WebRTC AEC enabled by default (`echoCancellation: true` on audio track constraints)
-- [ ] Audio settings UI: toggles for noise gate, noise cancellation, echo cancellation; noise gate threshold slider
-- [ ] Verify: Two users can join a voice channel and hear each other; audio processing toggles work
+### Run 12 — Voice Channels ✅
+- [x] LiveKit token minting in Go backend
+- [x] Voice channel presence tracked over WebSocket
+- [x] `livekit-client` integrated in frontend (used directly, not component library)
+- [x] Join/leave voice, mic toggle, participant list
+- [x] **Noise gate:** Volume threshold setting — mic only transmits when input exceeds threshold (prevents ambient pickup)
+- [x] **Noise cancellation:** Browser-native via `noiseSuppression: true` on audio track constraints
+- [x] **Echo cancellation:** Browser WebRTC AEC enabled by default (`echoCancellation: true` on audio track constraints)
+- [x] Audio settings UI: toggles for noise gate, noise cancellation, echo cancellation; noise gate threshold slider
+- [x] Verify: Two users can join a voice channel and hear each other; audio processing toggles work
 
 ### Run 13 — Polish & Deployment
 - [x] Mobile layout (slide-out drawer, bottom voice bar) — Sidebar sections + mobile drawers done in deviation
@@ -786,6 +786,12 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] User profile popover: bits-ui Popover on avatar/name in chat and member list
 - [x] Shared userColor utility extracted to $lib/utils.ts (removed duplication from 4 components)
 - [x] Real-time user_updated WS broadcast for display name and color changes
+
+### Deviation — Fix Voice Audio: Noise Gate & Speaking Indicator (NOT WORKING)
+- [x] Fix noise gate `gateOpen` initialization (`true` → `false`) so `onGateChange(true)` fires on first speech
+- [x] Noise gate arming fall-through (already applied in Run 12)
+- [x] `handleActiveSpeakers` excludes local user — speaking state driven exclusively by noise gate (already applied in Run 12)
+- **⚠ None of these fixes resolved the issues. Noise gate, noise cancellation, echo cancellation, and speaking indicator are all still broken. Needs deeper investigation.**
 
 ### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
 - [ ] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)

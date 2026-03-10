@@ -3,6 +3,7 @@ export interface ChannelInfo {
 	name: string;
 	topic?: string;
 	position: number;
+	is_voice?: boolean;
 	created_at: string;
 }
 
@@ -56,6 +57,7 @@ export interface EmoteInfo {
 
 export interface AppConfig {
 	uploads_enabled: boolean;
+	voice_enabled?: boolean;
 }
 
 export interface SearchResult {

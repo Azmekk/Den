@@ -23,7 +23,7 @@ let usersLoading = $state(false);
 let channels = $state<ChannelInfo[]>([]);
 let channelsLoading = $state(false);
 let showChannelForm = $state(false);
-let channelForm = $state({ name: '', topic: '', position: 0 });
+let channelForm = $state({ name: '', topic: '', position: 0, is_voice: false });
 let editingChannelId = $state<string | null>(null);
 
 // Stats
@@ -87,7 +87,7 @@ async function fetchUsers() {
 async function fetchChannels() {
 	channelsLoading = true;
 	try {
-		const res = await fetch('/api/channels', { headers: headers() });
+		const res = await fetch('/api/admin/channels', { headers: headers() });
 		if (res.ok) channels = await res.json();
 	} finally {
 		channelsLoading = false;
@@ -171,13 +171,13 @@ async function saveChannel() {
 	}
 	showChannelForm = false;
 	editingChannelId = null;
-	channelForm = { name: '', topic: '', position: 0 };
+	channelForm = { name: '', topic: '', position: 0, is_voice: false };
 	await fetchChannels();
 }
 
 function editChannel(ch: ChannelInfo) {
 	editingChannelId = ch.id;
-	channelForm = { name: ch.name, topic: ch.topic || '', position: ch.position };
+	channelForm = { name: ch.name, topic: ch.topic || '', position: ch.position, is_voice: ch.is_voice ?? false };
 	showChannelForm = true;
 }
 
@@ -386,7 +386,7 @@ function switchTab(tab: typeof activeTab) {
 			<!-- Channels Tab -->
 			<div class="mb-4">
 				<button
-					onclick={() => { editingChannelId = null; channelForm = { name: '', topic: '', position: 0 }; showChannelForm = true; }}
+					onclick={() => { editingChannelId = null; channelForm = { name: '', topic: '', position: 0, is_voice: false }; showChannelForm = true; }}
 					class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
 				>
 					Create Channel
@@ -413,6 +413,15 @@ function switchTab(tab: typeof activeTab) {
 							placeholder="Position"
 							class="w-24 rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
+						<label class="flex items-center gap-1.5 text-sm text-foreground whitespace-nowrap">
+							<input
+								type="checkbox"
+								bind:checked={channelForm.is_voice}
+								class="h-4 w-4 rounded border-border"
+								disabled={!!editingChannelId}
+							/>
+							Voice
+						</label>
 						<button onclick={saveChannel} class="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
 							{editingChannelId ? 'Save' : 'Create'}
 						</button>
@@ -431,6 +440,7 @@ function switchTab(tab: typeof activeTab) {
 						<thead>
 							<tr class="border-b border-border bg-secondary/50">
 								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
+								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
 								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Topic</th>
 								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Position</th>
 								<th class="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
@@ -439,7 +449,8 @@ function switchTab(tab: typeof activeTab) {
 						<tbody>
 							{#each channels as channel (channel.id)}
 								<tr class="border-b border-border last:border-0">
-									<td class="px-4 py-3 font-medium text-foreground">#{channel.name}</td>
+									<td class="px-4 py-3 font-medium text-foreground">{channel.is_voice ? '' : '#'}{channel.name}</td>
+									<td class="px-4 py-3 text-muted-foreground">{channel.is_voice ? 'Voice' : 'Text'}</td>
 									<td class="px-4 py-3 text-muted-foreground">{channel.topic || '-'}</td>
 									<td class="px-4 py-3 text-muted-foreground">{channel.position}</td>
 									<td class="px-4 py-3 text-right">

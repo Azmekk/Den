@@ -77,6 +77,17 @@ func main() {
 		log.Println("media upload enabled, cleanup loop started")
 	}
 
+	voiceSvc := service.NewVoiceService(
+		os.Getenv("LIVEKIT_API_KEY"),
+		os.Getenv("LIVEKIT_API_SECRET"),
+		os.Getenv("LIVEKIT_URL"),
+	)
+	if voiceSvc != nil {
+		log.Println("voice channels enabled (LiveKit configured)")
+	} else {
+		log.Println("voice channels disabled (LIVEKIT_* env vars not set)")
+	}
+
 	hub := ws.NewHub()
 	go hub.Run()
 
@@ -85,7 +96,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, hub, staticFS, bucketSvc != nil)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

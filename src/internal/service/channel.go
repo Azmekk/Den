@@ -29,6 +29,7 @@ type ChannelInfo struct {
 	Name      string    `json:"name"`
 	Topic     string    `json:"topic,omitempty"`
 	Position  int32     `json:"position"`
+	IsVoice   bool      `json:"is_voice"`
 	CreatedAt string    `json:"created_at"`
 }
 
@@ -37,6 +38,7 @@ func channelInfoFromDB(ch db.Channel) ChannelInfo {
 		ID:        ch.ID,
 		Name:      ch.Name,
 		Position:  ch.Position,
+		IsVoice:   ch.IsVoice,
 		CreatedAt: ch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if ch.Topic.Valid {
@@ -68,7 +70,31 @@ func (s *ChannelService) Get(ctx context.Context, id uuid.UUID) (ChannelInfo, er
 	return channelInfoFromDB(ch), nil
 }
 
-func (s *ChannelService) Create(ctx context.Context, name, topic string, position int32) (ChannelInfo, error) {
+func (s *ChannelService) ListVoice(ctx context.Context) ([]ChannelInfo, error) {
+	channels, err := s.queries.ListVoiceChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ChannelInfo, len(channels))
+	for i, ch := range channels {
+		result[i] = channelInfoFromDB(ch)
+	}
+	return result, nil
+}
+
+func (s *ChannelService) ListAll(ctx context.Context) ([]ChannelInfo, error) {
+	channels, err := s.queries.ListAllChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ChannelInfo, len(channels))
+	for i, ch := range channels {
+		result[i] = channelInfoFromDB(ch)
+	}
+	return result, nil
+}
+
+func (s *ChannelService) Create(ctx context.Context, name, topic string, position int32, isVoice bool) (ChannelInfo, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
 		return ChannelInfo{}, ErrInvalidInput
@@ -78,6 +104,7 @@ func (s *ChannelService) Create(ctx context.Context, name, topic string, positio
 		Name:     name,
 		Topic:    sql.NullString{String: topic, Valid: topic != ""},
 		Position: position,
+		IsVoice:  isVoice,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
