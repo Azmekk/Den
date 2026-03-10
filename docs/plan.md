@@ -732,7 +732,11 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [ ] Voice channel presence tracked over WebSocket
 - [ ] `@livekit/components-svelte` integrated in frontend
 - [ ] Join/leave voice, mic toggle, participant list
-- [ ] Verify: Two users can join a voice channel and hear each other
+- [ ] **Noise gate:** Volume threshold setting — mic only transmits when input exceeds threshold (prevents ambient pickup)
+- [ ] **Noise cancellation:** LiveKit's built-in noise suppression (or browser-native via `noiseSuppression: true` on audio track constraints)
+- [ ] **Echo cancellation:** Browser WebRTC AEC enabled by default (`echoCancellation: true` on audio track constraints)
+- [ ] Audio settings UI: toggles for noise gate, noise cancellation, echo cancellation; noise gate threshold slider
+- [ ] Verify: Two users can join a voice channel and hear each other; audio processing toggles work
 
 ### Run 13 — Polish & Deployment
 - [x] Mobile layout (slide-out drawer, bottom voice bar) — Sidebar sections + mobile drawers done in deviation
@@ -782,6 +786,48 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] User profile popover: bits-ui Popover on avatar/name in chat and member list
 - [x] Shared userColor utility extracted to $lib/utils.ts (removed duplication from 4 components)
 - [x] Real-time user_updated WS broadcast for display name and color changes
+
+### Run 14 — Avatar Cropper Fix & Old Avatar Cleanup
+- [ ] Fix avatar cropper image positioning bug (image not positioned correctly in cropperjs modal)
+- [ ] Delete old avatar from bucket when uploading a new one (in `UpdateAvatar()`, delete previous bucket key before storing new file — prevents orphaned files when format changes e.g. PNG→WebP)
+- [ ] Verify: Cropper displays image correctly, old avatar file is removed from bucket after re-upload
+
+### Run 15 — Bucket Storage Limit
+- [ ] Migration: add `file_size BIGINT NOT NULL` column to `media_uploads` table
+- [ ] Backend: record file size on every upload (images, videos — avatars and emotes are permanent and small, can be excluded or included)
+- [ ] Backend: `GetTotalBucketUsage()` query — `SELECT COALESCE(SUM(file_size), 0) FROM media_uploads`
+- [ ] Backend: pre-upload size check — sum current usage + incoming file size, reject with 413 if over `MAX_BUCKET_STORAGE` limit
+- [ ] Admin UI: display current bucket usage and configured limit in admin panel (Storage tab or Settings tab)
+- [ ] `MAX_BUCKET_STORAGE` env var (e.g. `1GB`, `500MB`) parsed at startup, default unlimited
+- [ ] Verify: Upload works under limit, returns 413 when limit would be exceeded
+
+### Run 16 — Admin-Configurable Message Limits
+- [ ] **Message count limit:** Admin-configurable max total messages across the instance (replaces hardcoded concept from plan)
+- [ ] Background cleanup job: when limit is exceeded, delete oldest N messages (pinned messages exempt)
+- [ ] Admin UI: current message count vs limit, manual cleanup trigger, configurable threshold
+- [ ] **Message character limit:** Admin-configurable max characters per message (currently hardcoded at 2000)
+- [ ] Backend: read character limit from admin settings instead of constant in `message_service.go` and `dm_service.go`
+- [ ] Frontend: enforce character limit in message input (show counter, disable send when exceeded)
+- [ ] Persist both settings to DB (admin settings table or similar — currently in-memory only)
+- [ ] Verify: Admin can change both limits; message cleanup runs when count limit exceeded; oversized messages rejected
+
+### Run 17 — Admin Media Manager
+- [ ] Backend: `GET /api/admin/media` — list all media uploads with metadata (uploader, filename, size, type, upload date, expiry)
+- [ ] Backend: `DELETE /api/admin/media/{id}` — delete a specific media file from bucket + DB
+- [ ] Backend: `GET /api/admin/media/stats` — total count, total size, breakdown by type
+- [ ] Admin UI: new "Media" tab in admin panel — sortable/filterable table of uploads, delete button per item, bulk delete
+- [ ] Admin UI: storage stats summary (total size, count, usage by type chart or breakdown)
+- [ ] Verify: Admin can browse, inspect, and delete uploaded media files
+
+### Run 18 — Tauri Desktop Wrapper
+- [ ] Initialize Tauri project alongside existing SvelteKit frontend
+- [ ] `tauri.conf.json` configuration (window size, title, app identifier)
+- [ ] Auth token storage (system keychain via Tauri's secure storage vs localStorage)
+- [ ] System tray with online/offline indicator
+- [ ] Desktop notifications for mentions (native OS notifications)
+- [ ] GitHub Actions workflow using `tauri-apps/tauri-action` for cross-platform builds (Windows, macOS, Linux)
+- [ ] Auto-updater configuration
+- [ ] Verify: App launches as native window, connects to server, chat works, notifications fire on mention
 
 ---
 
