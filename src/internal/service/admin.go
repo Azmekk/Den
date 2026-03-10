@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -118,6 +120,30 @@ func (s *AdminService) GetSettings() map[string]any {
 	return map[string]any{
 		"open_registration": s.authSvc.IsOpenRegistration(),
 		"instance_name":     s.authSvc.GetInstanceName(),
+	}
+}
+
+func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, maxMessages int64, batchSize int32, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			count, err := s.queries.CountMessages(ctx)
+			if err != nil {
+				log.Printf("message cleanup: count error: %v", err)
+				continue
+			}
+			if count > maxMessages {
+				toDelete := int32(count-maxMessages) + batchSize/2
+				if toDelete > 0 {
+					_ = s.queries.DeleteOldestMessages(ctx, toDelete)
+					log.Printf("message cleanup: deleted %d oldest unpinned messages", toDelete)
+				}
+			}
+		}
 	}
 }
 

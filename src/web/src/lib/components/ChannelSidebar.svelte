@@ -173,7 +173,7 @@ const tab = $derived(layoutStore.sidebarTab);
 					{@const participants = voiceStore.getParticipants(channel.id)}
 					<button
 						onclick={() => { voiceStore.join(channel.id); onNavigate?.(); }}
-						class="flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition-colors {voiceStore.currentChannelId === channel.id
+						class="flex w-full items-center rounded px-2 py-2 min-h-11 text-left text-sm transition-colors {voiceStore.currentChannelId === channel.id
 							? 'bg-secondary text-foreground font-medium'
 							: 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
 					>

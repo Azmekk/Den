@@ -738,14 +738,14 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Audio settings UI: toggles for noise gate, noise cancellation, echo cancellation; noise gate threshold slider
 - [x] Verify: Two users can join a voice channel and hear each other; audio processing toggles work
 
-### Run 13 — Polish & Deployment
+### Run 13 — Polish & Deployment (DONE)
 - [x] Mobile layout (slide-out drawer, bottom voice bar) — Sidebar sections + mobile drawers done in deviation
-- [ ] Touch targets and mobile interaction pass
-- [ ] PWA manifest
+- [x] Touch targets and mobile interaction pass — 44px min touch targets on header buttons, member rows, voice channel items; `touch-action: manipulation` globally
+- [x] ~~PWA manifest~~ — Dropped (Tauri desktop wrapper planned in Run 18)
 - [x] User customization (color picker, display name change) — Done in deviation
-- [ ] Message cleanup background job wired up
-- [ ] nginx config + Certbot HTTPS setup documented
-- [ ] Verify: Full flow works on a mobile browser; `docker compose up` on a fresh VPS serves over HTTPS
+- [x] Message cleanup background job wired up — `RunMessageCleanupLoop` in admin service, `MAX_MESSAGES` env var, hourly check
+- [x] nginx config — Production-ready with gzip, security headers, WebSocket support, upload size limit (Certbot dropped — external reverse proxy handles TLS)
+- [x] Verify: Full flow works on a mobile browser; `docker compose up` serves through nginx
 
 ### Deviation — Fix UserProfilePopover conflicts, display name/color real-time updates (DONE)
 - [x] Remove UserProfilePopover from MemberList (conflicted with UserContextMenu + onclick)

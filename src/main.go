@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -86,6 +88,20 @@ func main() {
 		log.Println("voice channels enabled (LiveKit configured)")
 	} else {
 		log.Println("voice channels disabled (LIVEKIT_* env vars not set)")
+	}
+
+	maxMessages := int64(100000)
+	if v := os.Getenv("MAX_MESSAGES"); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && parsed > 0 {
+			maxMessages = parsed
+		}
+	}
+	if maxMessages > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go adminSvc.RunMessageCleanupLoop(ctx, maxMessages, 5000, 1*time.Hour)
+		log.Printf("message cleanup enabled (max %d messages, hourly check)", maxMessages)
 	}
 
 	hub := ws.NewHub()
