@@ -864,15 +864,10 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] `UploadImage` and `UploadVideo` now record `file_size` on insert
 - [x] Verify: Backend builds, frontend builds, migration applied
 
-### Run 18 — Tauri Desktop Wrapper
-- [ ] Initialize Tauri project alongside existing SvelteKit frontend
-- [ ] `tauri.conf.json` configuration (window size, title, app identifier)
-- [ ] Auth token storage (system keychain via Tauri's secure storage vs localStorage)
-- [ ] System tray with online/offline indicator
-- [ ] Desktop notifications for mentions (native OS notifications)
-- [ ] GitHub Actions workflow using `tauri-apps/tauri-action` for cross-platform builds (Windows, macOS, Linux)
-- [ ] Auto-updater configuration
-- [ ] Verify: App launches as native window, connects to server, chat works, notifications fire on mention
+### Run 18 — Tauri Desktop Wrapper ❌ ABANDONED
+- **Reason:** Tauri uses WebView2 (Windows) which has broken/limited WebRTC support. LiveKit voice connections fail with "could not establish pc connection" — the LiveKit server immediately sends `leave-reconnect` signals and the PeerConnection never establishes. This works fine in a regular browser (Chrome/Edge) on the same machine.
+- **Conclusion:** Tauri is not viable for Den due to WebView2's WebRTC limitations. A future desktop wrapper should use Electron (ships full Chromium with proper WebRTC support) instead.
+- All Tauri code has been reverted.
 
 ---
 

@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 17 — Admin Media Manager
+**Last completed run:** Run 17 — Media Manager
 **Last deviation:** Invitation Codes Feature
-**Next run:** Run 18
+**Next run:** Run 18 (Run 18 Tauri was abandoned — see below)
 
 ---
 
@@ -510,6 +510,12 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - Frontend types: `MediaUploadInfo`, `MediaTypeStats`, `MediaStats`
 - Admin panel: added "Media" tab with stats cards (total uploads, total size, per-type breakdown), filter buttons (All/Images/Videos), sortable table (by created_at, file_size, media_type), select-all checkbox + bulk delete bar, individual delete with confirmation modal
 - No deviations from plan
+
+### Run 18 — Tauri Desktop Wrapper ❌ ABANDONED
+- Fully implemented: `denFetch` wrapper, `server.svelte.ts`, dual-mode auth, CORS middleware, `/connect` page, Tauri v2 project, system tray, notifications, auto-updater, GitHub Actions CI
+- **Problem:** WebView2 (Tauri's Windows webview) has broken/limited WebRTC support. LiveKit voice connections fail — the server immediately sends `leave-reconnect` signals and PeerConnection never establishes, even though the signaling WebSocket connects fine (101). The same voice setup works perfectly in a regular browser on the same machine.
+- **Decision:** Reverted all changes. Tauri is not viable for Den due to WebView2 WebRTC limitations. Future desktop wrapper should use Electron (ships full Chromium with proper WebRTC).
+- All code reverted to pre-Run 18 state
 
 ---
 
