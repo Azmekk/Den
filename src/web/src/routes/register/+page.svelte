@@ -20,6 +20,11 @@ async function handleSubmit(e: Event) {
 	e.preventDefault();
 	error = '';
 
+	if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+		error = 'username can only contain letters, numbers, underscores, and hyphens';
+		return;
+	}
+
 	if (password !== confirmPassword) {
 		error = 'passwords do not match';
 		return;
@@ -60,6 +65,8 @@ async function handleSubmit(e: Event) {
 					required
 					autocomplete="username"
 					maxlength={32}
+					pattern="[a-zA-Z0-9_\-]+"
+					title="Letters, numbers, underscores, and hyphens only"
 					class="w-full rounded-md border border-input bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 					placeholder="Choose a username"
 				/>

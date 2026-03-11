@@ -28,12 +28,13 @@ $effect(() => {
 </script>
 
 {#if websocket.reconnecting}
-	<div class="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 bg-amber-600 px-4 py-1.5 text-sm font-medium text-white shadow-md">
-		<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+	<div class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
+		<svg class="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24" fill="none">
 			<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
 			<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
 		</svg>
-		Connection lost. Reconnecting...
+		<p class="mt-4 text-lg font-medium text-foreground">Connection lost</p>
+		<p class="mt-1 text-sm text-muted-foreground">Reconnecting...</p>
 	</div>
 {:else if showReconnected}
 	<div class="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-md">

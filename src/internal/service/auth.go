@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ var (
 	ErrInvalidInput       = errors.New("invalid input")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 )
+
+var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 var reservedUsernames = map[string]bool{
 	"everyone": true,
@@ -87,6 +90,9 @@ func (s *AuthService) Register(ctx context.Context, username, password, displayN
 	}
 	if len(username) > 32 {
 		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username too long", ErrInvalidInput)
+	}
+	if !usernameRegex.MatchString(username) {
+		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username can only contain letters, numbers, underscores, and hyphens", ErrInvalidInput)
 	}
 	if reservedUsernames[strings.ToLower(username)] {
 		return UserInfo{}, TokenPair{}, fmt.Errorf("%w: username is reserved", ErrInvalidInput)

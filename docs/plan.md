@@ -869,6 +869,23 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - **Conclusion:** Tauri is not viable for Den due to WebView2's WebRTC limitations. A future desktop wrapper should use Electron (ships full Chromium with proper WebRTC support) instead.
 - All Tauri code has been reverted.
 
+### Run 19 — UX Improvements & Fixes ✅
+- [x] Full-screen overlay for lost connection — replaces small amber banner with opaque overlay blocking all interaction, centered spinner + "Connection lost" message, z-50. Green "Reconnected!" banner kept.
+- [x] Username restrictions — regex validation `^[a-zA-Z0-9_-]+$` on both backend (`auth.go`) and frontend (`register/+page.svelte`) with `pattern` attribute and client-side check
+- [x] Custom scrollbars — thin dark-themed scrollbar styles in `app.css` using both `scrollbar-*` (Firefox) and `::-webkit-scrollbar` (Chrome/Edge), matching `--muted-foreground` theme color
+- [x] YouTube embed fix — client-side YouTube URL detection via regex, renders iframe directly without relying on unfurl. Supports `youtube.com/watch`, `youtu.be`, and `youtube.com/shorts` URLs.
+
+### Run 20 — Electron Desktop App
+- [ ] `src/desktop/` — new Electron project directory
+- [ ] `package.json` — Electron + electron-builder deps
+- [ ] `main.js` — main process: prompt for server URL on first launch, load in BrowserWindow, system tray with minimize-to-tray
+- [ ] `preload.js` — context bridge if needed
+- [ ] Store server URL + window state in electron-store or similar
+- [ ] First-launch dialog to enter Den server URL (persisted)
+- [ ] System tray with minimize-to-tray
+- [ ] Window state persistence (size, position)
+- [ ] Cross-platform builds (Windows, macOS, Linux)
+
 ---
 
 ## What's Explicitly Out of Scope

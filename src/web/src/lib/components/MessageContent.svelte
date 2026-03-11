@@ -107,15 +107,32 @@ function isVideoUrl(url: string): boolean {
 	return /\.(mp4|webm)(\?.*)?$/i.test(url);
 }
 
+function isYouTubeUrl(url: string): boolean {
+	return /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)[\w-]+/.test(url);
+}
+
+function getYouTubeEmbedUrlFromRaw(url: string): string | null {
+	const m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]+)/);
+	return m ? `https://www.youtube-nocookie.com/embed/${m[1]}` : null;
+}
+
 // Direct media embeds (image/video file URLs) — handled client-side
 const directEmbeds = $derived.by(() => {
 	return parts.filter((p) => p.type === 'url' && isDirectMediaUrl(p.value));
 });
 
-// URLs that need server-side unfurling (everything except direct media)
+// YouTube URLs — handled client-side without unfurl
+const youtubeEmbeds = $derived.by(() => {
+	return parts
+		.filter((p) => p.type === 'url' && isYouTubeUrl(p.value))
+		.map((p) => ({ url: p.value, embedUrl: getYouTubeEmbedUrlFromRaw(p.value) }))
+		.filter((e) => e.embedUrl !== null) as { url: string; embedUrl: string }[];
+});
+
+// URLs that need server-side unfurling (everything except direct media and YouTube)
 const unfurlUrls = $derived.by(() => {
 	return parts
-		.filter((p) => p.type === 'url' && !isDirectMediaUrl(p.value))
+		.filter((p) => p.type === 'url' && !isDirectMediaUrl(p.value) && !isYouTubeUrl(p.value))
 		.map((p) => p.value);
 });
 
@@ -220,8 +237,21 @@ function hasRichEmbed(data: UnfurlData): boolean {
 		{/each}
 	</p>
 
-	{#if directEmbeds.length > 0 || unfurlResults.size > 0}
+	{#if directEmbeds.length > 0 || youtubeEmbeds.length > 0 || unfurlResults.size > 0}
 		<div class="mt-1 flex flex-col items-start gap-1">
+			{#each youtubeEmbeds as yt}
+				<iframe
+					width="400"
+					height="225"
+					src={yt.embedUrl}
+					title="YouTube video"
+					frameborder="0"
+					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+					allowfullscreen
+					class="w-[400px] max-w-full rounded"
+				></iframe>
+			{/each}
+
 			{#each directEmbeds as embed}
 				{#if isImageUrl(embed.value)}
 					<a href={embed.value} target="_blank" rel="noopener noreferrer">
