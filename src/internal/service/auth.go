@@ -38,6 +38,7 @@ type AuthService struct {
 	jwtSecret        []byte
 	openRegistration bool
 	instanceName     string
+	validateInvite   func(ctx context.Context, code string) error
 }
 
 func NewAuthService(queries *db.Queries, jwtSecret string, openRegistration bool) *AuthService {
@@ -73,7 +74,11 @@ func UserInfoFromDB(u db.User) UserInfo {
 	return info
 }
 
-func (s *AuthService) Register(ctx context.Context, username, password, displayName string) (UserInfo, TokenPair, error) {
+func (s *AuthService) SetInviteValidator(fn func(ctx context.Context, code string) error) {
+	s.validateInvite = fn
+}
+
+func (s *AuthService) Register(ctx context.Context, username, password, displayName, inviteCode string) (UserInfo, TokenPair, error) {
 	if username == "" || password == "" {
 		return UserInfo{}, TokenPair{}, ErrInvalidInput
 	}
@@ -94,7 +99,14 @@ func (s *AuthService) Register(ctx context.Context, username, password, displayN
 
 	isFirstUser := count == 0
 	if !isFirstUser && !s.openRegistration {
-		return UserInfo{}, TokenPair{}, ErrRegistrationClosed
+		if inviteCode == "" {
+			return UserInfo{}, TokenPair{}, ErrRegistrationClosed
+		}
+		if s.validateInvite != nil {
+			if err := s.validateInvite(ctx, inviteCode); err != nil {
+				return UserInfo{}, TokenPair{}, err
+			}
+		}
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

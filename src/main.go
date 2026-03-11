@@ -68,6 +68,7 @@ func main() {
 	if err := adminSvc.LoadSettings(context.Background()); err != nil {
 		log.Fatalf("failed to load admin settings: %v", err)
 	}
+	authSvc.SetInviteValidator(adminSvc.ValidateAndUseInviteCode)
 	messageSvc := service.NewMessageService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
 	dmSvc := service.NewDMService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
 	userSvc := service.NewUserService(queries)

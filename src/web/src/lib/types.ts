@@ -61,6 +61,7 @@ export interface AppConfig {
 	uploads_enabled: boolean;
 	voice_enabled?: boolean;
 	max_message_chars: number;
+	open_registration?: boolean;
 }
 
 export interface SearchResult {

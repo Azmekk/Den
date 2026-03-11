@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -166,6 +167,53 @@ func (h *AdminHandler) BulkDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+}
+
+func (h *AdminHandler) ListInviteCodes(w http.ResponseWriter, r *http.Request) {
+	codes, err := h.svc.ListInviteCodes(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, codes)
+}
+
+func (h *AdminHandler) CreateInviteCode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MaxUses      *int32 `json:"max_uses"`
+		ExpiresInHours *int `json:"expires_in_hours"`
+	}
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresInHours != nil && *req.ExpiresInHours > 0 {
+		t := time.Now().Add(time.Duration(*req.ExpiresInHours) * time.Hour)
+		expiresAt = &t
+	}
+
+	callerID := middleware.UserIDFromContext(r.Context())
+	code, err := h.svc.CreateInviteCode(r.Context(), callerID, req.MaxUses, expiresAt)
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to create invite code")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, code)
+}
+
+func (h *AdminHandler) DeleteInviteCode(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid invite code id")
+		return
+	}
+	if err := h.svc.DeleteInviteCode(r.Context(), id); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to delete invite code")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "invite code deleted"})
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {

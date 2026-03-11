@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 17 — Admin Media Manager
-**Last deviation:** Fix Media Embeds & Server-Side URL Unfurling
+**Last deviation:** Invitation Codes Feature
 **Next run:** Run 18
 
 ---
@@ -483,6 +483,13 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Rich embed cards**: URLs with OG metadata render as bordered cards with site name, title, description, and thumbnail. Videos with `og:video` render with a `<video>` player + poster image.
 - **Video URLs show link text**: `embedUrls` set excludes video URLs, so `.mp4`/`.webm` links display both the clickable URL text and the video embed below.
 
+### Deviation — Invitation Codes Feature (2026-03-11)
+- **Database**: Migration 000012 creates `invite_codes` table (id, code, max_uses, use_count, expires_at, created_by, created_at).
+- **Backend**: `AdminService` gains `CreateInviteCode`, `ListInviteCodes`, `DeleteInviteCode`, `ValidateAndUseInviteCode` methods. `AuthService.Register` now accepts optional `inviteCode` parameter — when open registration is off and invite code provided, validates code (checks expiry + max uses) and increments use count.
+- **API**: 3 new admin endpoints (`GET/POST /api/admin/invite-codes`, `DELETE /api/admin/invite-codes/{id}`). `/api/config` now includes `open_registration`. Register endpoint accepts `invite_code` field.
+- **Frontend**: Config store exposes `openRegistration`. Register page conditionally shows invite code input when registration is closed. Admin panel adds "Invites" tab with create form (max uses, expiry), code table, copy-to-clipboard, and delete.
+- Both backend and frontend build successfully.
+
 ## Known Deviations from Plan
 
 - **No Makefile or gofer.json** — Both had Windows/MSYS path translation issues with Docker volume mounts. Commands documented in CLAUDE.md instead.
@@ -528,3 +535,7 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - Admin settings (open_registration, instance_name, max_messages, max_message_chars) persisted in DB `admin_settings` table
 - Admin routes: `/api/admin/users`, `/api/admin/users/{id}/admin`, `/api/admin/users/{id}/reset-password`, `/api/admin/users/{id}` (DELETE), `/api/admin/stats`, `/api/admin/messages/cleanup`, `/api/admin/settings`, `/api/admin/media`, `/api/admin/media/stats`, `/api/admin/media/{id}` (DELETE), `/api/admin/media/bulk-delete` (POST)
 - `media_uploads` table has `file_size BIGINT` column (migration 000011)
+- `invite_codes` table (migration 000012) enables invite-only registration when open_registration is disabled
+- Admin routes include `/api/admin/invite-codes` (GET, POST), `/api/admin/invite-codes/{id}` (DELETE)
+- `/api/config` now returns `open_registration` field for frontend conditional UI
+- Admin panel has 7 tabs (users, channels, messages, settings, emotes, media, invites)
