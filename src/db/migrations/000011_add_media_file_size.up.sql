@@ -1,0 +1,1 @@
+ALTER TABLE media_uploads ADD COLUMN file_size BIGINT NOT NULL DEFAULT 0;

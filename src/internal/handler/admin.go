@@ -13,11 +13,12 @@ import (
 )
 
 type AdminHandler struct {
-	svc *service.AdminService
+	svc      *service.AdminService
+	mediaSvc *service.MediaService
 }
 
-func NewAdminHandler(svc *service.AdminService) *AdminHandler {
-	return &AdminHandler{svc: svc}
+func NewAdminHandler(svc *service.AdminService, mediaSvc *service.MediaService) *AdminHandler {
+	return &AdminHandler{svc: svc, mediaSvc: mediaSvc}
 }
 
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +118,54 @@ func (h *AdminHandler) CleanupMessages(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, h.svc.GetSettings())
+}
+
+func (h *AdminHandler) ListMedia(w http.ResponseWriter, r *http.Request) {
+	media, err := h.svc.ListMedia(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, media)
+}
+
+func (h *AdminHandler) GetMediaStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.svc.GetMediaStats(r.Context())
+	if err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, stats)
+}
+
+func (h *AdminHandler) DeleteMedia(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid media id")
+		return
+	}
+	if err := h.mediaSvc.DeleteMediaAdmin(r.Context(), id); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to delete media")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "media deleted"})
+}
+
+func (h *AdminHandler) BulkDeleteMedia(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []uuid.UUID `json:"ids"`
+	}
+	if err := httputil.DecodeJSON(r, &req); err != nil || len(req.IDs) == 0 {
+		httputil.WriteError(w, http.StatusBadRequest, "ids must be a non-empty array")
+		return
+	}
+	deleted := 0
+	for _, id := range req.IDs {
+		if err := h.mediaSvc.DeleteMediaAdmin(r.Context(), id); err == nil {
+			deleted++
+		}
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
 }
 
 func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {

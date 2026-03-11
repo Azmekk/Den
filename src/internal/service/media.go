@@ -69,6 +69,7 @@ func (s *MediaService) UploadImage(ctx context.Context, uploaderID uuid.UUID, fi
 		BucketKey:   key,
 		ContentHash: hash,
 		MediaType:   "image",
+		FileSize:    int64(len(fileData)),
 	})
 	if err != nil {
 		_ = s.bucket.Delete(ctx, key)
@@ -109,6 +110,7 @@ func (s *MediaService) UploadVideo(ctx context.Context, uploaderID uuid.UUID, fi
 		BucketKey:   key,
 		ContentHash: hash,
 		MediaType:   "video",
+		FileSize:    int64(len(fileData)),
 	})
 	if err != nil {
 		_ = s.bucket.Delete(ctx, key)
@@ -116,6 +118,17 @@ func (s *MediaService) UploadVideo(ctx context.Context, uploaderID uuid.UUID, fi
 	}
 
 	return s.bucket.PublicURL(key), nil
+}
+
+func (s *MediaService) DeleteMediaAdmin(ctx context.Context, id uuid.UUID) error {
+	bucketKey, err := s.queries.DeleteMediaUploadByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s.bucket != nil {
+		_ = s.bucket.Delete(ctx, bucketKey)
+	}
+	return nil
 }
 
 func (s *MediaService) CleanupExpired(ctx context.Context) error {

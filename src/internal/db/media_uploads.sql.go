@@ -7,10 +7,22 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
+
+const deleteMediaUploadByID = `-- name: DeleteMediaUploadByID :one
+DELETE FROM media_uploads WHERE id = $1 RETURNING bucket_key
+`
+
+func (q *Queries) DeleteMediaUploadByID(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRowContext(ctx, deleteMediaUploadByID, id)
+	var bucket_key string
+	err := row.Scan(&bucket_key)
+	return bucket_key, err
+}
 
 const deleteMediaUploadsByIDs = `-- name: DeleteMediaUploadsByIDs :exec
 DELETE FROM media_uploads WHERE id = ANY($1::uuid[])
@@ -62,8 +74,60 @@ func (q *Queries) GetExpiredMediaUploads(ctx context.Context) ([]GetExpiredMedia
 	return items, nil
 }
 
+const getMediaStats = `-- name: GetMediaStats :one
+SELECT COUNT(*)::bigint AS total_count, COALESCE(SUM(file_size), 0)::bigint AS total_size
+FROM media_uploads
+`
+
+type GetMediaStatsRow struct {
+	TotalCount int64
+	TotalSize  int64
+}
+
+func (q *Queries) GetMediaStats(ctx context.Context) (GetMediaStatsRow, error) {
+	row := q.db.QueryRowContext(ctx, getMediaStats)
+	var i GetMediaStatsRow
+	err := row.Scan(&i.TotalCount, &i.TotalSize)
+	return i, err
+}
+
+const getMediaStatsByType = `-- name: GetMediaStatsByType :many
+SELECT media_type, COUNT(*)::bigint AS count, COALESCE(SUM(file_size), 0)::bigint AS total_size
+FROM media_uploads
+GROUP BY media_type
+`
+
+type GetMediaStatsByTypeRow struct {
+	MediaType string
+	Count     int64
+	TotalSize int64
+}
+
+func (q *Queries) GetMediaStatsByType(ctx context.Context) ([]GetMediaStatsByTypeRow, error) {
+	rows, err := q.db.QueryContext(ctx, getMediaStatsByType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMediaStatsByTypeRow
+	for rows.Next() {
+		var i GetMediaStatsByTypeRow
+		if err := rows.Scan(&i.MediaType, &i.Count, &i.TotalSize); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getMediaUploadByHash = `-- name: GetMediaUploadByHash :one
-SELECT id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at FROM media_uploads WHERE content_hash = $1 LIMIT 1
+SELECT id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size FROM media_uploads WHERE content_hash = $1 LIMIT 1
 `
 
 func (q *Queries) GetMediaUploadByHash(ctx context.Context, contentHash string) (MediaUpload, error) {
@@ -77,14 +141,15 @@ func (q *Queries) GetMediaUploadByHash(ctx context.Context, contentHash string) 
 		&i.MediaType,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.FileSize,
 	)
 	return i, err
 }
 
 const insertMediaUpload = `-- name: InsertMediaUpload :one
-INSERT INTO media_uploads (uploader_id, bucket_key, content_hash, media_type)
-VALUES ($1, $2, $3, $4)
-RETURNING id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at
+INSERT INTO media_uploads (uploader_id, bucket_key, content_hash, media_type, file_size)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size
 `
 
 type InsertMediaUploadParams struct {
@@ -92,6 +157,7 @@ type InsertMediaUploadParams struct {
 	BucketKey   string
 	ContentHash string
 	MediaType   string
+	FileSize    int64
 }
 
 func (q *Queries) InsertMediaUpload(ctx context.Context, arg InsertMediaUploadParams) (MediaUpload, error) {
@@ -100,6 +166,7 @@ func (q *Queries) InsertMediaUpload(ctx context.Context, arg InsertMediaUploadPa
 		arg.BucketKey,
 		arg.ContentHash,
 		arg.MediaType,
+		arg.FileSize,
 	)
 	var i MediaUpload
 	err := row.Scan(
@@ -110,6 +177,57 @@ func (q *Queries) InsertMediaUpload(ctx context.Context, arg InsertMediaUploadPa
 		&i.MediaType,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.FileSize,
 	)
 	return i, err
+}
+
+const listAllMediaUploads = `-- name: ListAllMediaUploads :many
+SELECT m.id, m.uploader_id, u.username AS uploader_username, m.bucket_key, m.media_type, m.file_size, m.expires_at, m.created_at
+FROM media_uploads m
+JOIN users u ON u.id = m.uploader_id
+ORDER BY m.created_at DESC
+`
+
+type ListAllMediaUploadsRow struct {
+	ID               uuid.UUID
+	UploaderID       uuid.UUID
+	UploaderUsername string
+	BucketKey        string
+	MediaType        string
+	FileSize         int64
+	ExpiresAt        time.Time
+	CreatedAt        time.Time
+}
+
+func (q *Queries) ListAllMediaUploads(ctx context.Context) ([]ListAllMediaUploadsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllMediaUploads)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllMediaUploadsRow
+	for rows.Next() {
+		var i ListAllMediaUploadsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UploaderID,
+			&i.UploaderUsername,
+			&i.BucketKey,
+			&i.MediaType,
+			&i.FileSize,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

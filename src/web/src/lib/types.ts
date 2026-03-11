@@ -81,3 +81,26 @@ export interface UnreadInfo {
 	unread_count: number;
 	mention_count: number;
 }
+
+export interface MediaUploadInfo {
+	id: string;
+	uploader_id: string;
+	uploader_username: string;
+	bucket_key: string;
+	media_type: string;
+	file_size: number;
+	expires_at: string;
+	created_at: string;
+}
+
+export interface MediaTypeStats {
+	media_type: string;
+	count: number;
+	total_size: number;
+}
+
+export interface MediaStats {
+	total_count: number;
+	total_size: number;
+	by_type: MediaTypeStats[];
+}
