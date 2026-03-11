@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 16 — Admin-Configurable Message Limits
-**Last deviation:** Composite Krisp + Noise Gate Processor
+**Last deviation:** Chat Timestamps & Date Separators
 **Next run:** Run 17
 
 ---
@@ -470,6 +470,11 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 ### Deviation — Emote Upload Auto-Resize (2026-03-11)
 - **Frontend emote upload now auto-resizes**: Static images are resized to 128x128 max and converted to WebP client-side via `convertToWebP()` before uploading. Animated GIFs pass through as-is (canvas can't handle animation). File input accepts `image/*` instead of just PNG/GIF/WebP. Label updated to reflect auto-resize behavior.
 - **Backend unchanged**: Still validates ≤128x128, ≤256KB, PNG/GIF/WebP — acts as safety net.
+
+### Deviation — Chat Timestamps & Date Separators (2026-03-11)
+- **Replaced `formatTime()` with `formatTimestamp()`**: Today shows `HH:MM`, yesterday shows `Yesterday at HH:MM`, older shows `DD/MMM/YYYY HH:MM` (e.g. `09/MAR/2026 14:30`). Applied to both inline and hover timestamps.
+- **Added date separator bars**: Horizontal `line — label — line` dividers between days. Today/Yesterday use labels, older dates use `DD/MMM/YYYY` format.
+- **Message grouping respects day boundaries**: `isGrouped()` returns false when consecutive messages span different days.
 
 ## Known Deviations from Plan
 

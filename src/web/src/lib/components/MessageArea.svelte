@@ -52,9 +52,42 @@ function getDisplayNameForMessage(msg: MessageInfo): string {
 	return msg.display_name || msg.username;
 }
 
-function formatTime(iso: string): string {
+function formatTimestamp(iso: string): string {
 	const d = new Date(iso);
-	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	const now = new Date();
+	const hh = d.getHours().toString().padStart(2, '0');
+	const mm = d.getMinutes().toString().padStart(2, '0');
+	const time = `${hh}:${mm}`;
+
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const yesterday = new Date(today.getTime() - 86400000);
+	const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+	if (msgDay.getTime() === today.getTime()) return time;
+	if (msgDay.getTime() === yesterday.getTime()) return `Yesterday at ${time}`;
+	const day = d.getDate().toString().padStart(2, '0');
+	const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+	return `${day}/${month}/${d.getFullYear()} ${time}`;
+}
+
+function isDifferentDay(a: string, b: string): boolean {
+	const da = new Date(a);
+	const db = new Date(b);
+	return da.getFullYear() !== db.getFullYear() || da.getMonth() !== db.getMonth() || da.getDate() !== db.getDate();
+}
+
+function formatDateSeparator(iso: string): string {
+	const d = new Date(iso);
+	const now = new Date();
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const yesterday = new Date(today.getTime() - 86400000);
+	const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+	if (msgDay.getTime() === today.getTime()) return 'Today';
+	if (msgDay.getTime() === yesterday.getTime()) return 'Yesterday';
+	const day = d.getDate().toString().padStart(2, '0');
+	const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+	return `${day}/${month}/${d.getFullYear()}`;
 }
 
 function isGrouped(msgs: MessageInfo[], index: number): boolean {
@@ -62,6 +95,7 @@ function isGrouped(msgs: MessageInfo[], index: number): boolean {
 	const prev = msgs[index - 1];
 	const curr = msgs[index];
 	if (prev.username !== curr.username) return false;
+	if (isDifferentDay(prev.created_at, curr.created_at)) return false;
 	const diff =
 		new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
 	return diff < 5 * 60 * 1000;
@@ -560,6 +594,14 @@ function handleDrop(e: DragEvent) {
 			{:else}
 				{#each messages as msg, i (msg.id)}
 					{@const grouped = isGrouped(messages, i)}
+					{@const showDateSep = i === 0 || isDifferentDay(messages[i - 1].created_at, msg.created_at)}
+					{#if showDateSep}
+						<div class="flex items-center gap-3 my-4 px-2">
+							<div class="flex-1 h-px bg-border"></div>
+							<span class="text-xs font-medium text-muted-foreground shrink-0">{formatDateSeparator(msg.created_at)}</span>
+							<div class="flex-1 h-px bg-border"></div>
+						</div>
+					{/if}
 					<MessageContextMenu
 					msg={msg}
 					canPin={canPin(msg)}
@@ -572,7 +614,7 @@ function handleDrop(e: DragEvent) {
 						{#if grouped}
 							<div data-message-id={msg.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
 								<div class="w-8 flex items-center justify-center shrink-0">
-									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(msg.created_at)}</span>
+									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTimestamp(msg.created_at)}</span>
 								</div>
 								<div class="flex-1 min-w-0">
 									{#if editingMessageId === msg.id}
@@ -621,7 +663,7 @@ function handleDrop(e: DragEvent) {
 												{getDisplayNameForMessage(msg)}
 											</span>
 										</UserProfilePopover>
-										<span class="text-xs text-muted-foreground">{formatTime(msg.created_at)}</span>
+										<span class="text-xs text-muted-foreground">{formatTimestamp(msg.created_at)}</span>
 										{#if msg.edited_at}
 											<span class="text-xs text-muted-foreground italic">(edited)</span>
 										{/if}
