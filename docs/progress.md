@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 17 — Media Manager
+**Last completed run:** Run 19 — UX Improvements & Fixes
 **Last deviation:** Invitation Codes Feature
-**Next run:** Run 18 (Run 18 Tauri was abandoned — see below)
+**Next run:** Run 20 — Electron Desktop App
 
 ---
 
@@ -516,6 +516,14 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Problem:** WebView2 (Tauri's Windows webview) has broken/limited WebRTC support. LiveKit voice connections fail — the server immediately sends `leave-reconnect` signals and PeerConnection never establishes, even though the signaling WebSocket connects fine (101). The same voice setup works perfectly in a regular browser on the same machine.
 - **Decision:** Reverted all changes. Tauri is not viable for Den due to WebView2 WebRTC limitations. Future desktop wrapper should use Electron (ships full Chromium with proper WebRTC).
 - All code reverted to pre-Run 18 state
+
+### Run 19 — UX Improvements & Fixes
+- **Full-screen connection overlay:** Replaced small amber top banner with full-screen opaque overlay (`bg-background/95 backdrop-blur-sm`) that blocks all interaction while disconnected. Centered spinner + "Connection lost" / "Reconnecting..." text. Green "Reconnected!" banner kept for restore.
+- **Username restrictions:** Added `^[a-zA-Z0-9_-]+$` regex validation on backend (`auth.go` line ~91) and frontend (`register/+page.svelte` — `pattern` attribute + client-side JS check). Rejects spaces and special chars.
+- **Custom scrollbars:** Added thin dark-themed scrollbar styles in `app.css` — `scrollbar-width: thin` + `scrollbar-color` for Firefox, `::-webkit-scrollbar` rules for Chrome/Edge. Uses `--muted-foreground` at 30% opacity, 50% on hover.
+- **YouTube embed fix:** Added client-side YouTube URL detection (`isYouTubeUrl()`, `getYouTubeEmbedUrlFromRaw()`) that renders iframes directly without relying on server-side unfurl. Supports `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`. YouTube URLs excluded from unfurl pipeline.
+- **Electron deferred:** Desktop app via Electron planned for Run 20 (not implemented in this run).
+- Both Go backend and frontend build successfully.
 
 ---
 
