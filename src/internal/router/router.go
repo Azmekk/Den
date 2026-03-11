@@ -13,7 +13,7 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, unfurlSvc *service.UnfurlService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
 	authH := handler.NewAuthHandler(authSvc, hub)
 	channelH := handler.NewChannelHandler(channelSvc)
 	messageH := handler.NewMessageHandler(messageSvc, hub)
@@ -26,6 +26,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	if mediaSvc != nil {
 		mediaH = handler.NewMediaHandler(mediaSvc)
 	}
+	unfurlH := handler.NewUnfurlHandler(unfurlSvc)
 	var voiceH *handler.VoiceHandler
 	if voiceSvc != nil {
 		voiceH = handler.NewVoiceHandler(voiceSvc, channelSvc)
@@ -76,6 +77,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Put("/users/me/color", userH.UpdateColor)
 			r.Post("/users/me/avatar", userH.UploadAvatar)
 			r.Get("/emotes", emoteH.List)
+			r.Get("/unfurl", unfurlH.Unfurl)
 			if mediaH != nil {
 				r.Post("/upload/image", mediaH.UploadImage)
 				r.Post("/upload/video", mediaH.UploadVideo)

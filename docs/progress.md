@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 16 — Admin-Configurable Message Limits
-**Last deviation:** Chat Timestamps & Date Separators
+**Last deviation:** Fix Media Embeds & Server-Side URL Unfurling
 **Next run:** Run 17
 
 ---
@@ -475,6 +475,13 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Replaced `formatTime()` with `formatTimestamp()`**: Today shows `HH:MM`, yesterday shows `Yesterday at HH:MM`, older shows `DD/MMM/YYYY HH:MM` (e.g. `09/MAR/2026 14:30`). Applied to both inline and hover timestamps.
 - **Added date separator bars**: Horizontal `line — label — line` dividers between days. Today/Yesterday use labels, older dates use `DD/MMM/YYYY` format.
 - **Message grouping respects day boundaries**: `isGrouped()` returns false when consecutive messages span different days.
+
+### Deviation — Fix Media Embeds & Server-Side URL Unfurling (2026-03-11)
+- **Server-side OG unfurl endpoint**: `GET /api/unfurl?url=...` — fetches URL, parses OpenGraph meta tags (`og:title`, `og:description`, `og:image`, `og:video`, `og:site_name`), returns embed data. In-memory cache with 10-min TTL. New files: `service/unfurl.go`, `handler/unfurl.go`.
+- **Unified embed system**: Removed client-side YouTube/Tenor/Giphy pattern matching. Only direct media URLs (`.jpg`, `.mp4`, etc.) are handled client-side. All other URLs go through the unfurl API for rich embed cards.
+- **YouTube**: Detected via `og:site_name`, renders as standard `youtube-nocookie.com` iframe embed.
+- **Rich embed cards**: URLs with OG metadata render as bordered cards with site name, title, description, and thumbnail. Videos with `og:video` render with a `<video>` player + poster image.
+- **Video URLs show link text**: `embedUrls` set excludes video URLs, so `.mp4`/`.webm` links display both the clickable URL text and the video embed below.
 
 ## Known Deviations from Plan
 

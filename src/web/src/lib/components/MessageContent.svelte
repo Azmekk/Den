@@ -2,6 +2,7 @@
 import { auth } from '$lib/stores/auth.svelte';
 import { emoteStore } from '$lib/stores/emotes.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
+import { api } from '$lib/api';
 
 interface Props {
 	content: string;
@@ -17,6 +18,16 @@ const urlRegex = /https?:\/\/[^\s<>]+/g;
 interface ContentPart {
 	type: 'text' | 'emote' | 'mention' | 'url';
 	value: string;
+}
+
+interface UnfurlData {
+	url: string;
+	title?: string;
+	description?: string;
+	image?: string;
+	video?: string;
+	site_name?: string;
+	type?: string;
 }
 
 function splitTextWithUrls(text: string): ContentPart[] {
@@ -84,6 +95,10 @@ function isSelfMention(id: string): boolean {
 	return auth.user?.id === id;
 }
 
+function isDirectMediaUrl(url: string): boolean {
+	return /\.(jpg|jpeg|png|gif|webp|mp4|webm)(\?.*)?$/i.test(url);
+}
+
 function isImageUrl(url: string): boolean {
 	return /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i.test(url);
 }
@@ -92,37 +107,78 @@ function isVideoUrl(url: string): boolean {
 	return /\.(mp4|webm)(\?.*)?$/i.test(url);
 }
 
-function getYouTubeId(url: string): string | null {
-	const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
-	return m ? m[1] : null;
-}
-
-function getTenorId(url: string): string | null {
-	const m = url.match(/tenor\.com\/view\/.*-(\d+)$/i);
-	return m ? m[1] : null;
-}
-
-function getGiphyId(url: string): string | null {
-	const m = url.match(/giphy\.com\/gifs\/(?:.*-)?([a-zA-Z0-9]+)$/);
-	return m ? m[1] : null;
-}
-
-// Collect embeds (URLs that render as media)
-const embeds = $derived.by(() => {
-	return parts.filter(
-		(p) => p.type === 'url' && (isImageUrl(p.value) || isVideoUrl(p.value) || getYouTubeId(p.value) || getTenorId(p.value) || getGiphyId(p.value)),
-	);
+// Direct media embeds (image/video file URLs) — handled client-side
+const directEmbeds = $derived.by(() => {
+	return parts.filter((p) => p.type === 'url' && isDirectMediaUrl(p.value));
 });
 
-const embedUrls = $derived(new Set(embeds.map((e) => e.value)));
+// URLs that need server-side unfurling (everything except direct media)
+const unfurlUrls = $derived.by(() => {
+	return parts
+		.filter((p) => p.type === 'url' && !isDirectMediaUrl(p.value))
+		.map((p) => p.value);
+});
 
-let expandedYouTube = $state<Set<string>>(new Set());
+// Hide URL text for direct image embeds (not videos — those show URL + embed)
+const embedUrls = $derived(new Set(
+	directEmbeds.filter((e) => !isVideoUrl(e.value)).map((e) => e.value)
+));
 
-function toggleYouTube(videoId: string) {
-	const next = new Set(expandedYouTube);
-	if (next.has(videoId)) next.delete(videoId);
-	else next.add(videoId);
-	expandedYouTube = next;
+// Global unfurl cache shared across all message instances
+const unfurlCache = new Map<string, UnfurlData | null>();
+const unfurlPending = new Set<string>();
+
+let unfurlResults = $state<Map<string, UnfurlData>>(new Map());
+
+$effect(() => {
+	const urls = unfurlUrls;
+	if (urls.length === 0) return;
+
+	for (const url of urls) {
+		if (unfurlResults.has(url)) continue;
+
+		if (unfurlCache.has(url)) {
+			const cached = unfurlCache.get(url);
+			if (cached) {
+				unfurlResults = new Map(unfurlResults).set(url, cached);
+			}
+			continue;
+		}
+
+		if (unfurlPending.has(url)) continue;
+		unfurlPending.add(url);
+
+		api.get<UnfurlData>(`/unfurl?url=${encodeURIComponent(url)}`).then((data) => {
+			unfurlCache.set(url, data);
+			unfurlResults = new Map(unfurlResults).set(url, data);
+		}).catch(() => {
+			unfurlCache.set(url, null);
+		}).finally(() => {
+			unfurlPending.delete(url);
+		});
+	}
+});
+
+function isVideoEmbed(data: UnfurlData): boolean {
+	return !!data.video && /\.(mp4|webm)(\?.*)?$/i.test(data.video);
+}
+
+function isYouTubeEmbed(data: UnfurlData): boolean {
+	return !!data.site_name && /youtube/i.test(data.site_name);
+}
+
+function getYouTubeEmbedUrl(data: UnfurlData): string | null {
+	// Try to extract video ID from the original URL or og:video
+	const urlsToCheck = [data.url, data.video ?? ''];
+	for (const u of urlsToCheck) {
+		const m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/);
+		if (m) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+	}
+	return null;
+}
+
+function hasRichEmbed(data: UnfurlData): boolean {
+	return !!(data.title || data.description);
 }
 </script>
 
@@ -164,9 +220,9 @@ function toggleYouTube(videoId: string) {
 		{/each}
 	</p>
 
-	{#if embeds.length > 0}
+	{#if directEmbeds.length > 0 || unfurlResults.size > 0}
 		<div class="mt-1 flex flex-col items-start gap-1">
-			{#each embeds as embed}
+			{#each directEmbeds as embed}
 				{#if isImageUrl(embed.value)}
 					<a href={embed.value} target="_blank" rel="noopener noreferrer">
 						<img
@@ -201,52 +257,78 @@ function toggleYouTube(videoId: string) {
 					>
 						<source src={embed.value} />
 					</video>
-				{:else if getYouTubeId(embed.value)}
-					{@const ytId = getYouTubeId(embed.value)}
-					{#if ytId && expandedYouTube.has(ytId)}
-						<iframe
-							width="400"
-							height="225"
-							src="https://www.youtube-nocookie.com/embed/{ytId}"
-							title="YouTube video"
-							frameborder="0"
-							allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-							allowfullscreen
-							class="w-[400px] max-w-full rounded"
-						></iframe>
-					{:else if ytId}
-						<button
-							onclick={() => toggleYouTube(ytId)}
-							class="relative group cursor-pointer w-[400px] max-w-full"
-						>
-							<img
-								src="https://img.youtube.com/vi/{ytId}/hqdefault.jpg"
-								alt="YouTube thumbnail"
-								class="w-full rounded object-cover"
-							/>
-							<div class="absolute inset-0 flex items-center justify-center bg-black/30 rounded group-hover:bg-black/40 transition-colors">
-								<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="white" class="drop-shadow-lg"><path d="m5 3 14 9-14 9V3z"/></svg>
+				{/if}
+			{/each}
+
+			{#each unfurlUrls as url}
+				{@const data = unfurlResults.get(url)}
+				{#if data}
+					{#if isYouTubeEmbed(data)}
+						{@const embedUrl = getYouTubeEmbedUrl(data)}
+						{#if embedUrl}
+							<iframe
+								width="400"
+								height="225"
+								src={embedUrl}
+								title={data.title ?? 'YouTube video'}
+								frameborder="0"
+								allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+								allowfullscreen
+								class="w-[400px] max-w-full rounded"
+							></iframe>
+						{/if}
+					{:else if isVideoEmbed(data)}
+						{#if hasRichEmbed(data)}
+							<div class="flex max-w-[400px] overflow-hidden rounded border border-border bg-secondary/50">
+								<div class="flex-1 min-w-0 p-3">
+									{#if data.site_name}
+										<p class="text-xs text-muted-foreground truncate">{data.site_name}</p>
+									{/if}
+									{#if data.title}
+										<a href={url} target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-primary hover:underline line-clamp-2">{data.title}</a>
+									{/if}
+									{#if data.description}
+										<p class="mt-1 text-xs text-muted-foreground line-clamp-3">{data.description}</p>
+									{/if}
+								</div>
 							</div>
-						</button>
-					{/if}
-				{:else if getTenorId(embed.value)}
-					{@const tenorId = getTenorId(embed.value)}
-					<iframe
-						src="https://tenor.com/embed/{tenorId}"
-						width="400"
-						height="300"
-						frameborder="0"
-						allowfullscreen
-						class="w-[400px] max-w-full rounded"
-					></iframe>
-				{:else if getGiphyId(embed.value)}
-					{@const giphyId = getGiphyId(embed.value)}
-					{#if giphyId}
-						<img
-							src="https://media.giphy.com/media/{giphyId}/giphy.gif"
-							alt="Giphy GIF"
-							class="max-h-[300px] max-w-[400px] rounded object-contain"
-						/>
+						{/if}
+						<!-- svelte-ignore a11y_media_has_caption -->
+						<video
+							controls
+							preload="metadata"
+							poster={data.image}
+							class="max-h-[400px] max-w-[400px] rounded"
+						>
+							<source src={data.video} />
+						</video>
+					{:else if data.image && !hasRichEmbed(data)}
+						<a href={url} target="_blank" rel="noopener noreferrer">
+							<img
+								src={data.image}
+								alt={data.title ?? 'embedded media'}
+								class="max-h-[400px] max-w-full rounded object-contain cursor-pointer hover:opacity-90 transition-opacity"
+							/>
+						</a>
+					{:else if hasRichEmbed(data)}
+						<div class="flex max-w-[400px] overflow-hidden rounded border border-border bg-secondary/50">
+							<div class="flex-1 min-w-0 p-3">
+								{#if data.site_name}
+									<p class="text-xs text-muted-foreground truncate">{data.site_name}</p>
+								{/if}
+								{#if data.title}
+									<a href={url} target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-primary hover:underline line-clamp-2">{data.title}</a>
+								{/if}
+								{#if data.description}
+									<p class="mt-1 text-xs text-muted-foreground line-clamp-3">{data.description}</p>
+								{/if}
+							</div>
+							{#if data.image}
+								<a href={url} target="_blank" rel="noopener noreferrer" class="flex-shrink-0">
+									<img src={data.image} alt="" class="h-full w-20 object-cover" />
+								</a>
+							{/if}
+						</div>
 					{/if}
 				{/if}
 			{/each}

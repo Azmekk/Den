@@ -99,6 +99,8 @@ func main() {
 		log.Println("message cleanup loop started (hourly check, limit from DB)")
 	}
 
+	unfurlSvc := service.NewUnfurlService(os.Getenv("UNFURL_USER_AGENT"))
+
 	hub := ws.NewHub()
 	go hub.Run()
 
@@ -107,7 +109,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, hub, staticFS, bucketSvc != nil)
+	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

@@ -841,6 +841,15 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Persist both settings to DB (admin settings table or similar — currently in-memory only)
 - [x] Verify: Admin can change both limits; message cleanup runs when count limit exceeded; oversized messages rejected
 
+### Deviation — Fix Media Embeds & Server-Side URL Unfurling (DONE)
+- [x] Server-side OG unfurl endpoint (`GET /api/unfurl?url=...`) with in-memory cache (10-min TTL)
+- [x] Removed client-side YouTube/Tenor/Giphy pattern matching — all non-media URLs use unfurl API
+- [x] Rich embed cards for URLs with OG metadata (title, description, image, site name)
+- [x] YouTube detected via `og:site_name`, rendered as `youtube-nocookie.com` iframe
+- [x] Video URLs with `og:video` render with `<video>` player + poster
+- [x] Direct media URLs (`.jpg`, `.mp4`, etc.) still handled client-side
+- [x] Video file URLs show clickable URL text + embed (not hidden like images)
+
 ### Run 17 — Admin Media Manager
 - [ ] Backend: `GET /api/admin/media` — list all media uploads with metadata (uploader, filename, size, type, upload date, expiry)
 - [ ] Backend: `DELETE /api/admin/media/{id}` — delete a specific media file from bucket + DB
