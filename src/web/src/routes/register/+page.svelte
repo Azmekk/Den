@@ -2,15 +2,18 @@
 import { onMount } from 'svelte';
 import { goto } from '$app/navigation';
 import { auth } from '$lib/stores/auth.svelte';
+import { configStore } from '$lib/stores/config.svelte';
 
 let username = $state('');
 let password = $state('');
 let confirmPassword = $state('');
+let inviteCode = $state('');
 let error = $state('');
 let loading = $state(false);
 
-onMount(() => {
+onMount(async () => {
 	if (auth.isLoggedIn) goto('/');
+	await configStore.fetch();
 });
 
 async function handleSubmit(e: Event) {
@@ -24,7 +27,7 @@ async function handleSubmit(e: Event) {
 
 	loading = true;
 	try {
-		await auth.register(username, password);
+		await auth.register(username, password, inviteCode || undefined);
 		goto('/');
 	} catch (err) {
 		error = err instanceof Error ? err.message : 'registration failed';
@@ -89,6 +92,20 @@ async function handleSubmit(e: Event) {
 					placeholder="Repeat your password"
 				/>
 			</div>
+
+			{#if !configStore.openRegistration}
+				<div>
+					<label for="invite-code" class="mb-1 block text-sm font-medium text-foreground">Invite Code</label>
+					<input
+						id="invite-code"
+						type="text"
+						bind:value={inviteCode}
+						required
+						class="w-full rounded-md border border-input bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+						placeholder="Enter your invite code"
+					/>
+				</div>
+			{/if}
 
 			<button
 				type="submit"

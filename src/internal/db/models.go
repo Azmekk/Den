@@ -50,6 +50,16 @@ type DmPair struct {
 	CreatedAt time.Time
 }
 
+type InviteCode struct {
+	ID        uuid.UUID
+	Code      string
+	MaxUses   sql.NullInt32
+	UseCount  int32
+	ExpiresAt sql.NullTime
+	CreatedBy uuid.UUID
+	CreatedAt time.Time
+}
+
 type MediaUpload struct {
 	ID          uuid.UUID
 	UploaderID  uuid.UUID

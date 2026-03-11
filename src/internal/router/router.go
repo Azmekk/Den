@@ -20,7 +20,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	userH := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminH := handler.NewAdminHandler(adminSvc, mediaSvc)
 	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
-	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars)
+	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration)
 	dmH := handler.NewDMHandler(dmSvc)
 	var mediaH *handler.MediaHandler
 	if mediaSvc != nil {
@@ -109,6 +109,9 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 					r.Get("/media/stats", adminH.GetMediaStats)
 					r.Delete("/media/{id}", adminH.DeleteMedia)
 					r.Post("/media/bulk-delete", adminH.BulkDeleteMedia)
+					r.Get("/invite-codes", adminH.ListInviteCodes)
+					r.Post("/invite-codes", adminH.CreateInviteCode)
+					r.Delete("/invite-codes/{id}", adminH.DeleteInviteCode)
 				})
 			})
 		})

@@ -24,6 +24,7 @@ type registerRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
+	InviteCode  string `json:"invite_code"`
 }
 
 type loginRequest struct {
@@ -48,7 +49,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, tokens, err := h.svc.Register(r.Context(), req.Username, req.Password, req.DisplayName)
+	user, tokens, err := h.svc.Register(r.Context(), req.Username, req.Password, req.DisplayName, req.InviteCode)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
@@ -57,6 +58,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusConflict, "username already taken")
 		case errors.Is(err, service.ErrRegistrationClosed):
 			httputil.WriteError(w, http.StatusForbidden, "registration is closed")
+		case errors.Is(err, service.ErrInvalidInviteCode):
+			httputil.WriteError(w, http.StatusBadRequest, "invalid or expired invite code")
 		default:
 			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
 		}

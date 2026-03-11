@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	ErrSelfDemotion = errors.New("cannot remove your own admin status")
-	ErrSelfDeletion = errors.New("cannot delete your own account")
+	ErrSelfDemotion    = errors.New("cannot remove your own admin status")
+	ErrSelfDeletion    = errors.New("cannot delete your own account")
+	ErrInvalidInviteCode = errors.New("invalid or expired invite code")
 )
 
 type AdminService struct {
@@ -254,6 +255,102 @@ func (s *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
 		TotalSize:  totals.TotalSize,
 		ByType:     typeStats,
 	}, nil
+}
+
+type InviteCodeInfo struct {
+	ID               uuid.UUID  `json:"id"`
+	Code             string     `json:"code"`
+	MaxUses          *int32     `json:"max_uses"`
+	UseCount         int32      `json:"use_count"`
+	ExpiresAt        *time.Time `json:"expires_at"`
+	CreatedBy        uuid.UUID  `json:"created_by"`
+	CreatedByUsername string    `json:"created_by_username"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+func (s *AdminService) CreateInviteCode(ctx context.Context, createdBy uuid.UUID, maxUses *int32, expiresAt *time.Time) (InviteCodeInfo, error) {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return InviteCodeInfo{}, err
+	}
+	code := hex.EncodeToString(raw)
+
+	params := db.CreateInviteCodeParams{
+		Code:      code,
+		CreatedBy: createdBy,
+	}
+	if maxUses != nil {
+		params.MaxUses.Int32 = *maxUses
+		params.MaxUses.Valid = true
+	}
+	if expiresAt != nil {
+		params.ExpiresAt.Time = *expiresAt
+		params.ExpiresAt.Valid = true
+	}
+
+	row, err := s.queries.CreateInviteCode(ctx, params)
+	if err != nil {
+		return InviteCodeInfo{}, err
+	}
+
+	info := InviteCodeInfo{
+		ID:        row.ID,
+		Code:      row.Code,
+		UseCount:  row.UseCount,
+		CreatedBy: row.CreatedBy,
+		CreatedAt: row.CreatedAt,
+	}
+	if row.MaxUses.Valid {
+		info.MaxUses = &row.MaxUses.Int32
+	}
+	if row.ExpiresAt.Valid {
+		info.ExpiresAt = &row.ExpiresAt.Time
+	}
+	return info, nil
+}
+
+func (s *AdminService) ListInviteCodes(ctx context.Context) ([]InviteCodeInfo, error) {
+	rows, err := s.queries.ListInviteCodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]InviteCodeInfo, len(rows))
+	for i, row := range rows {
+		info := InviteCodeInfo{
+			ID:               row.ID,
+			Code:             row.Code,
+			UseCount:         row.UseCount,
+			CreatedBy:        row.CreatedBy,
+			CreatedByUsername: row.CreatedByUsername,
+			CreatedAt:        row.CreatedAt,
+		}
+		if row.MaxUses.Valid {
+			info.MaxUses = &row.MaxUses.Int32
+		}
+		if row.ExpiresAt.Valid {
+			info.ExpiresAt = &row.ExpiresAt.Time
+		}
+		result[i] = info
+	}
+	return result, nil
+}
+
+func (s *AdminService) DeleteInviteCode(ctx context.Context, id uuid.UUID) error {
+	return s.queries.DeleteInviteCode(ctx, id)
+}
+
+func (s *AdminService) ValidateAndUseInviteCode(ctx context.Context, code string) error {
+	ic, err := s.queries.GetInviteCodeByCode(ctx, code)
+	if err != nil {
+		return ErrInvalidInviteCode
+	}
+	if ic.ExpiresAt.Valid && time.Now().After(ic.ExpiresAt.Time) {
+		return ErrInvalidInviteCode
+	}
+	if ic.MaxUses.Valid && ic.UseCount >= ic.MaxUses.Int32 {
+		return ErrInvalidInviteCode
+	}
+	return s.queries.IncrementInviteCodeUseCount(ctx, ic.ID)
 }
 
 func (s *AdminService) UpdateSettings(ctx context.Context, openRegistration *bool, instanceName *string, maxMessages *int64, maxMessageChars *int) error {

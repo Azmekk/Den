@@ -61,12 +61,14 @@ function createAuth() {
 		setSession(data);
 	}
 
-	async function register(username: string, password: string): Promise<void> {
+	async function register(username: string, password: string, inviteCode?: string): Promise<void> {
+		const body: Record<string, string> = { username, password };
+		if (inviteCode) body.invite_code = inviteCode;
 		const res = await fetch('/api/register', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
-			body: JSON.stringify({ username, password }),
+			body: JSON.stringify(body),
 		});
 		if (!res.ok) {
 			const body = await res
