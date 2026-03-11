@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 16 — Admin-Configurable Message Limits
+**Last completed run:** Run 17 — Admin Media Manager
 **Last deviation:** Fix Media Embeds & Server-Side URL Unfurling
-**Next run:** Run 17
+**Next run:** Run 18
 
 ---
 
@@ -491,11 +491,24 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **No shadcn-svelte CLI init** — bits-ui installed directly, `cn()` utility created manually. Components will be added as needed in future runs.
 - **Layered architecture instead of per-domain packages** — Plan originally listed `internal/auth/`, `internal/channel/`, etc. Refactored to `service/`, `handler/`, `middleware/`, `router/` layers with chi router. Future features (admin, embed, voice) will add files to existing layers rather than creating new top-level packages.
 
+### Run 17 — Admin Media Manager
+- Added migration 000011: `file_size BIGINT NOT NULL DEFAULT 0` on `media_uploads`
+- Updated `InsertMediaUpload` sqlc query to include `file_size` as 5th param
+- Added sqlc queries: `ListAllMediaUploads` (JOIN users for uploader_username), `GetMediaStats`, `GetMediaStatsByType`, `DeleteMediaUploadByID`
+- `MediaService.UploadImage()` and `UploadVideo()` now pass `FileSize: int64(len(fileData))` to insert
+- Added `MediaService.DeleteMediaAdmin()` — deletes DB row then bucket object
+- Added `AdminService.ListMedia()` and `GetMediaStats()` with response types (`MediaUploadInfo`, `MediaStats`, `MediaTypeStats`)
+- Updated `AdminHandler` to accept `*service.MediaService`; added `ListMedia`, `GetMediaStats`, `DeleteMedia`, `BulkDeleteMedia` handlers
+- Router: added 4 admin media routes under `/api/admin/media`
+- Frontend types: `MediaUploadInfo`, `MediaTypeStats`, `MediaStats`
+- Admin panel: added "Media" tab with stats cards (total uploads, total size, per-type breakdown), filter buttons (All/Images/Videos), sortable table (by created_at, file_size, media_type), select-all checkbox + bulk delete bar, individual delete with confirmation modal
+- No deviations from plan
+
 ---
 
 ## Notes for Next Run
 
-- Postgres is running on port 5440, all migrations applied through 000010
+- Postgres is running on port 5440, all migrations applied through 000011
 - Auth is fully wired frontend-to-backend: login, register, refresh, logout all work through the Vite proxy
 - `MSYS_NO_PATHCONV=1` prefix needed for Docker commands with volume mounts in Git Bash
 - **Go module root is `src/`** — build with `cd src && go build -o ../bin/den .`, run with `cd src && go run .`
@@ -511,6 +524,7 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - Frontend stores follow factory pattern with `$state` runes in `.svelte.ts` files
 - User colors stored in DB `users.color` column (nullable, `VARCHAR(7)`); fallback to client-side hash when NULL; shared utility in `$lib/utils.ts`
 - Three-column layout: ChannelSidebar (w-60) | MessageArea (flex-1) | MemberList (w-60)
-- Admin panel at `/admin` — admin-only, 4 tabs (users, channels, messages, settings)
-- Admin settings (open_registration, instance_name) are in-memory only — reset on server restart
-- Admin routes: `/api/admin/users`, `/api/admin/users/{id}/admin`, `/api/admin/users/{id}/reset-password`, `/api/admin/users/{id}` (DELETE), `/api/admin/stats`, `/api/admin/messages/cleanup`, `/api/admin/settings`
+- Admin panel at `/admin` — admin-only, 6 tabs (users, channels, messages, settings, emotes, media)
+- Admin settings (open_registration, instance_name, max_messages, max_message_chars) persisted in DB `admin_settings` table
+- Admin routes: `/api/admin/users`, `/api/admin/users/{id}/admin`, `/api/admin/users/{id}/reset-password`, `/api/admin/users/{id}` (DELETE), `/api/admin/stats`, `/api/admin/messages/cleanup`, `/api/admin/settings`, `/api/admin/media`, `/api/admin/media/stats`, `/api/admin/media/{id}` (DELETE), `/api/admin/media/bulk-delete` (POST)
+- `media_uploads` table has `file_size BIGINT` column (migration 000011)

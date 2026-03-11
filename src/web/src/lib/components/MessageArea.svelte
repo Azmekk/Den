@@ -498,18 +498,31 @@ function handleFileSelect(e: Event) {
 	if (file) uploadFile(file);
 }
 
-function handleDragOver(e: DragEvent) {
+let dragCounter = 0;
+
+function handleDragEnter(e: DragEvent) {
 	if (!configStore.uploadsEnabled) return;
 	e.preventDefault();
+	dragCounter++;
 	dragOver = true;
 }
 
+function handleDragOver(e: DragEvent) {
+	if (!configStore.uploadsEnabled) return;
+	e.preventDefault();
+}
+
 function handleDragLeave() {
-	dragOver = false;
+	dragCounter--;
+	if (dragCounter <= 0) {
+		dragCounter = 0;
+		dragOver = false;
+	}
 }
 
 function handleDrop(e: DragEvent) {
 	e.preventDefault();
+	dragCounter = 0;
 	dragOver = false;
 	if (!configStore.uploadsEnabled) return;
 	const file = e.dataTransfer?.files[0];
@@ -519,7 +532,23 @@ function handleDrop(e: DragEvent) {
 }
 </script>
 
-<div class="flex flex-1 flex-col min-w-0">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="relative flex flex-1 flex-col min-w-0"
+	ondragenter={handleDragEnter}
+	ondragover={handleDragOver}
+	ondragleave={handleDragLeave}
+	ondrop={handleDrop}
+>
+	{#if dragOver}
+		<div class="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+			<div class="rounded-xl border-2 border-dashed border-primary bg-primary/10 px-8 py-6 text-center">
+				<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-2 text-primary"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+				<p class="text-sm font-medium text-foreground">Upload File</p>
+				<p class="text-xs text-muted-foreground">Drop an image or video to upload</p>
+			</div>
+		</div>
+	{/if}
 	{#if hasActiveView}
 		<!-- Header -->
 		<div class="flex h-12 items-center justify-between border-b border-border px-4">
@@ -718,14 +747,7 @@ function handleDrop(e: DragEvent) {
 		</div>
 
 		<!-- Input -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="relative border-t border-border p-2 md:p-4 {dragOver ? 'ring-2 ring-primary ring-inset bg-primary/5' : ''}"
-			ondragover={handleDragOver}
-			ondragenter={handleDragOver}
-			ondragleave={handleDragLeave}
-			ondrop={handleDrop}
-		>
+		<div class="relative border-t border-border p-2 md:p-4">
 			<MentionAutocomplete
 				inputValue={messageInput}
 				{cursorPosition}

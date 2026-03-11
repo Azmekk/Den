@@ -188,6 +188,74 @@ func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int3
 	}
 }
 
+type MediaUploadInfo struct {
+	ID               uuid.UUID `json:"id"`
+	UploaderID       uuid.UUID `json:"uploader_id"`
+	UploaderUsername string    `json:"uploader_username"`
+	BucketKey        string    `json:"bucket_key"`
+	MediaType        string    `json:"media_type"`
+	FileSize         int64     `json:"file_size"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type MediaTypeStats struct {
+	MediaType string `json:"media_type"`
+	Count     int64  `json:"count"`
+	TotalSize int64  `json:"total_size"`
+}
+
+type MediaStats struct {
+	TotalCount int64            `json:"total_count"`
+	TotalSize  int64            `json:"total_size"`
+	ByType     []MediaTypeStats `json:"by_type"`
+}
+
+func (s *AdminService) ListMedia(ctx context.Context) ([]MediaUploadInfo, error) {
+	rows, err := s.queries.ListAllMediaUploads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]MediaUploadInfo, len(rows))
+	for i, row := range rows {
+		result[i] = MediaUploadInfo{
+			ID:               row.ID,
+			UploaderID:       row.UploaderID,
+			UploaderUsername: row.UploaderUsername,
+			BucketKey:        row.BucketKey,
+			MediaType:        row.MediaType,
+			FileSize:         row.FileSize,
+			ExpiresAt:        row.ExpiresAt,
+			CreatedAt:        row.CreatedAt,
+		}
+	}
+	return result, nil
+}
+
+func (s *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
+	totals, err := s.queries.GetMediaStats(ctx)
+	if err != nil {
+		return MediaStats{}, err
+	}
+	byType, err := s.queries.GetMediaStatsByType(ctx)
+	if err != nil {
+		return MediaStats{}, err
+	}
+	typeStats := make([]MediaTypeStats, len(byType))
+	for i, t := range byType {
+		typeStats[i] = MediaTypeStats{
+			MediaType: t.MediaType,
+			Count:     t.Count,
+			TotalSize: t.TotalSize,
+		}
+	}
+	return MediaStats{
+		TotalCount: totals.TotalCount,
+		TotalSize:  totals.TotalSize,
+		ByType:     typeStats,
+	}, nil
+}
+
 func (s *AdminService) UpdateSettings(ctx context.Context, openRegistration *bool, instanceName *string, maxMessages *int64, maxMessageChars *int) error {
 	// Read current values
 	current := s.GetSettings()

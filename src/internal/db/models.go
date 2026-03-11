@@ -58,6 +58,7 @@ type MediaUpload struct {
 	MediaType   string
 	ExpiresAt   time.Time
 	CreatedAt   time.Time
+	FileSize    int64
 }
 
 type Message struct {

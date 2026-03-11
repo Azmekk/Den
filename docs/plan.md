@@ -850,13 +850,19 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Direct media URLs (`.jpg`, `.mp4`, etc.) still handled client-side
 - [x] Video file URLs show clickable URL text + embed (not hidden like images)
 
-### Run 17 — Admin Media Manager
-- [ ] Backend: `GET /api/admin/media` — list all media uploads with metadata (uploader, filename, size, type, upload date, expiry)
-- [ ] Backend: `DELETE /api/admin/media/{id}` — delete a specific media file from bucket + DB
-- [ ] Backend: `GET /api/admin/media/stats` — total count, total size, breakdown by type
-- [ ] Admin UI: new "Media" tab in admin panel — sortable/filterable table of uploads, delete button per item, bulk delete
-- [ ] Admin UI: storage stats summary (total size, count, usage by type chart or breakdown)
-- [ ] Verify: Admin can browse, inspect, and delete uploaded media files
+### Run 17 — Admin Media Manager ✅
+- [x] Migration 000011: `file_size BIGINT NOT NULL DEFAULT 0` column on `media_uploads`
+- [x] sqlc queries: `InsertMediaUpload` with file_size, `ListAllMediaUploads` (JOIN users), `GetMediaStats`, `GetMediaStatsByType`, `DeleteMediaUploadByID`
+- [x] Backend: `MediaService.DeleteMediaAdmin()` — deletes DB row + bucket object
+- [x] Backend: `AdminService.ListMedia()` and `GetMediaStats()` — maps DB rows to response types
+- [x] Backend: `GET /api/admin/media` — list all media uploads with uploader username, size, type, expiry
+- [x] Backend: `GET /api/admin/media/stats` — total count, total size, breakdown by type
+- [x] Backend: `DELETE /api/admin/media/{id}` — delete specific media from bucket + DB
+- [x] Backend: `POST /api/admin/media/bulk-delete` — bulk delete with `{ "ids": [...] }` body
+- [x] Frontend types: `MediaUploadInfo`, `MediaStats`, `MediaTypeStats`
+- [x] Admin UI: new "Media" tab with stats cards, filter buttons (All/Images/Videos), sortable table, select-all checkbox, bulk delete bar
+- [x] `UploadImage` and `UploadVideo` now record `file_size` on insert
+- [x] Verify: Backend builds, frontend builds, migration applied
 
 ### Run 18 — Tauri Desktop Wrapper
 - [ ] Initialize Tauri project alongside existing SvelteKit frontend
