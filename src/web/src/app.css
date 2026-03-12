@@ -35,6 +35,15 @@
 		background-color: hsl(var(--background));
 		color: hsl(var(--foreground));
 		font-family: "Inter", system-ui, -apple-system, sans-serif;
+		overscroll-behavior: none;
+		padding-left: env(safe-area-inset-left);
+		padding-right: env(safe-area-inset-right);
+	}
+
+	@media screen and (max-width: 767px) {
+		input, textarea, select {
+			font-size: 16px !important;
+		}
 	}
 
 	button, [role="button"] {
