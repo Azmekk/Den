@@ -5,7 +5,7 @@ RUN bun install --frozen-lockfile
 COPY src/web/ .
 RUN bun run build
 
-FROM golang:1.23-alpine AS backend
+FROM golang:1.25-alpine AS backend
 WORKDIR /app/src
 COPY src/go.mod src/go.sum ./
 RUN go mod download
