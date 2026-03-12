@@ -152,6 +152,10 @@ func (s *MediaService) CleanupExpired(ctx context.Context) error {
 }
 
 func (s *MediaService) RunCleanupLoop(ctx context.Context) {
+	if err := s.CleanupExpired(ctx); err != nil {
+		log.Printf("media cleanup error (initial): %v", err)
+	}
+
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for {
