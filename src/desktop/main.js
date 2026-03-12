@@ -12,6 +12,7 @@ const {
 } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
+const { autoUpdater } = require('electron-updater');
 
 const store = new Store({
   defaults: {
@@ -252,6 +253,10 @@ ipcMain.on('select-screen-source', (_event, id) => {
   selectedSourceId = id;
 });
 
+ipcMain.on('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
 ipcMain.on('send-notification', (_event, { title, body }) => {
   if (Notification.isSupported()) {
     const notification = new Notification({
@@ -296,6 +301,30 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+
+  // Auto-updater
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-available', info.version);
+    }
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('download-progress', Math.round(progress.percent));
+    }
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-downloaded');
+    }
+  });
+
+  autoUpdater.checkForUpdatesAndNotify();
 });
 
 app.on('window-all-closed', () => {
