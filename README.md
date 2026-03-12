@@ -28,41 +28,13 @@
 
 ### Quick Start
 
-Create a `docker-compose.yml`:
-
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: den
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: den
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U den"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  app:
-    image: ghcr.io/azmekk/den:latest
-    ports:
-      - "8080:8080"
-    environment:
-      DATABASE_URL: postgres://den:changeme@postgres:5432/den?sslmode=disable
-      APP_PORT: "8080"
-      JWT_SECRET: change-me-in-production
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  pgdata:
-```
-
 ```sh
+mkdir den && cd den
+curl -LO https://raw.githubusercontent.com/Azmekk/den/master/docker-compose.yml \
+     -LO https://raw.githubusercontent.com/Azmekk/den/master/livekit.yaml \
+     -LO https://raw.githubusercontent.com/Azmekk/den/master/.env.example
+cp .env.example .env
+# Edit .env — set strong random values for JWT_SECRET, LIVEKIT keys, and Postgres password
 docker compose up -d
 ```
 
