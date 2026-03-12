@@ -6,6 +6,8 @@ import {
 	type RemoteTrack,
 	type RemoteTrackPublication,
 	type RemoteParticipant,
+	type LocalTrackPublication,
+	type TrackPublication,
 } from 'livekit-client';
 import { auth } from './auth.svelte';
 import { websocket } from './websocket.svelte';
@@ -14,12 +16,28 @@ import { playJoinSound, playLeaveSound } from '$lib/voice/sounds';
 
 const STORAGE_KEY = 'den_voice_settings';
 
+export interface ScreenSharePreset {
+	label: string;
+	width: number;
+	height: number;
+	frameRate: number;
+}
+
+export const SCREEN_SHARE_PRESETS: ScreenSharePreset[] = [
+	{ label: '720p 30fps', width: 1280, height: 720, frameRate: 30 },
+	{ label: '720p 60fps', width: 1280, height: 720, frameRate: 60 },
+	{ label: '1080p 30fps', width: 1920, height: 1080, frameRate: 30 },
+	{ label: '1080p 60fps', width: 1920, height: 1080, frameRate: 60 },
+	{ label: '1080p Clarity (5fps)', width: 1920, height: 1080, frameRate: 5 },
+];
+
 interface VoiceSettings {
 	noiseGateEnabled: boolean;
 	noiseGateThreshold: number;
 	noiseCancellationEnabled: boolean;
 	echoCancellationEnabled: boolean;
 	krispEnabled: boolean;
+	screenSharePresetIndex: number;
 }
 
 function loadSettings(): VoiceSettings {
@@ -39,6 +57,7 @@ function defaultSettings(): VoiceSettings {
 		noiseCancellationEnabled: true,
 		echoCancellationEnabled: true,
 		krispEnabled: true,
+		screenSharePresetIndex: 2, // 1080p 30fps default
 	};
 }
 
@@ -52,8 +71,18 @@ function createVoiceStore() {
 	let isMuted = $state(false);
 	let isConnecting = $state(false);
 	let speakingUserIds = $state<Set<string>>(new Set());
-
 	const initial = loadSettings();
+	let isScreenSharing = $state(false);
+	let isWatchingStream = $state(false);
+	let screenSharePresetIndex = $state(initial.screenSharePresetIndex);
+	let screenPickerOpen = $state(false);
+	let screenPickerSources = $state<{ id: string; name: string; thumbnailDataUrl: string; isScreen: boolean }[]>([]);
+	let mutedUserIds = $state<Set<string>>(new Set());
+	// Identity of the participant currently sharing (null if none)
+	let screenSharerIdentity = $state<string | null>(null);
+	// The actual video track — only populated when user opts in to watch
+	let screenShareTrack = $state<RemoteTrack | null>(null);
+	let screenShareParticipant = $state<RemoteParticipant | null>(null);
 	let noiseGateEnabled = $state(initial.noiseGateEnabled);
 	let noiseGateThreshold = $state(initial.noiseGateThreshold);
 	let noiseCancellationEnabled = $state(initial.noiseCancellationEnabled);
@@ -155,6 +184,9 @@ function createVoiceStore() {
 			room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
 			room.on(RoomEvent.Disconnected, handleDisconnect);
 			room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakers);
+			room.on(RoomEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
+			room.on(RoomEvent.TrackMuted, handleTrackMuted);
+			room.on(RoomEvent.TrackUnmuted, handleTrackUnmuted);
 
 			await room.connect(url, token);
 
@@ -193,6 +225,12 @@ function createVoiceStore() {
 	async function leave(silent = false) {
 		if (currentChannelId && !silent) playLeaveSound();
 		speakingUserIds = new Set();
+		mutedUserIds = new Set();
+		isScreenSharing = false;
+		isWatchingStream = false;
+		screenSharerIdentity = null;
+		screenShareTrack = null;
+		screenShareParticipant = null;
 		cleanupProcessors();
 		if (room) {
 			room.disconnect();
@@ -239,6 +277,92 @@ function createVoiceStore() {
 		}
 	}
 
+	async function toggleScreenShare() {
+		if (!room) return;
+
+		// Stopping screen share
+		if (isScreenSharing) {
+			try {
+				await room.localParticipant.setScreenShareEnabled(false);
+				isScreenSharing = false;
+			} catch (err) {
+				console.warn('Screen share toggle failed:', err);
+				isScreenSharing = false;
+			}
+			return;
+		}
+
+		// Starting screen share — Electron gets custom picker
+		const desktop = (window as any).denDesktop;
+		if (desktop?.isDesktop) {
+			try {
+				const sources = await desktop.getScreenSources();
+				if (sources && sources.length > 0) {
+					screenPickerSources = sources;
+					screenPickerOpen = true;
+				}
+			} catch (err) {
+				console.warn('Failed to get screen sources:', err);
+			}
+			return;
+		}
+
+		// Web browser — native picker via getDisplayMedia
+		try {
+			const preset = SCREEN_SHARE_PRESETS[screenSharePresetIndex] ?? SCREEN_SHARE_PRESETS[2];
+			await room.localParticipant.setScreenShareEnabled(true, {
+				audio: true,
+				resolution: { width: preset.width, height: preset.height, frameRate: preset.frameRate },
+			});
+			isScreenSharing = true;
+		} catch (err) {
+			console.warn('Screen share toggle failed:', err);
+			isScreenSharing = false;
+		}
+	}
+
+	async function selectScreenSource(sourceId: string) {
+		screenPickerOpen = false;
+		screenPickerSources = [];
+		if (!room) return;
+
+		const desktop = (window as any).denDesktop;
+		if (desktop?.selectScreenSource) {
+			desktop.selectScreenSource(sourceId);
+		}
+
+		try {
+			const preset = SCREEN_SHARE_PRESETS[screenSharePresetIndex] ?? SCREEN_SHARE_PRESETS[2];
+			await room.localParticipant.setScreenShareEnabled(true, {
+				audio: true,
+				resolution: { width: preset.width, height: preset.height, frameRate: preset.frameRate },
+			});
+			isScreenSharing = true;
+		} catch (err) {
+			console.warn('Screen share failed:', err);
+			isScreenSharing = false;
+		}
+	}
+
+	function cancelScreenPicker() {
+		screenPickerOpen = false;
+		screenPickerSources = [];
+	}
+
+	function setScreenSharePreset(index: number) {
+		screenSharePresetIndex = index;
+		persistAndApply();
+	}
+
+	function watchStream() {
+		if (!screenShareTrack) return;
+		isWatchingStream = true;
+	}
+
+	function stopWatchingStream() {
+		isWatchingStream = false;
+	}
+
 	function getSharedAudioCtx(): AudioContext {
 		if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
 			sharedAudioCtx = new AudioContext();
@@ -251,9 +375,21 @@ function createVoiceStore() {
 
 	function handleTrackSubscribed(
 		track: RemoteTrack,
-		_publication: RemoteTrackPublication,
-		_participant: RemoteParticipant,
+		publication: RemoteTrackPublication,
+		participant: RemoteParticipant,
 	) {
+		if (publication.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
+			screenSharerIdentity = participant.identity;
+			screenShareTrack = track;
+			screenShareParticipant = participant;
+			return;
+		}
+		if (track.kind === Track.Kind.Audio && publication.source === Track.Source.ScreenShareAudio) {
+			// Attach screen share audio
+			const el = track.attach();
+			getAudioContainer().appendChild(el);
+			return;
+		}
 		if (track.kind === Track.Kind.Audio) {
 			const el = track.attach();
 			getAudioContainer().appendChild(el);
@@ -282,9 +418,17 @@ function createVoiceStore() {
 
 	function handleTrackUnsubscribed(
 		track: RemoteTrack,
-		_publication: RemoteTrackPublication,
-		_participant: RemoteParticipant,
+		publication: RemoteTrackPublication,
+		participant: RemoteParticipant,
 	) {
+		if (publication.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
+			track.detach().forEach((el) => el.remove());
+			screenSharerIdentity = null;
+			screenShareTrack = null;
+			screenShareParticipant = null;
+			isWatchingStream = false;
+			return;
+		}
 		track.detach().forEach((el) => {
 			const source = (el as any).__voiceSourceNode as AudioNode | undefined;
 			const streamDest = (el as any).__voiceStreamDest as AudioNode | undefined;
@@ -294,8 +438,34 @@ function createVoiceStore() {
 		});
 	}
 
+	function handleTrackMuted(publication: TrackPublication, participant: Participant) {
+		if (publication.source === Track.Source.Microphone && participant.identity) {
+			mutedUserIds = new Set([...mutedUserIds, participant.identity]);
+		}
+	}
+
+	function handleTrackUnmuted(publication: TrackPublication, participant: Participant) {
+		if (publication.source === Track.Source.Microphone && participant.identity) {
+			const next = new Set(mutedUserIds);
+			next.delete(participant.identity);
+			mutedUserIds = next;
+		}
+	}
+
+	function handleLocalTrackUnpublished(publication: LocalTrackPublication) {
+		if (publication.source === Track.Source.ScreenShare) {
+			isScreenSharing = false;
+		}
+	}
+
 	function handleDisconnect() {
 		speakingUserIds = new Set();
+		mutedUserIds = new Set();
+		isScreenSharing = false;
+		isWatchingStream = false;
+		screenSharerIdentity = null;
+		screenShareTrack = null;
+		screenShareParticipant = null;
 		if (currentChannelId) {
 			websocket.send({ type: 'voice_leave', channel_id: currentChannelId });
 			currentChannelId = null;
@@ -413,6 +583,7 @@ function createVoiceStore() {
 			noiseCancellationEnabled,
 			echoCancellationEnabled,
 			krispEnabled,
+			screenSharePresetIndex,
 		});
 	}
 
@@ -475,6 +646,15 @@ function createVoiceStore() {
 		get isMuted() { return isMuted; },
 		get isConnecting() { return isConnecting; },
 		isSpeaking(userId: string) { return speakingUserIds.has(userId); },
+		isUserMuted(userId: string) { return userId === auth.user?.id ? isMuted : mutedUserIds.has(userId); },
+		get isScreenSharing() { return isScreenSharing; },
+		get isWatchingStream() { return isWatchingStream; },
+		get screenSharerIdentity() { return screenSharerIdentity; },
+		get screenShareTrack() { return screenShareTrack; },
+		get screenSharePresetIndex() { return screenSharePresetIndex; },
+		get screenPickerOpen() { return screenPickerOpen; },
+		get screenPickerSources() { return screenPickerSources; },
+		isUserScreenSharing(userId: string) { return screenSharerIdentity === userId || (userId === auth.user?.id && isScreenSharing); },
 		get noiseGateEnabled() { return noiseGateEnabled; },
 		get noiseGateThreshold() { return noiseGateThreshold; },
 		get noiseCancellationEnabled() { return noiseCancellationEnabled; },
@@ -487,6 +667,12 @@ function createVoiceStore() {
 		join,
 		leave,
 		toggleMute,
+		toggleScreenShare,
+		selectScreenSource,
+		cancelScreenPicker,
+		setScreenSharePreset,
+		watchStream,
+		stopWatchingStream,
 		getParticipants,
 		setNoiseGateEnabled,
 		setNoiseGateThreshold,

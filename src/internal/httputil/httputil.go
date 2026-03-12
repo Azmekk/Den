@@ -2,6 +2,7 @@ package httputil
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -17,7 +18,16 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func WriteError(w http.ResponseWriter, status int, msg string) {
+	if status >= 500 {
+		log.Printf("[ERROR] %d: %s", status, msg)
+	}
 	WriteJSON(w, status, map[string]string{"error": msg})
+}
+
+// WriteInternalError logs the underlying error and returns a generic 500 to the client.
+func WriteInternalError(w http.ResponseWriter, msg string, err error) {
+	log.Printf("[ERROR] %s: %v", msg, err)
+	WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 }
 
 func SetRefreshTokenCookie(w http.ResponseWriter, token string) {

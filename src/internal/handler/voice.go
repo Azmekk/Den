@@ -34,7 +34,7 @@ func (h *VoiceHandler) Join(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusNotFound, "channel not found")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (h *VoiceHandler) Join(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.voiceSvc.GenerateToken(userID, username, channelID.String())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to generate token")
+		httputil.WriteInternalError(w, "failed to generate token", err)
 		return
 	}
 

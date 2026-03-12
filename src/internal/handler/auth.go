@@ -61,7 +61,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrInvalidInviteCode):
 			httputil.WriteError(w, http.StatusBadRequest, "invalid or expired invite code")
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}
@@ -95,7 +95,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			httputil.WriteError(w, http.StatusUnauthorized, "invalid username or password")
 		} else {
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}
@@ -142,7 +142,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
 	user, err := h.svc.Queries.GetUserByID(r.Context(), userID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, service.UserInfoFromDB(user))
@@ -164,7 +164,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrInvalidCredentials):
 			httputil.WriteError(w, http.StatusUnauthorized, "incorrect old password")
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}

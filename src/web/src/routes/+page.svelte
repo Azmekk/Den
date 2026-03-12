@@ -21,6 +21,8 @@ import ConnectionBanner from '$lib/components/ConnectionBanner.svelte';
 import MemberList from '$lib/components/MemberList.svelte';
 import MessageArea from '$lib/components/MessageArea.svelte';
 import PinnedMessagesPanel from '$lib/components/PinnedMessagesPanel.svelte';
+import ScreenSharePicker from '$lib/components/ScreenSharePicker.svelte';
+import ScreenShareViewer from '$lib/components/ScreenShareViewer.svelte';
 import SearchPalette from '$lib/components/SearchPalette.svelte';
 
 let searchOpen = $state(false);
@@ -342,6 +344,7 @@ function updateMessagePin(
 		{/if}
 
 		<MessageArea onSearchOpen={() => searchOpen = true} />
+		<ScreenShareViewer />
 		{#if activeTargetId}
 			<PinnedMessagesPanel targetId={activeTargetId} isDM={isDMMode} />
 		{/if}
@@ -365,5 +368,6 @@ function updateMessagePin(
 			</div>
 		{/if}
 	</div>
+	<ScreenSharePicker />
 	<SearchPalette bind:open={searchOpen} />
 {/if}

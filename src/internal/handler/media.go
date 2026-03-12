@@ -51,8 +51,7 @@ func (h *MediaHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrMediaBadFormat):
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, err.Error())
-			//httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "upload failed", err)
 		}
 		return
 	}
@@ -93,7 +92,7 @@ func (h *MediaHandler) UploadVideo(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrMediaBadFormat):
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}

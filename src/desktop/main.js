@@ -6,7 +6,9 @@ const {
   ipcMain,
   Notification,
   shell,
-  nativeImage
+  nativeImage,
+  desktopCapturer,
+  session
 } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
@@ -26,6 +28,7 @@ const store = new Store({
 
 let mainWindow = null;
 let tray = null;
+let selectedSourceId = null;
 
 // Set app identity for Windows notifications
 if (process.platform === 'win32') {
@@ -79,6 +82,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.webContents.openDevTools();
   });
 
   // Save window state on move/resize
@@ -126,25 +130,8 @@ function createWindow() {
     }
   });
 
-  // Detect logout (navigation to /login) and return to connect page
-  mainWindow.webContents.on('did-navigate', (_event, url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname === '/login') {
-        store.set('serverUrl', null);
-        mainWindow.loadFile('connect.html');
-      }
-    } catch {}
-  });
-  mainWindow.webContents.on('did-navigate-in-page', (_event, url) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname === '/login') {
-        store.set('serverUrl', null);
-        mainWindow.loadFile('connect.html');
-      }
-    } catch {}
-  });
+  // No auto-redirect on /login — let the user log in on the server.
+  // Use tray menu "Change Server" or IPC 'change-server' to return to connect page.
 
   // Load server URL or connect page
   const serverUrl = store.get('serverUrl');
@@ -174,6 +161,7 @@ function createTray() {
       label: 'Change Server',
       click: () => {
         store.set('serverUrl', null);
+        wasAuthenticated = false;
         if (mainWindow) {
           mainWindow.loadFile('connect.html');
           mainWindow.show();
@@ -245,6 +233,23 @@ ipcMain.on('change-server', () => {
   }
 });
 
+ipcMain.handle('get-screen-sources', async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 320, height: 180 }
+  });
+  return sources.map(s => ({
+    id: s.id,
+    name: s.name,
+    thumbnailDataUrl: s.thumbnail.toDataURL(),
+    isScreen: s.id.startsWith('screen:')
+  }));
+});
+
+ipcMain.on('select-screen-source', (_event, id) => {
+  selectedSourceId = id;
+});
+
 ipcMain.on('send-notification', (_event, { title, body }) => {
   if (Notification.isSupported()) {
     const notification = new Notification({
@@ -268,6 +273,25 @@ ipcMain.on('send-notification', (_event, { title, body }) => {
 // App lifecycle
 
 app.whenReady().then(() => {
+  // Allow screen sharing via getDisplayMedia — Electron requires this handler
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+      let source = sources[0];
+      if (selectedSourceId) {
+        const match = sources.find(s => s.id === selectedSourceId);
+        if (match) source = match;
+        selectedSourceId = null;
+      }
+      callback({ video: source, audio: 'loopback' });
+    });
+  });
+
+  // Allow media permissions (microphone, camera, screen) without prompts
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    const allowed = ['media', 'microphone', 'camera', 'display-capture'];
+    callback(allowed.includes(permission));
+  });
+
   createWindow();
   createTray();
 });

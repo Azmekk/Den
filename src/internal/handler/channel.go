@@ -36,7 +36,7 @@ type updateChannelRequest struct {
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	channels, err := h.svc.List(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, channels)
@@ -45,7 +45,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ChannelHandler) ListVoice(w http.ResponseWriter, r *http.Request) {
 	channels, err := h.svc.ListVoice(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, channels)
@@ -54,7 +54,7 @@ func (h *ChannelHandler) ListVoice(w http.ResponseWriter, r *http.Request) {
 func (h *ChannelHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	channels, err := h.svc.ListAll(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, channels)
@@ -73,7 +73,7 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusNotFound, "channel not found")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, ch)
@@ -94,7 +94,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrChannelNameTaken):
 			httputil.WriteError(w, http.StatusConflict, "channel name already taken")
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}
@@ -124,7 +124,7 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrChannelNameTaken):
 			httputil.WriteError(w, http.StatusConflict, "channel name already taken")
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}
@@ -139,7 +139,7 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Delete(r.Context(), id); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})
@@ -149,7 +149,7 @@ func (h *ChannelHandler) GetUnreadCounts(w http.ResponseWriter, r *http.Request)
 	userID := middleware.UserIDFromContext(r.Context())
 	counts, err := h.svc.GetUnreadCounts(r.Context(), userID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, counts)
@@ -163,7 +163,7 @@ func (h *ChannelHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.MarkChannelRead(r.Context(), userID, channelID); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "ok"})
