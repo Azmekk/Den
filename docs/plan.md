@@ -875,16 +875,16 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Custom scrollbars — thin dark-themed scrollbar styles in `app.css` using both `scrollbar-*` (Firefox) and `::-webkit-scrollbar` (Chrome/Edge), matching `--muted-foreground` theme color
 - [x] YouTube embed fix — client-side YouTube URL detection via regex, renders iframe directly without relying on unfurl. Supports `youtube.com/watch`, `youtu.be`, and `youtube.com/shorts` URLs.
 
-### Run 20 — Electron Desktop App
-- [ ] `src/desktop/` — new Electron project directory
-- [ ] `package.json` — Electron + electron-builder deps
-- [ ] `main.js` — main process: prompt for server URL on first launch, load in BrowserWindow, system tray with minimize-to-tray
-- [ ] `preload.js` — context bridge if needed
-- [ ] Store server URL + window state in electron-store or similar
-- [ ] First-launch dialog to enter Den server URL (persisted)
-- [ ] System tray with minimize-to-tray
-- [ ] Window state persistence (size, position)
-- [ ] Cross-platform builds (Windows, macOS, Linux)
+### Run 20 — Electron Desktop App ✅
+- [x] `src/desktop/` — new Electron project directory
+- [x] `package.json` — Electron + electron-builder + electron-store deps, build scripts for win/mac/linux
+- [x] `main.js` — main process: first-launch connect page, BrowserWindow with stored server URL, system tray (minimize-to-tray, click to restore), window state persistence, external link handling, custom user-agent
+- [x] `preload.js` — context bridge: submitServerUrl, onUrlValidation, getServerUrl, changeServer, sendNotification, isDesktop flag
+- [x] `connect.html` — dark-themed server URL prompt matching Den palette, validates via `/api/config` fetch
+- [x] `icons/` — icon.png (512x512), icon.ico (multi-size), icon.icns generated from existing logo
+- [x] Native desktop notifications — IPC bridge triggers OS notifications for mentions/DMs when window unfocused
+- [x] Frontend integration — `sendDesktopNotification()` in `+page.svelte` for new_message mentions and new_dm events, respects mute toggle
+- [x] `.gitignore` updated for `src/desktop/node_modules/`, `build/`, `dist/`
 
 ---
 

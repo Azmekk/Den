@@ -18,6 +18,11 @@ src/web/build/
 .env
 settings.local.json
 
+# Electron
+src/desktop/node_modules/
+src/desktop/build/
+src/desktop/dist/
+
 # OS
 .DS_Store
 Thumbs.db

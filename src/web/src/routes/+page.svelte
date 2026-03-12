@@ -39,6 +39,43 @@ function playMentionSound() {
 	}
 }
 
+function sendDesktopNotification(data: any, kind: 'mention' | 'dm') {
+	if (notificationsMuted) return;
+	if (document.hasFocus()) return;
+	if (!(window as any).denDesktop?.isDesktop) return;
+
+	const senderName = data.sender_username || data.username || 'Someone';
+	// Resolve tokens to plain text for notification body
+	const plainContent = (data.content || '')
+		.replace(/<emote:([0-9a-f-]+)>/g, (_: string, id: string) => {
+			const emote = emoteStore.emotes.find((e: any) => e.id === id);
+			return emote ? `:${emote.name}:` : ':emote:';
+		})
+		.replace(/<mention:everyone>/g, '@everyone')
+		.replace(/<mention:([0-9a-f-]+)>/g, (_: string, id: string) => {
+			const user = usersStore.users.find((u) => u.id === id);
+			return user ? `@${user.username}` : '@unknown';
+		})
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&')
+		.trim()
+		.slice(0, 200);
+	let title: string;
+	let body: string;
+
+	if (kind === 'dm') {
+		title = `Message from ${senderName}`;
+		body = plainContent;
+	} else {
+		const channelName = channelStore.channels.find((c) => c.id === data.channel_id)?.name;
+		title = channelName ? `#${channelName}` : 'Mention';
+		body = `${senderName}: ${plainContent}`;
+	}
+
+	(window as any).denDesktop.sendNotification(title, body);
+}
+
 // Derive active view for pinned panel
 const isDMMode = $derived(
 	!!dmStore.selectedDMId && !channelStore.selectedChannelId,
@@ -80,6 +117,7 @@ onMount(() => {
 			if (isMentioned || isEveryoneMentioned) {
 				unreadStore.incrementMention(data.channel_id);
 				playMentionSound();
+				sendDesktopNotification(data, 'mention');
 			}
 		}
 	}
@@ -92,6 +130,7 @@ onMount(() => {
 		if (dmId !== dmStore.selectedDMId) {
 			dmStore.incrementUnread(dmId);
 			playMentionSound();
+			sendDesktopNotification(data, 'dm');
 		}
 
 		// Refresh conversations to ensure this DM pair is listed
