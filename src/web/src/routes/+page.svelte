@@ -254,6 +254,8 @@ onMount(() => {
 				'--app-height',
 				`${window.visualViewport.height}px`,
 			);
+			// Reset any scroll offset iOS Safari may have applied when keyboard opens
+			window.scrollTo(0, 0);
 		}
 	}
 	// Initialize immediately

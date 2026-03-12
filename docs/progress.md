@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
-**Last deviation:** Fix WS connection queued ~58s due to browser connection limit
+**Last deviation:** Fix iOS Safari mobile issues (2026-03-13)
 **Next run:** Run 22 — TBD
 
 ---
@@ -516,6 +516,12 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **`websocket.svelte.ts`:** Added guards in `doConnect()` — skip if socket already CONNECTING/OPEN, detach handlers if CLOSING before replacing; `connect()` now clears pending `reconnectTimer`
 - **`hub.go`:** `removeClient()` now returns `bool` (was last connection); `broadcastAll()`, `broadcast`, `broadcastExc`, `userSend` cases use two-pass pattern — collect overflow clients first, remove after iteration, broadcast offline if last connection
 - Backend and frontend builds verified
+
+### Deviation — Fix iOS Safari Mobile Issues (2026-03-13)
+- **Issue 1 — Input jumps to top on keyboard open:** Added `html { position: fixed; width: 100%; height: 100%; overflow: hidden; }` in `app.css` to prevent iOS Safari from scrolling the layout viewport when keyboard opens. Added `window.scrollTo(0, 0)` in `updateViewportHeight()` as belt-and-suspenders.
+- **Issue 2 — Pinned messages panel displaces content on mobile:** `PinnedMessagesPanel.svelte` now renders as a full-screen overlay (`fixed inset-0 z-50`) on mobile (`md:hidden`), with the sidebar layout kept for desktop (`hidden md:flex w-80`).
+- **Issue 3 — Long-press context menu on mobile:** Replaced bits-ui `ContextMenu` in `MessageContextMenu.svelte` with custom implementation. Desktop: native `oncontextmenu` right-click. Mobile: long-press detection via `touchstart`/`touchend`/`touchmove` (500ms threshold, cancels on >10px movement). Custom positioned dropdown with same menu items (Edit, Pin/Unpin, Delete).
+- Frontend build verified
 
 ## Known Deviations from Plan
 
