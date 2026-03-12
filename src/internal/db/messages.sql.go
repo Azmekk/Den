@@ -116,6 +116,98 @@ func (q *Queries) DeleteOldestMessages(ctx context.Context, limit int32) error {
 	return err
 }
 
+const getAllChannelMessages = `-- name: GetAllChannelMessages :many
+SELECT m.id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at
+FROM messages m
+WHERE m.channel_id = $1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type GetAllChannelMessagesRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Content   string
+	Pinned    bool
+	EditedAt  sql.NullTime
+	CreatedAt time.Time
+}
+
+func (q *Queries) GetAllChannelMessages(ctx context.Context, channelID uuid.NullUUID) ([]GetAllChannelMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllChannelMessages, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllChannelMessagesRow
+	for rows.Next() {
+		var i GetAllChannelMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllDMMessages = `-- name: GetAllDMMessages :many
+SELECT m.id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at
+FROM messages m
+WHERE m.dm_pair_id = $1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type GetAllDMMessagesRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Content   string
+	Pinned    bool
+	EditedAt  sql.NullTime
+	CreatedAt time.Time
+}
+
+func (q *Queries) GetAllDMMessages(ctx context.Context, dmPairID uuid.NullUUID) ([]GetAllDMMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllDMMessages, dmPairID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllDMMessagesRow
+	for rows.Next() {
+		var i GetAllDMMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Content,
+			&i.Pinned,
+			&i.EditedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDMMessagesByPair = `-- name: GetDMMessagesByPair :many
 SELECT sub.id, sub.dm_pair_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
        sub.username, sub.display_name, sub.avatar_url

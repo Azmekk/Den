@@ -175,5 +175,17 @@ WHERE m.channel_id = @channel_id
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 50;
 
+-- name: GetAllChannelMessages :many
+SELECT m.id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at
+FROM messages m
+WHERE m.channel_id = $1
+ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: GetAllDMMessages :many
+SELECT m.id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at
+FROM messages m
+WHERE m.dm_pair_id = $1
+ORDER BY m.created_at ASC, m.id ASC;
+
 -- name: CountChannels :one
 SELECT count(*) FROM channels;

@@ -26,6 +26,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	if mediaSvc != nil {
 		mediaH = handler.NewMediaHandler(mediaSvc)
 	}
+	exportH := handler.NewExportHandler(channelSvc, userSvc, emoteSvc, dmSvc, userSvc.Queries(), authSvc.GetInstanceName)
 	unfurlH := handler.NewUnfurlHandler(unfurlSvc)
 	var voiceH *handler.VoiceHandler
 	if voiceSvc != nil {
@@ -78,6 +79,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			r.Post("/users/me/avatar", userH.UploadAvatar)
 			r.Get("/emotes", emoteH.List)
 			r.Get("/unfurl", unfurlH.Unfurl)
+			r.Get("/export", exportH.Export)
 			if mediaH != nil {
 				r.Post("/upload/image", mediaH.UploadImage)
 				r.Post("/upload/video", mediaH.UploadVideo)
