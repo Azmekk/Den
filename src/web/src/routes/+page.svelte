@@ -92,19 +92,6 @@ onMount(() => {
 		return;
 	}
 
-	// Fetch initial data
-	channelStore.fetch().then(() => {
-		if (channelStore.channels.length > 0 && !channelStore.selectedChannelId) {
-			channelStore.select(channelStore.channels[0].id);
-		}
-	});
-	usersStore.fetch();
-	configStore.fetch();
-	emoteStore.fetch();
-	channelStore.fetchVoice();
-	unreadStore.fetch();
-	dmStore.fetchConversations();
-
 	// Register WS event listeners before connecting so no messages are dropped
 	function handleNewMessage(data: any) {
 		messageStore.handleNewMessage(data);
@@ -218,10 +205,23 @@ onMount(() => {
 	}
 	websocket.on('open', handleWsOpen);
 
-	// Connect WebSocket
+	// Connect WebSocket BEFORE API fetches to avoid browser connection-limit queuing
 	if (auth.accessToken) {
 		websocket.connect(auth.accessToken);
 	}
+
+	// Fetch initial data (after WS connect so it doesn't block the upgrade)
+	channelStore.fetch().then(() => {
+		if (channelStore.channels.length > 0 && !channelStore.selectedChannelId) {
+			channelStore.select(channelStore.channels[0].id);
+		}
+	});
+	usersStore.fetch();
+	configStore.fetch();
+	emoteStore.fetch();
+	channelStore.fetchVoice();
+	unreadStore.fetch();
+	dmStore.fetchConversations();
 
 	// Refresh token when tab becomes visible (handles sleep/background)
 	function handleVisibilityChange() {
@@ -312,6 +312,18 @@ $effect(() => {
 	if (id) {
 		untrack(() => {
 			dmStore.fetchHistory(id);
+		});
+	}
+});
+
+// Safety net: reconnect WS if logged in but not connected
+$effect(() => {
+	const token = auth.accessToken;
+	const isConnected = websocket.connected;
+	const isReconnecting = websocket.reconnecting;
+	if (auth.isLoggedIn && token && !isConnected && !isReconnecting) {
+		untrack(() => {
+			websocket.connect(token);
 		});
 	}
 });

@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
-**Last deviation:** Auto-migrations at startup
+**Last deviation:** Fix WS connection queued ~58s due to browser connection limit
 **Next run:** Run 22 — TBD
 
 ---
@@ -509,6 +509,13 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - Logs final migration version after completion
 - Removed `COPY src/db/migrations /migrations` from Dockerfile (no longer needed — migrations embedded in binary)
 - External `migrate` CLI is no longer required for production deployments
+
+### Deviation — Fix WS Connection Queued ~58s (2026-03-12)
+- **Root cause:** WS upgrade was the 8th concurrent connection (after 7 API fetches in `onMount`), hitting browser's 6-connection-per-origin limit for HTTP/1.1
+- **`+page.svelte`:** Moved `websocket.connect()` before API fetches so WS upgrade goes out first; added `$effect` safety net that reactively reconnects if logged in but WS not connected
+- **`websocket.svelte.ts`:** Added guards in `doConnect()` — skip if socket already CONNECTING/OPEN, detach handlers if CLOSING before replacing; `connect()` now clears pending `reconnectTimer`
+- **`hub.go`:** `removeClient()` now returns `bool` (was last connection); `broadcastAll()`, `broadcast`, `broadcastExc`, `userSend` cases use two-pass pattern — collect overflow clients first, remove after iteration, broadcast offline if last connection
+- Backend and frontend builds verified
 
 ## Known Deviations from Plan
 

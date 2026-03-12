@@ -88,16 +88,32 @@ func NewHub() *Hub {
 }
 
 func (h *Hub) broadcastAll(data []byte) {
+	var overflow []*Client
 	for client := range h.clients {
 		select {
 		case client.send <- data:
 		default:
-			h.removeClient(client)
+			overflow = append(overflow, client)
+		}
+	}
+	for _, client := range overflow {
+		userID := client.UserID
+		username := client.Username
+		wasLast := h.removeClient(client)
+		if wasLast {
+			update, _ := json.Marshal(map[string]any{
+				"type":     "presence_update",
+				"user_id":  userID,
+				"username": username,
+				"status":   "offline",
+			})
+			h.broadcastAll(update)
 		}
 	}
 }
 
-func (h *Hub) removeClient(client *Client) {
+// removeClient removes a client and returns true if it was the user's last connection.
+func (h *Hub) removeClient(client *Client) bool {
 	delete(h.clients, client)
 	close(client.send)
 	for chID := range client.subs {
@@ -112,10 +128,11 @@ func (h *Hub) removeClient(client *Client) {
 		delete(conns, client)
 		if len(conns) == 0 {
 			delete(h.onlineUsers, client.UserID)
-			// Remove from voice channel if last connection
 			h.removeUserFromVoice(client.UserID)
+			return true
 		}
 	}
+	return false
 }
 
 func (h *Hub) removeUserFromVoice(userID uuid.UUID) {
@@ -216,10 +233,9 @@ func (h *Hub) Run() {
 			if _, ok := h.clients[client]; ok {
 				userID := client.UserID
 				username := client.Username
-				h.removeClient(client)
+				wasLast := h.removeClient(client)
 
-				// Broadcast offline status if no connections remain
-				if len(h.onlineUsers[userID]) == 0 {
+				if wasLast {
 					update, _ := json.Marshal(map[string]any{
 						"type":     "presence_update",
 						"user_id":  userID,
@@ -248,11 +264,26 @@ func (h *Hub) Run() {
 
 		case msg := <-h.broadcast:
 			if members, ok := h.channels[msg.channelID]; ok {
+				var overflow []*Client
 				for client := range members {
 					select {
 					case client.send <- msg.data:
 					default:
-						h.removeClient(client)
+						overflow = append(overflow, client)
+					}
+				}
+				for _, client := range overflow {
+					userID := client.UserID
+					username := client.Username
+					wasLast := h.removeClient(client)
+					if wasLast {
+						update, _ := json.Marshal(map[string]any{
+							"type":     "presence_update",
+							"user_id":  userID,
+							"username": username,
+							"status":   "offline",
+						})
+						h.broadcastAll(update)
 					}
 				}
 			}
@@ -265,6 +296,7 @@ func (h *Hub) Run() {
 
 		case msg := <-h.broadcastExc:
 			if members, ok := h.channels[msg.channelID]; ok {
+				var overflow []*Client
 				for client := range members {
 					if client == msg.exclude {
 						continue
@@ -272,7 +304,21 @@ func (h *Hub) Run() {
 					select {
 					case client.send <- msg.data:
 					default:
-						h.removeClient(client)
+						overflow = append(overflow, client)
+					}
+				}
+				for _, client := range overflow {
+					userID := client.UserID
+					username := client.Username
+					wasLast := h.removeClient(client)
+					if wasLast {
+						update, _ := json.Marshal(map[string]any{
+							"type":     "presence_update",
+							"user_id":  userID,
+							"username": username,
+							"status":   "offline",
+						})
+						h.broadcastAll(update)
 					}
 				}
 			}
@@ -282,11 +328,26 @@ func (h *Hub) Run() {
 
 		case msg := <-h.userSend:
 			if conns, ok := h.onlineUsers[msg.userID]; ok {
+				var overflow []*Client
 				for client := range conns {
 					select {
 					case client.send <- msg.data:
 					default:
-						h.removeClient(client)
+						overflow = append(overflow, client)
+					}
+				}
+				for _, client := range overflow {
+					userID := client.UserID
+					username := client.Username
+					wasLast := h.removeClient(client)
+					if wasLast {
+						update, _ := json.Marshal(map[string]any{
+							"type":     "presence_update",
+							"user_id":  userID,
+							"username": username,
+							"status":   "offline",
+						})
+						h.broadcastAll(update)
 					}
 				}
 			}

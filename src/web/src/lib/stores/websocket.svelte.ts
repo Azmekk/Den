@@ -13,11 +13,29 @@ function createWebSocket() {
 	function connect(accessToken: string) {
 		token = accessToken;
 		intentionalClose = false;
+		if (reconnectTimer) {
+			clearTimeout(reconnectTimer);
+			reconnectTimer = null;
+		}
 		doConnect();
 	}
 
 	function doConnect() {
 		if (!token) return;
+
+		// Don't open a second socket if one is already active or connecting
+		if (ws) {
+			if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+				return;
+			}
+			// CLOSING state — detach handlers so the old close doesn't trigger reconnect
+			if (ws.readyState === WebSocket.CLOSING) {
+				ws.onopen = null;
+				ws.onclose = null;
+				ws.onerror = null;
+				ws.onmessage = null;
+			}
+		}
 
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const url = `${protocol}//${window.location.host}/api/ws?token=${token}`;
