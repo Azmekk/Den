@@ -35,6 +35,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 
 	r := chi.NewRouter()
 
+	r.Use(cloudflareRealIP)
 	r.Use(chimw.RealIP)
 	r.Use(chimw.RequestID)
 	r.Use(chimw.Logger)
@@ -127,4 +128,15 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
 
 	return r
+}
+
+// cloudflareRealIP copies CF-Connecting-IP into X-Real-IP so Chi's
+// RealIP middleware picks up the actual client address.
+func cloudflareRealIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
+			r.Header.Set("X-Real-IP", cfIP)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
