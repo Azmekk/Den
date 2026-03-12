@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 19 — UX Improvements & Fixes
+**Last completed run:** Run 20 — Electron Desktop App
 **Last deviation:** Invitation Codes Feature
-**Next run:** Run 20 — Electron Desktop App
+**Next run:** Run 21 — TBD
 
 ---
 
@@ -524,6 +524,18 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **YouTube embed fix:** Added client-side YouTube URL detection (`isYouTubeUrl()`, `getYouTubeEmbedUrlFromRaw()`) that renders iframes directly without relying on server-side unfurl. Supports `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`. YouTube URLs excluded from unfurl pipeline.
 - **Electron deferred:** Desktop app via Electron planned for Run 20 (not implemented in this run).
 - Both Go backend and frontend build successfully.
+
+### Run 20 — Electron Desktop App
+- **New directory:** `src/desktop/` — standalone Electron project (thin client that loads remote Den server URL)
+- **package.json:** Electron 33, electron-store 10, electron-builder 25. Scripts: `start`, `build:win`, `build:mac`, `build:linux`, `build:all`
+- **main.js:** Main process — first-launch shows `connect.html` for server URL input, validates via `fetch({url}/api/config)`, stores URL in electron-store. Normal launch loads stored URL directly. Window state (x, y, width, height, isMaximized) persisted. System tray with Show/Quit menu, close-to-tray behavior, tray click restores. External links open in system browser. Custom `Den-Desktop` user-agent suffix.
+- **preload.js:** Context bridge exposes `window.denDesktop` — `submitServerUrl()`, `onUrlValidation()`, `getServerUrl()`, `changeServer()`, `sendNotification()`, `isDesktop` flag. Full `contextIsolation: true`, `nodeIntegration: false`.
+- **connect.html:** Self-contained dark-themed page matching Den palette (HSL vars from app.css). Inline SVG logo, URL input with validation, loading spinner, error display. CSP header set.
+- **Icons:** Generated from `assets/den_logo.png` via ImageMagick — `icon.png` (512x512), `icon.ico` (multi-size: 256/48/32/16), `icon.icns` (macOS).
+- **Native notifications:** IPC `send-notification` handler creates `new Notification({ title, body, icon })`. Click focuses/restores window.
+- **Frontend integration:** Added `sendDesktopNotification()` helper in `+page.svelte` — fires for mentions (new_message with user in mentioned_user_ids or mentioned_everyone) and DMs (new_dm to non-selected DM). Checks `notificationsMuted`, `document.hasFocus()`, and `window.denDesktop?.isDesktop` before sending.
+- **.gitignore:** Added `src/desktop/node_modules/`, `src/desktop/build/`, `src/desktop/dist/`.
+- Frontend builds successfully with notification integration.
 
 ---
 
