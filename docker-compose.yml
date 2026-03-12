@@ -25,6 +25,7 @@ services:
     command: --config /livekit.yaml
 
   app:
+    image: ghcr.io/azmekk/den:latest
     build: .
     ports:
       - "8080:8080"
