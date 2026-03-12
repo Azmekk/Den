@@ -40,12 +40,6 @@
 		padding-right: env(safe-area-inset-right);
 	}
 
-	@media screen and (max-width: 767px) {
-		input, textarea, select {
-			font-size: 16px !important;
-		}
-	}
-
 	button, [role="button"] {
 		cursor: pointer;
 	}
@@ -82,6 +76,13 @@
 }
 .highlight-flash {
 	animation: highlight-flash 2s ease-out;
+}
+
+/* Prevent iOS Safari zoom on input focus — must be outside @layer to beat Tailwind utilities */
+@media screen and (max-width: 767px) {
+	input, textarea, select {
+		font-size: 16px !important;
+	}
 }
 
 @theme inline {

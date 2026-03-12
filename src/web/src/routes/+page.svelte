@@ -247,26 +247,30 @@ onMount(() => {
 	document.addEventListener('keydown', handleKeydown);
 	document.addEventListener('visibilitychange', handleVisibilityChange);
 
-	// Track mobile virtual keyboard height to keep input visible
-	function updateKeyboardOffset() {
+	// Track mobile virtual keyboard — set explicit viewport height for iOS Safari
+	function updateViewportHeight() {
 		if (window.visualViewport) {
-			const offset = window.innerHeight - window.visualViewport.height;
-			document.documentElement.style.setProperty('--kb-offset', `${Math.max(0, offset)}px`);
+			document.documentElement.style.setProperty(
+				'--app-height',
+				`${window.visualViewport.height}px`,
+			);
 		}
 	}
+	// Initialize immediately
+	updateViewportHeight();
 	if (window.visualViewport) {
-		window.visualViewport.addEventListener('resize', updateKeyboardOffset);
-		window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
+		window.visualViewport.addEventListener('resize', updateViewportHeight);
+		window.visualViewport.addEventListener('scroll', updateViewportHeight);
 	}
 
 	return () => {
 		document.removeEventListener('keydown', handleKeydown);
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		if (window.visualViewport) {
-			window.visualViewport.removeEventListener('resize', updateKeyboardOffset);
-			window.visualViewport.removeEventListener('scroll', updateKeyboardOffset);
+			window.visualViewport.removeEventListener('resize', updateViewportHeight);
+			window.visualViewport.removeEventListener('scroll', updateViewportHeight);
 		}
-		document.documentElement.style.removeProperty('--kb-offset');
+		document.documentElement.style.removeProperty('--app-height');
 		websocket.off('new_message', handleNewMessage);
 		websocket.off('new_dm', handleNewDM);
 		websocket.off('edit_message', handleEditMessage);
@@ -354,8 +358,8 @@ function updateMessagePin(
 
 {#if auth.isLoggedIn}
 	<ConnectionBanner />
-	<div class="flex h-screen h-dvh {layoutStore.anyDrawerOpen ? 'overflow-hidden' : ''}"
-		 style="height: calc(100dvh - var(--kb-offset, 0px));">
+	<div class="flex {layoutStore.anyDrawerOpen ? 'overflow-hidden' : ''}"
+		 style="height: var(--app-height, 100dvh);">
 		<!-- Static sidebar (desktop) -->
 		<aside class="hidden md:flex w-60 shrink-0">
 			<ChannelSidebar />
