@@ -365,6 +365,33 @@ const tab = $derived(layoutStore.sidebarTab);
 									<span class="text-xs text-muted-foreground">Custom color</span>
 								</div>
 							</div>
+
+							<div class="border-t border-border pt-3">
+								<button
+									onclick={async () => {
+										try {
+											const res = await fetch('/api/export', {
+												headers: { Authorization: `Bearer ${auth.accessToken}` }
+											});
+											if (!res.ok) throw new Error('Export failed');
+											const blob = await res.blob();
+											const url = URL.createObjectURL(blob);
+											const a = document.createElement('a');
+											a.href = url;
+											a.download = 'den-export.json.gz';
+											a.click();
+											URL.revokeObjectURL(url);
+										} catch {
+											alert('Failed to export data');
+										}
+									}}
+									class="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-sm text-foreground hover:bg-secondary/80 transition-colors"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+									Export Data
+								</button>
+								<p class="mt-1 text-xs text-muted-foreground">Download all chat history as JSON</p>
+							</div>
 						</div>
 					</Popover.Content>
 				</Popover.Portal>
