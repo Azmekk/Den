@@ -82,7 +82,9 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.webContents.openDevTools();
+    if (process.argv.includes('--devtools')) {
+      mainWindow.webContents.openDevTools();
+    }
   });
 
   // Save window state on move/resize
