@@ -886,6 +886,15 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - [x] Frontend integration — `sendDesktopNotification()` in `+page.svelte` for new_message mentions and new_dm events, respects mute toggle
 - [x] `.gitignore` updated for `src/desktop/node_modules/`, `build/`, `dist/`
 
+### Run 21 — GitHub Workflows + README Rewrite + Auto-Updater ✅
+- [x] `.github/workflows/docker.yml` — Docker image build & push to GHCR on master push (latest) and v* tags (semver), multi-arch (amd64/arm64), GHA cache
+- [x] `.github/workflows/desktop.yml` — Electron desktop builds on v* tags, matrix across ubuntu/windows/macos, `--publish always` for update manifests, GitHub Release via softprops/action-gh-release
+- [x] `README.md` — full rewrite with centered logo, badges (stars, license, GHCR), features list, self-hosting Docker Compose snippet with env var reference table, desktop app section, development quickstart
+- [x] `LICENSE` — custom source-available license (personal use/self-hosting allowed, no redistribution/commercial use)
+- [x] `src/desktop/package.json` — added `electron-updater` dependency, `publish` config pointing to GitHub provider
+- [x] `src/desktop/main.js` — auto-updater integration: checks on launch, IPC events for update-available/download-progress/update-downloaded, install-update handler
+- [x] `src/desktop/preload.js` — exposed onUpdateAvailable, onDownloadProgress, onUpdateDownloaded listeners and installUpdate method
+
 ---
 
 ## What's Explicitly Out of Scope

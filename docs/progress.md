@@ -7,9 +7,9 @@
 ## Status
 
 **Current run:** Complete
-**Last completed run:** Run 20 — Electron Desktop App
+**Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
 **Last deviation:** Screen Share via LiveKit
-**Next run:** Run 21 — TBD
+**Next run:** Run 22 — TBD
 
 ---
 
@@ -547,6 +547,16 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Frontend integration:** Added `sendDesktopNotification()` helper in `+page.svelte` — fires for mentions (new_message with user in mentioned_user_ids or mentioned_everyone) and DMs (new_dm to non-selected DM). Checks `notificationsMuted`, `document.hasFocus()`, and `window.denDesktop?.isDesktop` before sending.
 - **.gitignore:** Added `src/desktop/node_modules/`, `src/desktop/build/`, `src/desktop/dist/`.
 - Frontend builds successfully with notification integration.
+
+### Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
+- **`.github/workflows/docker.yml`:** Docker image build & push to GHCR. Triggers on master push (tags `latest`) and v* tags (semver `{{version}}`, `{{major}}.{{minor}}`). Multi-arch linux/amd64 + linux/arm64 via QEMU. GHA build cache. Uses docker/metadata-action for tag computation.
+- **`.github/workflows/desktop.yml`:** Electron desktop release workflow. Triggers on v* tags only. Matrix build across ubuntu/windows/macos runners. Uses `npx electron-builder --publish always` to upload installers + update manifests (latest.yml, latest-mac.yml, latest-linux-*.yml) directly to GitHub Release. Second job downloads all artifacts and creates GitHub Release with softprops/action-gh-release.
+- **`README.md`:** Full rewrite — centered logo + title + tagline, badges (stars, license, GHCR), features bullet list, self-hosting section with Docker Compose snippet using `ghcr.io/azmekk/den:latest`, env var reference table, LiveKit/S3 notes, desktop app download link, condensed dev setup instructions, star CTA, license section.
+- **`LICENSE`:** Custom source-available license — allows personal use and self-hosting, prohibits redistribution/commercial use/sublicensing/hosted service.
+- **`src/desktop/package.json`:** Added `electron-updater` ^6.3.0 dependency. Added `publish` config in build section pointing to GitHub provider (Azmekk/den).
+- **`src/desktop/main.js`:** Imported `autoUpdater` from electron-updater. After createWindow/createTray, calls `autoUpdater.checkForUpdatesAndNotify()`. Sends IPC events: `update-available` (with version), `download-progress` (with percent), `update-downloaded`. Added `install-update` IPC handler calling `autoUpdater.quitAndInstall()`.
+- **`src/desktop/preload.js`:** Exposed `onUpdateAvailable(callback)`, `onDownloadProgress(callback)`, `onUpdateDownloaded(callback)` listeners and `installUpdate()` method on `window.denDesktop`.
+- No deviations from plan.
 
 ---
 

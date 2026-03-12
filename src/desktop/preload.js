@@ -29,5 +29,22 @@ contextBridge.exposeInMainWorld('denDesktop', {
 
   selectScreenSource: (id) => {
     ipcRenderer.send('select-screen-source', id);
+  },
+
+  // Auto-updater
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-available', (_event, version) => callback(version));
+  },
+
+  onDownloadProgress: (callback) => {
+    ipcRenderer.on('download-progress', (_event, percent) => callback(percent));
+  },
+
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.on('update-downloaded', () => callback());
+  },
+
+  installUpdate: () => {
+    ipcRenderer.send('install-update');
   }
 });
