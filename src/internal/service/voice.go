@@ -10,17 +10,17 @@ import (
 type VoiceService struct {
 	apiKey    string
 	apiSecret string
-	url       string
+	publicURL string
 }
 
-func NewVoiceService(apiKey, apiSecret, url string) *VoiceService {
-	if apiKey == "" || apiSecret == "" || url == "" {
+func NewVoiceService(apiKey, apiSecret, publicURL string) *VoiceService {
+	if apiKey == "" || apiSecret == "" || publicURL == "" {
 		return nil
 	}
 	return &VoiceService{
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
-		url:       url,
+		publicURL: publicURL,
 	}
 }
 
@@ -39,5 +39,5 @@ func (s *VoiceService) GenerateToken(userID uuid.UUID, username, roomName string
 }
 
 func (s *VoiceService) GetURL() string {
-	return s.url
+	return s.publicURL
 }

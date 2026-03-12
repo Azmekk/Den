@@ -85,7 +85,7 @@ func main() {
 	voiceSvc := service.NewVoiceService(
 		os.Getenv("LIVEKIT_API_KEY"),
 		os.Getenv("LIVEKIT_API_SECRET"),
-		os.Getenv("LIVEKIT_URL"),
+		os.Getenv("LIVEKIT_PUBLIC_URL"),
 	)
 	if voiceSvc != nil {
 		log.Println("voice channels enabled (LiveKit configured)")
