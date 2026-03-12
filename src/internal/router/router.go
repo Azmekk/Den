@@ -108,6 +108,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 					r.Get("/settings", adminH.GetSettings)
 					r.Put("/settings", adminH.UpdateSettings)
 					r.Get("/media", adminH.ListMedia)
+					r.Get("/media/deleted", adminH.ListDeletedMedia)
 					r.Get("/media/stats", adminH.GetMediaStats)
 					r.Delete("/media/{id}", adminH.DeleteMedia)
 					r.Post("/media/bulk-delete", adminH.BulkDeleteMedia)

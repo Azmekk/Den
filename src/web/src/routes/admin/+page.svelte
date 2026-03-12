@@ -11,6 +11,7 @@ import type {
 	EmoteInfo,
 	MediaStats,
 	MediaUploadInfo,
+	PaginatedMedia,
 	UserInfo,
 } from '$lib/types';
 
@@ -63,6 +64,14 @@ let selectedMedia = $state<Set<string>>(new Set());
 let mediaSortKey = $state<'created_at' | 'file_size' | 'media_type'>('created_at');
 let mediaSortDir = $state<'asc' | 'desc'>('desc');
 let mediaFilter = $state<'all' | 'image' | 'video'>('all');
+let mediaPage = $state(1);
+let mediaTotalCount = $state(0);
+let mediaPageSize = 50;
+let mediaSubTab = $state<'active' | 'deleted'>('active');
+let deletedMedia = $state<MediaUploadInfo[]>([]);
+let deletedMediaPage = $state(1);
+let deletedMediaTotalCount = $state(0);
+let deletedMediaLoading = $state(false);
 
 // Invites
 interface InviteCode {
@@ -347,14 +356,32 @@ async function fetchMedia() {
 	mediaLoading = true;
 	try {
 		const [listRes, statsRes] = await Promise.all([
-			fetch('/api/admin/media', { headers: headers() }),
+			fetch(`/api/admin/media?page=${mediaPage}&page_size=${mediaPageSize}`, { headers: headers() }),
 			fetch('/api/admin/media/stats', { headers: headers() }),
 		]);
-		if (listRes.ok) mediaUploads = await listRes.json();
+		if (listRes.ok) {
+			const data: PaginatedMedia = await listRes.json();
+			mediaUploads = data.items ?? [];
+			mediaTotalCount = data.total_count;
+		}
 		if (statsRes.ok) mediaStats = await statsRes.json();
 		selectedMedia = new Set();
 	} finally {
 		mediaLoading = false;
+	}
+}
+
+async function fetchDeletedMedia() {
+	deletedMediaLoading = true;
+	try {
+		const res = await fetch(`/api/admin/media/deleted?page=${deletedMediaPage}&page_size=${mediaPageSize}`, { headers: headers() });
+		if (res.ok) {
+			const data: PaginatedMedia = await res.json();
+			deletedMedia = data.items ?? [];
+			deletedMediaTotalCount = data.total_count;
+		}
+	} finally {
+		deletedMediaLoading = false;
 	}
 }
 
@@ -386,6 +413,24 @@ async function bulkDeleteMedia() {
 	}
 	selectedMedia = new Set();
 	await fetchMedia();
+}
+
+function mediaTotalPages(): number {
+	return Math.max(1, Math.ceil(mediaTotalCount / mediaPageSize));
+}
+
+function deletedMediaTotalPages(): number {
+	return Math.max(1, Math.ceil(deletedMediaTotalCount / mediaPageSize));
+}
+
+function goToMediaPage(p: number) {
+	mediaPage = p;
+	fetchMedia();
+}
+
+function goToDeletedMediaPage(p: number) {
+	deletedMediaPage = p;
+	fetchDeletedMedia();
 }
 
 async function deleteEmote(id: string) {
@@ -457,7 +502,7 @@ function switchTab(tab: typeof activeTab) {
 	if (tab === 'messages') fetchStats();
 	if (tab === 'settings') fetchSettings();
 	if (tab === 'emotes') fetchEmotes();
-	if (tab === 'media') fetchMedia();
+	if (tab === 'media') { fetchMedia(); fetchDeletedMedia(); }
 	if (tab === 'invites') fetchInviteCodes();
 }
 </script>
@@ -827,14 +872,12 @@ function switchTab(tab: typeof activeTab) {
 				<div class="rounded-lg border border-border bg-secondary/50 p-4">
 					<p class="text-sm text-muted-foreground">Uploads are not configured. Set the BUCKET_* environment variables to enable media uploads.</p>
 				</div>
-			{:else if mediaLoading}
-				<p class="text-muted-foreground">Loading media...</p>
 			{:else}
 				<div class="space-y-6">
 					<!-- Stats Cards -->
 					<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
 						<div class="rounded-lg border border-border p-4">
-							<p class="text-sm text-muted-foreground">Total Uploads</p>
+							<p class="text-sm text-muted-foreground">Active Uploads</p>
 							<p class="text-2xl font-bold text-foreground">{mediaStats.total_count.toLocaleString()}</p>
 						</div>
 						<div class="rounded-lg border border-border p-4">
@@ -850,107 +893,216 @@ function switchTab(tab: typeof activeTab) {
 						{/each}
 					</div>
 
-					<!-- Filter + Bulk Actions -->
-					<div class="flex items-center justify-between">
-						<div class="flex gap-1">
-							{#each ['all', 'image', 'video'] as filter}
-								<button
-									onclick={() => (mediaFilter = filter as typeof mediaFilter)}
-									class="rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors {mediaFilter === filter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}"
-								>
-									{filter === 'all' ? 'All' : filter + 's'}
-								</button>
-							{/each}
-						</div>
-						{#if selectedMedia.size > 0}
-							<div class="flex items-center gap-3">
-								<span class="text-sm text-muted-foreground">{selectedMedia.size} selected</span>
-								<button
-									onclick={bulkDeleteMedia}
-									class="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-								>
-									Delete Selected
-								</button>
-							</div>
-						{/if}
+					<!-- Sub-tabs: Active / Deleted -->
+					<div class="flex gap-1 border-b border-border">
+						<button
+							onclick={() => { mediaSubTab = 'active'; }}
+							class="px-4 py-2 text-sm font-medium transition-colors {mediaSubTab === 'active' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+						>
+							Active ({mediaTotalCount})
+						</button>
+						<button
+							onclick={() => { mediaSubTab = 'deleted'; }}
+							class="px-4 py-2 text-sm font-medium transition-colors {mediaSubTab === 'deleted' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+						>
+							Deleted ({deletedMediaTotalCount})
+						</button>
 					</div>
 
-					<!-- Table -->
-					{#if filteredMedia.length === 0}
-						<p class="text-muted-foreground">No media uploads found.</p>
-					{:else}
-						<div class="overflow-hidden rounded-lg border border-border">
-							<table class="w-full text-sm">
-								<thead>
-									<tr class="border-b border-border bg-secondary/50">
-										<th class="px-4 py-3 text-left">
-											<input
-												type="checkbox"
-												checked={selectedMedia.size === filteredMedia.length && filteredMedia.length > 0}
-												onchange={() => {
-													if (selectedMedia.size === filteredMedia.length) {
-														selectedMedia = new Set();
-													} else {
-														selectedMedia = new Set(filteredMedia.map(m => m.id));
-													}
-												}}
-												class="h-4 w-4 rounded border-border"
-											/>
-										</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground">Bucket Key</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('media_type')}>
-											Type {mediaSortKey === 'media_type' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
-										</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground">Uploader</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('file_size')}>
-											Size {mediaSortKey === 'file_size' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
-										</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('created_at')}>
-											Uploaded {mediaSortKey === 'created_at' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
-										</th>
-										<th class="px-4 py-3 text-left font-medium text-muted-foreground">Expires</th>
-										<th class="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each filteredMedia as media (media.id)}
-										<tr class="border-b border-border last:border-0">
-											<td class="px-4 py-3">
+					{#if mediaSubTab === 'active'}
+						<!-- Filter + Bulk Actions -->
+						<div class="flex items-center justify-between">
+							<div class="flex gap-1">
+								{#each ['all', 'image', 'video'] as filter}
+									<button
+										onclick={() => (mediaFilter = filter as typeof mediaFilter)}
+										class="rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors {mediaFilter === filter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}"
+									>
+										{filter === 'all' ? 'All' : filter + 's'}
+									</button>
+								{/each}
+							</div>
+							{#if selectedMedia.size > 0}
+								<div class="flex items-center gap-3">
+									<span class="text-sm text-muted-foreground">{selectedMedia.size} selected</span>
+									<button
+										onclick={bulkDeleteMedia}
+										class="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+									>
+										Delete Selected
+									</button>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Active Table -->
+						{#if mediaLoading}
+							<p class="text-muted-foreground">Loading media...</p>
+						{:else if filteredMedia.length === 0}
+							<p class="text-muted-foreground">No media uploads found.</p>
+						{:else}
+							<div class="overflow-hidden rounded-lg border border-border">
+								<table class="w-full text-sm">
+									<thead>
+										<tr class="border-b border-border bg-secondary/50">
+											<th class="px-4 py-3 text-left">
 												<input
 													type="checkbox"
-													checked={selectedMedia.has(media.id)}
+													checked={selectedMedia.size === filteredMedia.length && filteredMedia.length > 0}
 													onchange={() => {
-														const next = new Set(selectedMedia);
-														if (next.has(media.id)) next.delete(media.id);
-														else next.add(media.id);
-														selectedMedia = next;
+														if (selectedMedia.size === filteredMedia.length) {
+															selectedMedia = new Set();
+														} else {
+															selectedMedia = new Set(filteredMedia.map(m => m.id));
+														}
 													}}
 													class="h-4 w-4 rounded border-border"
 												/>
-											</td>
-											<td class="px-4 py-3 font-mono text-xs text-foreground max-w-[200px] truncate" title={media.bucket_key}>{media.bucket_key}</td>
-											<td class="px-4 py-3">
-												<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {media.media_type === 'image' ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'}">
-													{media.media_type}
-												</span>
-											</td>
-											<td class="px-4 py-3 text-foreground">{media.uploader_username}</td>
-											<td class="px-4 py-3 text-muted-foreground">{formatBytes(media.file_size)}</td>
-											<td class="px-4 py-3 text-muted-foreground">{new Date(media.created_at).toLocaleString()}</td>
-											<td class="px-4 py-3 text-muted-foreground">{new Date(media.expires_at).toLocaleString()}</td>
-											<td class="px-4 py-3 text-right">
-												<button
-													onclick={() => (confirmDelete = { type: 'media', id: media.id, name: media.bucket_key })}
-													class="rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
-												>
-													Delete
-												</button>
-											</td>
+											</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Bucket Key</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('media_type')}>
+												Type {mediaSortKey === 'media_type' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
+											</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Uploader</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('file_size')}>
+												Size {mediaSortKey === 'file_size' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
+											</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground cursor-pointer select-none" onclick={() => toggleMediaSort('created_at')}>
+												Uploaded {mediaSortKey === 'created_at' ? (mediaSortDir === 'asc' ? '\u25B2' : '\u25BC') : ''}
+											</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Expires</th>
+											<th class="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
 										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
+									</thead>
+									<tbody>
+										{#each filteredMedia as media (media.id)}
+											<tr class="border-b border-border last:border-0">
+												<td class="px-4 py-3">
+													<input
+														type="checkbox"
+														checked={selectedMedia.has(media.id)}
+														onchange={() => {
+															const next = new Set(selectedMedia);
+															if (next.has(media.id)) next.delete(media.id);
+															else next.add(media.id);
+															selectedMedia = next;
+														}}
+														class="h-4 w-4 rounded border-border"
+													/>
+												</td>
+												<td class="px-4 py-3 font-mono text-xs text-foreground max-w-[200px] truncate" title={media.bucket_key}>{media.bucket_key}</td>
+												<td class="px-4 py-3">
+													<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {media.media_type === 'image' ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'}">
+														{media.media_type}
+													</span>
+												</td>
+												<td class="px-4 py-3 text-foreground">{media.uploader_username}</td>
+												<td class="px-4 py-3 text-muted-foreground">{formatBytes(media.file_size)}</td>
+												<td class="px-4 py-3 text-muted-foreground">{new Date(media.created_at).toLocaleString()}</td>
+												<td class="px-4 py-3 text-muted-foreground">{new Date(media.expires_at).toLocaleString()}</td>
+												<td class="px-4 py-3 text-right">
+													<button
+														onclick={() => (confirmDelete = { type: 'media', id: media.id, name: media.bucket_key })}
+														class="rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+													>
+														Delete
+													</button>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+
+							<!-- Active Pagination -->
+							{#if mediaTotalPages() > 1}
+								<div class="flex items-center justify-between">
+									<p class="text-sm text-muted-foreground">
+										Page {mediaPage} of {mediaTotalPages()} ({mediaTotalCount} items)
+									</p>
+									<div class="flex gap-1">
+										<button
+											onclick={() => goToMediaPage(mediaPage - 1)}
+											disabled={mediaPage <= 1}
+											class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default"
+										>
+											Previous
+										</button>
+										<button
+											onclick={() => goToMediaPage(mediaPage + 1)}
+											disabled={mediaPage >= mediaTotalPages()}
+											class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default"
+										>
+											Next
+										</button>
+									</div>
+								</div>
+							{/if}
+						{/if}
+
+					{:else}
+						<!-- Deleted Media Table -->
+						{#if deletedMediaLoading}
+							<p class="text-muted-foreground">Loading deleted media...</p>
+						{:else if deletedMedia.length === 0}
+							<p class="text-muted-foreground">No deleted media.</p>
+						{:else}
+							<div class="overflow-hidden rounded-lg border border-border">
+								<table class="w-full text-sm">
+									<thead>
+										<tr class="border-b border-border bg-secondary/50">
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Bucket Key</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Uploader</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Size</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Uploaded</th>
+											<th class="px-4 py-3 text-left font-medium text-muted-foreground">Deleted</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each deletedMedia as media (media.id)}
+											<tr class="border-b border-border last:border-0">
+												<td class="px-4 py-3 font-mono text-xs text-foreground max-w-[200px] truncate" title={media.bucket_key}>{media.bucket_key}</td>
+												<td class="px-4 py-3">
+													<span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {media.media_type === 'image' ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'}">
+														{media.media_type}
+													</span>
+												</td>
+												<td class="px-4 py-3 text-foreground">{media.uploader_username}</td>
+												<td class="px-4 py-3 text-muted-foreground">{formatBytes(media.file_size)}</td>
+												<td class="px-4 py-3 text-muted-foreground">{new Date(media.created_at).toLocaleString()}</td>
+												<td class="px-4 py-3 text-muted-foreground">{media.deleted_at ? new Date(media.deleted_at).toLocaleString() : '-'}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+
+							<!-- Deleted Pagination -->
+							{#if deletedMediaTotalPages() > 1}
+								<div class="flex items-center justify-between">
+									<p class="text-sm text-muted-foreground">
+										Page {deletedMediaPage} of {deletedMediaTotalPages()} ({deletedMediaTotalCount} items)
+									</p>
+									<div class="flex gap-1">
+										<button
+											onclick={() => goToDeletedMediaPage(deletedMediaPage - 1)}
+											disabled={deletedMediaPage <= 1}
+											class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default"
+										>
+											Previous
+										</button>
+										<button
+											onclick={() => goToDeletedMediaPage(deletedMediaPage + 1)}
+											disabled={deletedMediaPage >= deletedMediaTotalPages()}
+											class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default"
+										>
+											Next
+										</button>
+									</div>
+								</div>
+							{/if}
+						{/if}
 					{/if}
 				</div>
 			{/if}
