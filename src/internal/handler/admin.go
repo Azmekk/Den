@@ -25,7 +25,7 @@ func NewAdminHandler(svc *service.AdminService, mediaSvc *service.MediaService) 
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.svc.ListUsers(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, users)
@@ -52,7 +52,7 @@ func (h *AdminHandler) SetAdmin(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusBadRequest, "cannot remove your own admin status")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "admin status updated"})
@@ -67,7 +67,7 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	tempPassword, err := h.svc.ResetPassword(r.Context(), targetID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"temp_password": tempPassword})
@@ -86,7 +86,7 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusBadRequest, "cannot delete your own account")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "user deleted"})
@@ -95,7 +95,7 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.svc.GetStats(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, stats)
@@ -111,7 +111,7 @@ func (h *AdminHandler) CleanupMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteOldestMessages(r.Context(), req.Count); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "messages deleted"})
@@ -124,7 +124,7 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListMedia(w http.ResponseWriter, r *http.Request) {
 	media, err := h.svc.ListMedia(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, media)
@@ -133,7 +133,7 @@ func (h *AdminHandler) ListMedia(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) GetMediaStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.svc.GetMediaStats(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, stats)
@@ -146,7 +146,7 @@ func (h *AdminHandler) DeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.mediaSvc.DeleteMediaAdmin(r.Context(), id); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to delete media")
+		httputil.WriteInternalError(w, "failed to delete media", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "media deleted"})
@@ -172,7 +172,7 @@ func (h *AdminHandler) BulkDeleteMedia(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListInviteCodes(w http.ResponseWriter, r *http.Request) {
 	codes, err := h.svc.ListInviteCodes(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, codes)
@@ -197,7 +197,7 @@ func (h *AdminHandler) CreateInviteCode(w http.ResponseWriter, r *http.Request) 
 	callerID := middleware.UserIDFromContext(r.Context())
 	code, err := h.svc.CreateInviteCode(r.Context(), callerID, req.MaxUses, expiresAt)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to create invite code")
+		httputil.WriteInternalError(w, "failed to create invite code", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, code)
@@ -210,7 +210,7 @@ func (h *AdminHandler) DeleteInviteCode(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := h.svc.DeleteInviteCode(r.Context(), id); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to delete invite code")
+		httputil.WriteInternalError(w, "failed to delete invite code", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "invite code deleted"})
@@ -238,7 +238,7 @@ func (h *AdminHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.UpdateSettings(r.Context(), req.OpenRegistration, req.InstanceName, req.MaxMessages, req.MaxMessageChars); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to update settings")
+		httputil.WriteInternalError(w, "failed to update settings", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, h.svc.GetSettings())

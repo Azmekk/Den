@@ -63,7 +63,7 @@ func (h *EmoteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrEmoteDimensions):
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}
@@ -89,7 +89,7 @@ func (h *EmoteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusNotFound, "emote not found")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *EmoteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *EmoteHandler) List(w http.ResponseWriter, r *http.Request) {
 	emotes, err := h.svc.List(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, emotes)
@@ -119,7 +119,7 @@ func (h *EmoteHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusNotFound, "emote not found")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 

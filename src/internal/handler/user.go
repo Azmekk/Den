@@ -28,7 +28,7 @@ func NewUserHandler(svc *service.UserService, mediaSvc *service.MediaService, hu
 func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	users, err := h.svc.List(r.Context())
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, users)
@@ -52,7 +52,7 @@ func (h *UserHandler) UpdateDisplayName(w http.ResponseWriter, r *http.Request) 
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *UserHandler) UpdateColor(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrMediaBadFormat):
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+			httputil.WriteInternalError(w, "internal error", err)
 		}
 		return
 	}

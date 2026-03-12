@@ -43,7 +43,7 @@ func (h *DMHandler) CreateOrGet(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -55,7 +55,7 @@ func (h *DMHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	pairs, err := h.svc.ListConversations(r.Context(), userID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -77,7 +77,7 @@ func (h *DMHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusForbidden, "access denied")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -109,7 +109,7 @@ func (h *DMHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 
 	messages, hasMore, err := h.svc.GetDMHistory(r.Context(), dmPairID, beforeTime, beforeID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -133,13 +133,13 @@ func (h *DMHandler) GetPins(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusForbidden, "access denied")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
 	messages, err := h.svc.GetPinnedDMMessages(r.Context(), dmPairID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 

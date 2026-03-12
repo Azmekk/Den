@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 20 — Electron Desktop App
-**Last deviation:** Invitation Codes Feature
+**Last deviation:** Screen Share via LiveKit
 **Next run:** Run 21 — TBD
 
 ---
@@ -489,6 +489,17 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **API**: 3 new admin endpoints (`GET/POST /api/admin/invite-codes`, `DELETE /api/admin/invite-codes/{id}`). `/api/config` now includes `open_registration`. Register endpoint accepts `invite_code` field.
 - **Frontend**: Config store exposes `openRegistration`. Register page conditionally shows invite code input when registration is closed. Admin panel adds "Invites" tab with create form (max uses, expiry), code table, copy-to-clipboard, and delete.
 - Both backend and frontend build successfully.
+
+### Deviation — Screen Share via LiveKit (2026-03-12)
+- **Backend**: No changes needed — LiveKit handles screen share tracks via existing `VideoGrant`.
+- **Voice store** (`voice.svelte.ts`): Added `isScreenSharing`, `isWatchingStream`, `screenSharerIdentity`, `screenShareTrack` state. `toggleScreenShare()` applies quality presets (resolution + fps) from `SCREEN_SHARE_PRESETS`. Handles `TrackSubscribed`/`TrackUnsubscribed` for `ScreenShare` and `ScreenShareAudio` sources. Listens for `LocalTrackUnpublished` to detect browser's native "Stop sharing" prompt. Users opt in to watch via `watchStream()`/`stopWatchingStream()`. Persists `screenSharePresetIndex` in voice settings.
+- **VoiceConnectionBar.svelte**: Screen share button opens quality picker popover (720p/1080p, 30/60/5fps presets) with "Go Live" button. When sharing, shows stop button directly. Uses bits-ui Popover.
+- **ScreenShareViewer.svelte** (new): Detached floating window — draggable title bar, resizable from all edges/corners, fullscreen toggle, close button. Shows "stream available" banner when someone is sharing but user hasn't opted in. Video auto-attaches via `$effect`. Positioned at viewport center on first open.
+- **ChannelSidebar.svelte**: Screen share indicator (green monitor icon) via `voiceStore.isUserScreenSharing()`.
+- **+page.svelte**: ScreenShareViewer rendered as fixed overlay (not inline — no sidebar scrolling impact).
+- **Electron** (`src/desktop/main.js`): Added `session.setDisplayMediaRequestHandler()` to enable `getDisplayMedia()` for screen sharing. Added `setPermissionRequestHandler()` to auto-grant media permissions. Imported `desktopCapturer` and `session`.
+- Removed "Screen sharing" from plan's out-of-scope list.
+- Frontend build passes.
 
 ## Known Deviations from Plan
 

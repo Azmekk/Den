@@ -57,7 +57,7 @@ func (h *MessageHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 
 	messages, hasMore, err := h.svc.GetHistory(r.Context(), channelID, beforeTime, beforeID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *MessageHandler) PinMessage(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *MessageHandler) UnpinMessage(w http.ResponseWriter, r *http.Request) {
 			httputil.WriteError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -182,7 +182,7 @@ func (h *MessageHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.svc.SearchMessages(r.Context(), query, channelID, authorID, afterTime, beforeTime)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -206,7 +206,7 @@ func (h *MessageHandler) GetMessagesAround(w http.ResponseWriter, r *http.Reques
 
 	messages, hasMoreBefore, hasMoreAfter, err := h.svc.GetMessagesAround(r.Context(), channelID, messageID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -238,7 +238,7 @@ func (h *MessageHandler) GetNewer(w http.ResponseWriter, r *http.Request) {
 
 	messages, hasMore, err := h.svc.GetNewer(r.Context(), channelID, afterTime, afterID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 
@@ -257,7 +257,7 @@ func (h *MessageHandler) GetPinnedMessages(w http.ResponseWriter, r *http.Reques
 
 	messages, err := h.svc.GetPinnedMessages(r.Context(), channelID)
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "internal error")
+		httputil.WriteInternalError(w, "internal error", err)
 		return
 	}
 

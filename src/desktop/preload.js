@@ -21,5 +21,13 @@ contextBridge.exposeInMainWorld('denDesktop', {
 
   sendNotification: (title, body) => {
     ipcRenderer.send('send-notification', { title, body });
+  },
+
+  getScreenSources: () => {
+    return ipcRenderer.invoke('get-screen-sources');
+  },
+
+  selectScreenSource: (id) => {
+    ipcRenderer.send('select-screen-source', id);
   }
 });

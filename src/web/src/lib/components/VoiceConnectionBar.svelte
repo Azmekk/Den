@@ -1,11 +1,19 @@
 <script lang="ts">
+  import { Popover } from 'bits-ui';
   import { channelStore } from "$lib/stores/channels.svelte";
-  import { voiceStore } from "$lib/stores/voice.svelte";
+  import { voiceStore, SCREEN_SHARE_PRESETS } from "$lib/stores/voice.svelte";
   import AudioSettingsPopover from "./AudioSettingsPopover.svelte";
 
   const currentVoiceChannel = $derived(
     channelStore.sortedVoiceChannels.find((c) => c.id === voiceStore.currentChannelId),
   );
+
+  let screenSharePopoverOpen = $state(false);
+
+  function startScreenShare() {
+    screenSharePopoverOpen = false;
+    voiceStore.toggleScreenShare();
+  }
 </script>
 
 {#if voiceStore.currentChannelId}
@@ -83,6 +91,83 @@
           >
         {/if}
       </button>
+
+      <!-- Screen share toggle with quality picker -->
+      {#if voiceStore.isScreenSharing}
+        <!-- Stop sharing (direct button) -->
+        <button
+          onclick={() => voiceStore.toggleScreenShare()}
+          class="rounded p-1.5 transition-colors text-green-500 hover:bg-green-500/10"
+          title="Stop Sharing"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /><line x1="2" x2="22" y1="2" y2="22" /></svg
+          >
+        </button>
+      {:else}
+        <!-- Start sharing (popover with quality picker) -->
+        <Popover.Root bind:open={screenSharePopoverOpen}>
+          <Popover.Trigger
+            class="rounded p-1.5 transition-colors text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Share Screen"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /></svg
+            >
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              class="z-50 w-52 rounded-lg border border-border bg-card p-2 shadow-lg"
+              sideOffset={8}
+              side="top"
+            >
+              <div class="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Stream Quality
+              </div>
+              {#each SCREEN_SHARE_PRESETS as preset, i}
+                <button
+                  onclick={() => { voiceStore.setScreenSharePreset(i); }}
+                  class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors {voiceStore.screenSharePresetIndex === i
+                    ? 'bg-secondary text-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+                >
+                  <span class="flex-1 text-left">{preset.label}</span>
+                  {#if voiceStore.screenSharePresetIndex === i}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  {/if}
+                </button>
+              {/each}
+              <div class="mt-1.5 border-t border-border pt-1.5">
+                <button
+                  onclick={startScreenShare}
+                  class="flex w-full items-center justify-center gap-1.5 rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /></svg>
+                  Go Live
+                </button>
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      {/if}
 
       <!-- Audio settings -->
       <AudioSettingsPopover />

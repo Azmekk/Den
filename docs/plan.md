@@ -893,7 +893,6 @@ Each run should leave the repo in a working, committable state. Never start a ru
 - Media uploads are limited to profile pics (5 MB), emotes (256 KB), images (25 MB, ephemeral 24h), and videos (100 MB, ephemeral 24h); stored in optional S3-compatible bucket
 - End-to-end encryption
 - Role/permission systems beyond admin/non-admin
-- Screen sharing
 - Message reactions (emoji reactions on messages — custom emotes are for inline message content only)
 - Threads or replies (keep it flat)
 - Bots or webhooks
