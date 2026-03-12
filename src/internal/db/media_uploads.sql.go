@@ -7,30 +7,33 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
-const deleteMediaUploadByID = `-- name: DeleteMediaUploadByID :one
-DELETE FROM media_uploads WHERE id = $1 RETURNING bucket_key
+const countActiveMediaUploads = `-- name: CountActiveMediaUploads :one
+SELECT COUNT(*)::bigint FROM media_uploads WHERE deleted_at IS NULL
 `
 
-func (q *Queries) DeleteMediaUploadByID(ctx context.Context, id uuid.UUID) (string, error) {
-	row := q.db.QueryRowContext(ctx, deleteMediaUploadByID, id)
-	var bucket_key string
-	err := row.Scan(&bucket_key)
-	return bucket_key, err
+func (q *Queries) CountActiveMediaUploads(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveMediaUploads)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
-const deleteMediaUploadsByIDs = `-- name: DeleteMediaUploadsByIDs :exec
-DELETE FROM media_uploads WHERE id = ANY($1::uuid[])
+const countDeletedMediaUploads = `-- name: CountDeletedMediaUploads :one
+SELECT COUNT(*)::bigint FROM media_uploads WHERE deleted_at IS NOT NULL
 `
 
-func (q *Queries) DeleteMediaUploadsByIDs(ctx context.Context, dollar_1 []uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteMediaUploadsByIDs, pq.Array(dollar_1))
-	return err
+func (q *Queries) CountDeletedMediaUploads(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDeletedMediaUploads)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const extendMediaUploadExpiry = `-- name: ExtendMediaUploadExpiry :exec
@@ -43,7 +46,7 @@ func (q *Queries) ExtendMediaUploadExpiry(ctx context.Context, id uuid.UUID) err
 }
 
 const getExpiredMediaUploads = `-- name: GetExpiredMediaUploads :many
-SELECT id, bucket_key FROM media_uploads WHERE expires_at < NOW()
+SELECT id, bucket_key FROM media_uploads WHERE expires_at < NOW() AND deleted_at IS NULL
 `
 
 type GetExpiredMediaUploadsRow struct {
@@ -76,7 +79,7 @@ func (q *Queries) GetExpiredMediaUploads(ctx context.Context) ([]GetExpiredMedia
 
 const getMediaStats = `-- name: GetMediaStats :one
 SELECT COUNT(*)::bigint AS total_count, COALESCE(SUM(file_size), 0)::bigint AS total_size
-FROM media_uploads
+FROM media_uploads WHERE deleted_at IS NULL
 `
 
 type GetMediaStatsRow struct {
@@ -94,6 +97,7 @@ func (q *Queries) GetMediaStats(ctx context.Context) (GetMediaStatsRow, error) {
 const getMediaStatsByType = `-- name: GetMediaStatsByType :many
 SELECT media_type, COUNT(*)::bigint AS count, COALESCE(SUM(file_size), 0)::bigint AS total_size
 FROM media_uploads
+WHERE deleted_at IS NULL
 GROUP BY media_type
 `
 
@@ -127,7 +131,7 @@ func (q *Queries) GetMediaStatsByType(ctx context.Context) ([]GetMediaStatsByTyp
 }
 
 const getMediaUploadByHash = `-- name: GetMediaUploadByHash :one
-SELECT id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size FROM media_uploads WHERE content_hash = $1 LIMIT 1
+SELECT id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size, deleted_at FROM media_uploads WHERE content_hash = $1 AND deleted_at IS NULL LIMIT 1
 `
 
 func (q *Queries) GetMediaUploadByHash(ctx context.Context, contentHash string) (MediaUpload, error) {
@@ -142,14 +146,24 @@ func (q *Queries) GetMediaUploadByHash(ctx context.Context, contentHash string) 
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.FileSize,
+		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const hardDeleteMediaUploadsByIDs = `-- name: HardDeleteMediaUploadsByIDs :exec
+DELETE FROM media_uploads WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) HardDeleteMediaUploadsByIDs(ctx context.Context, dollar_1 []uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, hardDeleteMediaUploadsByIDs, pq.Array(dollar_1))
+	return err
 }
 
 const insertMediaUpload = `-- name: InsertMediaUpload :one
 INSERT INTO media_uploads (uploader_id, bucket_key, content_hash, media_type, file_size)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size
+RETURNING id, uploader_id, bucket_key, content_hash, media_type, expires_at, created_at, file_size, deleted_at
 `
 
 type InsertMediaUploadParams struct {
@@ -178,18 +192,26 @@ func (q *Queries) InsertMediaUpload(ctx context.Context, arg InsertMediaUploadPa
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.FileSize,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
-const listAllMediaUploads = `-- name: ListAllMediaUploads :many
+const listActiveMediaUploads = `-- name: ListActiveMediaUploads :many
 SELECT m.id, m.uploader_id, u.username AS uploader_username, m.bucket_key, m.media_type, m.file_size, m.expires_at, m.created_at
 FROM media_uploads m
 JOIN users u ON u.id = m.uploader_id
+WHERE m.deleted_at IS NULL
 ORDER BY m.created_at DESC
+LIMIT $1 OFFSET $2
 `
 
-type ListAllMediaUploadsRow struct {
+type ListActiveMediaUploadsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+type ListActiveMediaUploadsRow struct {
 	ID               uuid.UUID
 	UploaderID       uuid.UUID
 	UploaderUsername string
@@ -200,15 +222,15 @@ type ListAllMediaUploadsRow struct {
 	CreatedAt        time.Time
 }
 
-func (q *Queries) ListAllMediaUploads(ctx context.Context) ([]ListAllMediaUploadsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllMediaUploads)
+func (q *Queries) ListActiveMediaUploads(ctx context.Context, arg ListActiveMediaUploadsParams) ([]ListActiveMediaUploadsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveMediaUploads, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListAllMediaUploadsRow
+	var items []ListActiveMediaUploadsRow
 	for rows.Next() {
-		var i ListAllMediaUploadsRow
+		var i ListActiveMediaUploadsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UploaderID,
@@ -230,4 +252,83 @@ func (q *Queries) ListAllMediaUploads(ctx context.Context) ([]ListAllMediaUpload
 		return nil, err
 	}
 	return items, nil
+}
+
+const listDeletedMediaUploads = `-- name: ListDeletedMediaUploads :many
+SELECT m.id, m.uploader_id, u.username AS uploader_username, m.bucket_key, m.media_type, m.file_size, m.expires_at, m.created_at, m.deleted_at
+FROM media_uploads m
+JOIN users u ON u.id = m.uploader_id
+WHERE m.deleted_at IS NOT NULL
+ORDER BY m.deleted_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListDeletedMediaUploadsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+type ListDeletedMediaUploadsRow struct {
+	ID               uuid.UUID
+	UploaderID       uuid.UUID
+	UploaderUsername string
+	BucketKey        string
+	MediaType        string
+	FileSize         int64
+	ExpiresAt        time.Time
+	CreatedAt        time.Time
+	DeletedAt        sql.NullTime
+}
+
+func (q *Queries) ListDeletedMediaUploads(ctx context.Context, arg ListDeletedMediaUploadsParams) ([]ListDeletedMediaUploadsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletedMediaUploads, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeletedMediaUploadsRow
+	for rows.Next() {
+		var i ListDeletedMediaUploadsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UploaderID,
+			&i.UploaderUsername,
+			&i.BucketKey,
+			&i.MediaType,
+			&i.FileSize,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteMediaUploadByID = `-- name: SoftDeleteMediaUploadByID :one
+UPDATE media_uploads SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING bucket_key
+`
+
+func (q *Queries) SoftDeleteMediaUploadByID(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRowContext(ctx, softDeleteMediaUploadByID, id)
+	var bucket_key string
+	err := row.Scan(&bucket_key)
+	return bucket_key, err
+}
+
+const softDeleteMediaUploadsByIDs = `-- name: SoftDeleteMediaUploadsByIDs :exec
+UPDATE media_uploads SET deleted_at = NOW() WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) SoftDeleteMediaUploadsByIDs(ctx context.Context, dollar_1 []uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, softDeleteMediaUploadsByIDs, pq.Array(dollar_1))
+	return err
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -121,8 +122,35 @@ func (h *AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, h.svc.GetSettings())
 }
 
+func parsePagination(r *http.Request) (page, pageSize int) {
+	page = 1
+	pageSize = 50
+	if v := r.URL.Query().Get("page"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if v := r.URL.Query().Get("page_size"); v != "" {
+		if ps, err := strconv.Atoi(v); err == nil && ps > 0 && ps <= 100 {
+			pageSize = ps
+		}
+	}
+	return
+}
+
 func (h *AdminHandler) ListMedia(w http.ResponseWriter, r *http.Request) {
-	media, err := h.svc.ListMedia(r.Context())
+	page, pageSize := parsePagination(r)
+	media, err := h.svc.ListMedia(r.Context(), page, pageSize)
+	if err != nil {
+		httputil.WriteInternalError(w, "internal error", err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, media)
+}
+
+func (h *AdminHandler) ListDeletedMedia(w http.ResponseWriter, r *http.Request) {
+	page, pageSize := parsePagination(r)
+	media, err := h.svc.ListDeletedMedia(r.Context(), page, pageSize)
 	if err != nil {
 		httputil.WriteInternalError(w, "internal error", err)
 		return

@@ -121,7 +121,7 @@ func (s *MediaService) UploadVideo(ctx context.Context, uploaderID uuid.UUID, fi
 }
 
 func (s *MediaService) DeleteMediaAdmin(ctx context.Context, id uuid.UUID) error {
-	bucketKey, err := s.queries.DeleteMediaUploadByID(ctx, id)
+	bucketKey, err := s.queries.SoftDeleteMediaUploadByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (s *MediaService) CleanupExpired(ctx context.Context) error {
 	for i, row := range rows {
 		ids[i] = row.ID
 	}
-	return s.queries.DeleteMediaUploadsByIDs(ctx, ids)
+	return s.queries.SoftDeleteMediaUploadsByIDs(ctx, ids)
 }
 
 func (s *MediaService) RunCleanupLoop(ctx context.Context) {

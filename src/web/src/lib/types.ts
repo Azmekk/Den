@@ -92,6 +92,7 @@ export interface MediaUploadInfo {
 	file_size: number;
 	expires_at: string;
 	created_at: string;
+	deleted_at?: string;
 }
 
 export interface MediaTypeStats {
@@ -104,4 +105,11 @@ export interface MediaStats {
 	total_count: number;
 	total_size: number;
 	by_type: MediaTypeStats[];
+}
+
+export interface PaginatedMedia {
+	items: MediaUploadInfo[];
+	total_count: number;
+	page: number;
+	page_size: number;
 }

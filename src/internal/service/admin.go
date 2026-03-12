@@ -190,14 +190,15 @@ func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int3
 }
 
 type MediaUploadInfo struct {
-	ID               uuid.UUID `json:"id"`
-	UploaderID       uuid.UUID `json:"uploader_id"`
-	UploaderUsername string    `json:"uploader_username"`
-	BucketKey        string    `json:"bucket_key"`
-	MediaType        string    `json:"media_type"`
-	FileSize         int64     `json:"file_size"`
-	ExpiresAt        time.Time `json:"expires_at"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               uuid.UUID  `json:"id"`
+	UploaderID       uuid.UUID  `json:"uploader_id"`
+	UploaderUsername string     `json:"uploader_username"`
+	BucketKey        string     `json:"bucket_key"`
+	MediaType        string     `json:"media_type"`
+	FileSize         int64      `json:"file_size"`
+	ExpiresAt        time.Time  `json:"expires_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	DeletedAt        *time.Time `json:"deleted_at,omitempty"`
 }
 
 type MediaTypeStats struct {
@@ -212,14 +213,29 @@ type MediaStats struct {
 	ByType     []MediaTypeStats `json:"by_type"`
 }
 
-func (s *AdminService) ListMedia(ctx context.Context) ([]MediaUploadInfo, error) {
-	rows, err := s.queries.ListAllMediaUploads(ctx)
+type PaginatedMedia struct {
+	Items      []MediaUploadInfo `json:"items"`
+	TotalCount int64             `json:"total_count"`
+	Page       int               `json:"page"`
+	PageSize   int               `json:"page_size"`
+}
+
+func (s *AdminService) ListMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
+	offset := int32((page - 1) * pageSize)
+	rows, err := s.queries.ListActiveMediaUploads(ctx, db.ListActiveMediaUploadsParams{
+		Limit:  int32(pageSize),
+		Offset: offset,
+	})
 	if err != nil {
-		return nil, err
+		return PaginatedMedia{}, err
 	}
-	result := make([]MediaUploadInfo, len(rows))
+	total, err := s.queries.CountActiveMediaUploads(ctx)
+	if err != nil {
+		return PaginatedMedia{}, err
+	}
+	items := make([]MediaUploadInfo, len(rows))
 	for i, row := range rows {
-		result[i] = MediaUploadInfo{
+		items[i] = MediaUploadInfo{
 			ID:               row.ID,
 			UploaderID:       row.UploaderID,
 			UploaderUsername: row.UploaderUsername,
@@ -230,7 +246,41 @@ func (s *AdminService) ListMedia(ctx context.Context) ([]MediaUploadInfo, error)
 			CreatedAt:        row.CreatedAt,
 		}
 	}
-	return result, nil
+	return PaginatedMedia{Items: items, TotalCount: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) ListDeletedMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
+	offset := int32((page - 1) * pageSize)
+	rows, err := s.queries.ListDeletedMediaUploads(ctx, db.ListDeletedMediaUploadsParams{
+		Limit:  int32(pageSize),
+		Offset: offset,
+	})
+	if err != nil {
+		return PaginatedMedia{}, err
+	}
+	total, err := s.queries.CountDeletedMediaUploads(ctx)
+	if err != nil {
+		return PaginatedMedia{}, err
+	}
+	items := make([]MediaUploadInfo, len(rows))
+	for i, row := range rows {
+		var deletedAt *time.Time
+		if row.DeletedAt.Valid {
+			deletedAt = &row.DeletedAt.Time
+		}
+		items[i] = MediaUploadInfo{
+			ID:               row.ID,
+			UploaderID:       row.UploaderID,
+			UploaderUsername: row.UploaderUsername,
+			BucketKey:        row.BucketKey,
+			MediaType:        row.MediaType,
+			FileSize:         row.FileSize,
+			ExpiresAt:        row.ExpiresAt,
+			CreatedAt:        row.CreatedAt,
+			DeletedAt:        deletedAt,
+		}
+	}
+	return PaginatedMedia{Items: items, TotalCount: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
