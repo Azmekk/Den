@@ -552,7 +552,7 @@ function handleDrop(e: DragEvent) {
 	{#if hasActiveView}
 		<!-- Header -->
 		<div class="flex h-12 items-center justify-between border-b border-border px-4">
-			<div class="flex items-center gap-2">
+			<div class="flex min-w-0 flex-1 items-center gap-2">
 				<button
 					onclick={() => layoutStore.toggleSidebar()}
 					class="rounded p-1.5 min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden"
@@ -570,7 +570,7 @@ function handleDrop(e: DragEvent) {
 					<span class="ml-3 truncate text-sm text-muted-foreground">{channel.topic}</span>
 				{/if}
 			</div>
-			<div class="flex items-center gap-1">
+			<div class="flex shrink-0 items-center gap-1">
 				{#if onSearchOpen}
 					<button
 						onclick={onSearchOpen}
