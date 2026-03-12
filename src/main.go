@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
@@ -51,6 +55,10 @@ func main() {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 	log.Println("connected to database")
+
+	if err := runMigrations(conn); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
 
 	queries := db.New(conn)
 
@@ -117,4 +125,34 @@ func main() {
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func runMigrations(conn *sql.DB) error {
+	migrationFS, err := fs.Sub(MigrationFiles, "db/migrations")
+	if err != nil {
+		return fmt.Errorf("creating migration sub-fs: %w", err)
+	}
+
+	source, err := iofs.New(migrationFS, ".")
+	if err != nil {
+		return fmt.Errorf("creating migration source: %w", err)
+	}
+
+	driver, err := postgres.WithInstance(conn, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("creating migration driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("creating migrate instance: %w", err)
+	}
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("running migrations: %w", err)
+	}
+
+	version, dirty, _ := m.Version()
+	log.Printf("migrations complete (version=%d, dirty=%v)", version, dirty)
+	return nil
 }

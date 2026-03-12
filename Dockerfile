@@ -17,6 +17,5 @@ RUN cd src && CGO_ENABLED=0 go build -o /den .
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 COPY --from=backend /den /den
-COPY src/db/migrations /migrations
 EXPOSE 8080
 CMD ["/den"]

@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
-**Last deviation:** Screen Share via LiveKit
+**Last deviation:** Auto-migrations at startup
 **Next run:** Run 22 — TBD
 
 ---
@@ -500,6 +500,15 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Electron** (`src/desktop/main.js`): Added `session.setDisplayMediaRequestHandler()` to enable `getDisplayMedia()` for screen sharing. Added `setPermissionRequestHandler()` to auto-grant media permissions. Imported `desktopCapturer` and `session`.
 - Removed "Screen sharing" from plan's out-of-scope list.
 - Frontend build passes.
+
+### Deviation — Auto-migrations at Startup (2026-03-12)
+- Embedded migration SQL files into the Go binary via `//go:embed db/migrations/*.sql` in `embed.go`
+- Added `runMigrations()` in `main.go` using `golang-migrate/migrate/v4` with `iofs` source and `postgres` driver
+- Migrations run automatically at startup after DB connection, before any services initialize
+- `migrate.ErrNoChange` is handled gracefully (no error when already up to date)
+- Logs final migration version after completion
+- Removed `COPY src/db/migrations /migrations` from Dockerfile (no longer needed — migrations embedded in binary)
+- External `migrate` CLI is no longer required for production deployments
 
 ## Known Deviations from Plan
 
