@@ -507,7 +507,7 @@ function switchTab(tab: typeof activeTab) {
 }
 </script>
 
-<div class="flex h-screen flex-col bg-background text-foreground">
+<div class="flex h-screen h-dvh flex-col bg-background text-foreground">
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b border-border px-6 py-3">
 		<div class="flex items-center gap-3">

@@ -247,9 +247,26 @@ onMount(() => {
 	document.addEventListener('keydown', handleKeydown);
 	document.addEventListener('visibilitychange', handleVisibilityChange);
 
+	// Track mobile virtual keyboard height to keep input visible
+	function updateKeyboardOffset() {
+		if (window.visualViewport) {
+			const offset = window.innerHeight - window.visualViewport.height;
+			document.documentElement.style.setProperty('--kb-offset', `${Math.max(0, offset)}px`);
+		}
+	}
+	if (window.visualViewport) {
+		window.visualViewport.addEventListener('resize', updateKeyboardOffset);
+		window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
+	}
+
 	return () => {
 		document.removeEventListener('keydown', handleKeydown);
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
+		if (window.visualViewport) {
+			window.visualViewport.removeEventListener('resize', updateKeyboardOffset);
+			window.visualViewport.removeEventListener('scroll', updateKeyboardOffset);
+		}
+		document.documentElement.style.removeProperty('--kb-offset');
 		websocket.off('new_message', handleNewMessage);
 		websocket.off('new_dm', handleNewDM);
 		websocket.off('edit_message', handleEditMessage);
@@ -325,7 +342,8 @@ function updateMessagePin(
 
 {#if auth.isLoggedIn}
 	<ConnectionBanner />
-	<div class="flex h-screen {layoutStore.anyDrawerOpen ? 'overflow-hidden' : ''}">
+	<div class="flex h-screen h-dvh {layoutStore.anyDrawerOpen ? 'overflow-hidden' : ''}"
+		 style="height: calc(100dvh - var(--kb-offset, 0px));">
 		<!-- Static sidebar (desktop) -->
 		<aside class="hidden md:flex w-60 shrink-0">
 			<ChannelSidebar />

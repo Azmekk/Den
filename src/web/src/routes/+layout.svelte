@@ -20,7 +20,7 @@ onMount(async () => {
 {#if ready}
 	{@render children()}
 {:else}
-	<div class="flex h-screen items-center justify-center">
+	<div class="flex h-screen h-dvh items-center justify-center">
 		<div class="text-muted-foreground">Loading...</div>
 	</div>
 {/if}
