@@ -2,6 +2,11 @@
   "name": "den-desktop",
   "version": "1.0.0",
   "description": "Den — Desktop Client",
+  "author": {
+    "name": "Azmekk",
+    "email": "azmekk@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/Azmekk/Den",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
