@@ -44,6 +44,54 @@ let avatarCropOpen = $state(false);
 let avatarFile: File | null = $state(null);
 let avatarInputEl: HTMLInputElement | undefined = $state();
 
+let changingPassword = $state(false);
+let oldPassword = $state('');
+let newPassword = $state('');
+let confirmPassword = $state('');
+let passwordError = $state('');
+let passwordSuccess = $state(false);
+let passwordLoading = $state(false);
+
+function resetPasswordForm() {
+	oldPassword = '';
+	newPassword = '';
+	confirmPassword = '';
+	passwordError = '';
+	passwordSuccess = false;
+	passwordLoading = false;
+}
+
+async function submitChangePassword() {
+	passwordError = '';
+	passwordSuccess = false;
+
+	if (newPassword.length < 8) {
+		passwordError = 'New password must be at least 8 characters';
+		return;
+	}
+	if (newPassword !== confirmPassword) {
+		passwordError = 'Passwords do not match';
+		return;
+	}
+
+	passwordLoading = true;
+	try {
+		await auth.changePassword(oldPassword, newPassword);
+		passwordSuccess = true;
+		oldPassword = '';
+		newPassword = '';
+		confirmPassword = '';
+		setTimeout(() => {
+			changingPassword = false;
+			passwordSuccess = false;
+		}, 2000);
+	} catch (e: any) {
+		passwordError = e.message || 'Failed to change password';
+	} finally {
+		passwordLoading = false;
+	}
+}
+
 const currentAvatarUrl = $derived(currentUser?.avatar_url);
 
 function handleAvatarFileSelect(e: Event) {
@@ -364,6 +412,63 @@ const tab = $derived(layoutStore.sidebarTab);
 									/>
 									<span class="text-xs text-muted-foreground">Custom color</span>
 								</div>
+							</div>
+
+							<div class="border-t border-border pt-3">
+								{#if changingPassword}
+									<div class="space-y-2">
+										<!-- svelte-ignore a11y_label_has_associated_control -->
+										<label class="mb-1 block text-xs font-medium text-muted-foreground">Change Password</label>
+										<input
+											type="password"
+											bind:value={oldPassword}
+											placeholder="Current password"
+											class="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground focus:border-primary focus:outline-none"
+										/>
+										<input
+											type="password"
+											bind:value={newPassword}
+											placeholder="New password"
+											class="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground focus:border-primary focus:outline-none"
+										/>
+										<input
+											type="password"
+											bind:value={confirmPassword}
+											placeholder="Confirm new password"
+											class="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground focus:border-primary focus:outline-none"
+											onkeydown={(e) => { if (e.key === 'Enter') submitChangePassword(); }}
+										/>
+										{#if passwordError}
+											<p class="text-xs text-red-500">{passwordError}</p>
+										{/if}
+										{#if passwordSuccess}
+											<p class="text-xs text-green-500">Password changed!</p>
+										{/if}
+										<div class="flex gap-2">
+											<button
+												onclick={submitChangePassword}
+												disabled={passwordLoading}
+												class="flex-1 rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+											>
+												{passwordLoading ? 'Saving...' : 'Save'}
+											</button>
+											<button
+												onclick={() => { changingPassword = false; resetPasswordForm(); }}
+												class="flex-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary"
+											>
+												Cancel
+											</button>
+										</div>
+									</div>
+								{:else}
+									<button
+										onclick={() => { changingPassword = true; resetPasswordForm(); }}
+										class="flex w-full items-center gap-2 rounded border border-border bg-secondary px-3 py-1.5 text-sm text-foreground hover:bg-secondary/80 transition-colors"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+										Change Password
+									</button>
+								{/if}
 							</div>
 
 							<div class="border-t border-border pt-3">

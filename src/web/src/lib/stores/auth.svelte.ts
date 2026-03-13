@@ -80,6 +80,22 @@ function createAuth() {
 		setSession(data);
 	}
 
+	async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+		const res = await fetch('/api/change-password', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${accessToken}`,
+			},
+			credentials: 'include',
+			body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+		});
+		if (!res.ok) {
+			const body = await res.json().catch(() => ({ error: 'change password failed' }));
+			throw new Error(body.error || 'change password failed');
+		}
+	}
+
 	async function logout(): Promise<void> {
 		await fetch('/api/logout', {
 			method: 'POST',
@@ -107,6 +123,7 @@ function createAuth() {
 		init,
 		login,
 		register,
+		changePassword,
 		logout,
 	};
 }
