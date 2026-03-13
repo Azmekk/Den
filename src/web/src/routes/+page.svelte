@@ -250,12 +250,23 @@ onMount(() => {
 	// Track mobile virtual keyboard — set explicit viewport height for iOS Safari
 	function updateViewportHeight() {
 		if (window.visualViewport) {
-			document.documentElement.style.setProperty(
-				'--app-height',
-				`${window.visualViewport.height}px`,
-			);
-			// Reset any scroll offset iOS Safari may have applied when keyboard opens
-			window.scrollTo(0, 0);
+			const vh = window.visualViewport.height;
+			document.documentElement.style.setProperty('--app-height', `${vh}px`);
+			// Detect keyboard open: visual viewport significantly shorter than screen
+			const keyboardOpen = vh < window.screen.height * 0.75;
+			if (keyboardOpen) {
+				// Lock html in place so iOS Safari doesn't scroll the viewport
+				document.documentElement.style.position = 'fixed';
+				document.documentElement.style.width = '100%';
+				document.documentElement.style.height = '100%';
+				document.documentElement.style.overflow = 'hidden';
+				window.scrollTo(0, 0);
+			} else {
+				document.documentElement.style.removeProperty('position');
+				document.documentElement.style.removeProperty('width');
+				document.documentElement.style.removeProperty('height');
+				document.documentElement.style.removeProperty('overflow');
+			}
 		}
 	}
 	// Initialize immediately
@@ -273,6 +284,10 @@ onMount(() => {
 			window.visualViewport.removeEventListener('scroll', updateViewportHeight);
 		}
 		document.documentElement.style.removeProperty('--app-height');
+		document.documentElement.style.removeProperty('position');
+		document.documentElement.style.removeProperty('width');
+		document.documentElement.style.removeProperty('height');
+		document.documentElement.style.removeProperty('overflow');
 		websocket.off('new_message', handleNewMessage);
 		websocket.off('new_dm', handleNewDM);
 		websocket.off('edit_message', handleEditMessage);
