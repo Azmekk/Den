@@ -30,7 +30,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "icons/icon.ico"
+      "icon": "icons/icon.ico",
+      "artifactName": "Den-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
