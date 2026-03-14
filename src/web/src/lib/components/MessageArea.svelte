@@ -530,6 +530,15 @@ function handleDrop(e: DragEvent) {
 		uploadFile(file);
 	}
 }
+
+function handlePaste(e: ClipboardEvent) {
+	if (!configStore.uploadsEnabled) return;
+	const file = e.clipboardData?.files[0];
+	if (file && (isImageFile(file) || isVideoFile(file))) {
+		e.preventDefault();
+		uploadFile(file);
+	}
+}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -834,6 +843,7 @@ function handleDrop(e: DragEvent) {
 					bind:value={messageInput}
 					onkeydown={handleKeydown}
 					oninput={handleInput}
+					onpaste={handlePaste}
 					onclick={updateCursorPosition}
 					onkeyup={updateCursorPosition}
 					placeholder={placeholderText}
