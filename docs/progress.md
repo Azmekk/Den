@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
-**Last deviation:** Fix iOS Safari mobile issues (2026-03-13)
+**Last deviation:** Fix desktop release version from tag (2026-03-14)
 **Next run:** Run 22 — TBD
 
 ---
@@ -522,6 +522,10 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 - **Issue 2 — Pinned messages panel displaces content on mobile:** `PinnedMessagesPanel.svelte` now renders as a full-screen overlay (`fixed inset-0 z-50`) on mobile (`md:hidden`), with the sidebar layout kept for desktop (`hidden md:flex w-80`).
 - **Issue 3 — Long-press context menu on mobile:** Replaced bits-ui `ContextMenu` in `MessageContextMenu.svelte` with custom implementation. Desktop: native `oncontextmenu` right-click. Mobile: long-press detection via `touchstart`/`touchend`/`touchmove` (500ms threshold, cancels on >10px movement). Custom positioned dropdown with same menu items (Edit, Pin/Unpin, Delete).
 - Frontend build verified
+
+### Deviation — Fix Desktop Release Version from Tag (2026-03-14)
+- **Problem:** `src/desktop/package.json` has `"version": "1.0.0"` hardcoded. The desktop workflow never updated it from the git tag, so electron-builder always produced a 1.0.0 exe.
+- **Fix:** Added "Set version from tag" step in `.github/workflows/desktop.yml` before `npm install`. Uses `npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version` to strip the `v` prefix (e.g. `v0.1.13` → `0.1.13`) and update package.json in-place during CI only.
 
 ## Known Deviations from Plan
 
