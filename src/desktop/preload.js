@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('denDesktop', {
     ipcRenderer.send('change-server');
   },
 
+  onAutoReconnect: (callback) => {
+    ipcRenderer.on('auto-reconnect', (_event, data) => callback(data));
+  },
+
   sendNotification: (title, body) => {
     ipcRenderer.send('send-notification', { title, body });
   },

@@ -101,12 +101,3 @@ docker compose down             # Stop everything
 - Postgres on port 5440 (5432-5434 occupied on host)
 - `MSYS_NO_PATHCONV=1` needed for Docker volume mount commands in Git Bash
 
-## After Every Run
-
-After completing a run, always update **both** `docs/plan.md` **and** `docs/progress.md`:
-- `docs/plan.md` — mark the completed run as done and update the next run section
-- `docs/progress.md` — record what was completed, any deviations from the plan, and the exact starting point for the next run
-
-**Never update one without the other.** Both files must stay in sync.
-
-**Runs vs Deviations:** Only count work as a numbered run if the user explicitly says so. Ad-hoc fixes, improvements, or changes done outside a formal run should be logged as a "Deviation" in progress.md — not as a new run number. The run counter only advances when the user specifies it.

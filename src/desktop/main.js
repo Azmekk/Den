@@ -30,6 +30,7 @@ const store = new Store({
 let mainWindow = null;
 let tray = null;
 let selectedSourceId = null;
+let wasAuthenticated = false;
 
 // Set app identity for Windows notifications
 if (process.platform === 'win32') {
@@ -136,12 +137,36 @@ function createWindow() {
   // No auto-redirect on /login — let the user log in on the server.
   // Use tray menu "Change Server" or IPC 'change-server' to return to connect page.
 
-  // Load server URL or connect page
+  // Catch load failures for server URL and fall back to connect page
+  mainWindow.webContents.on('did-fail-load', (_event, _code, errorDescription, validatedURL) => {
+    const storedUrl = store.get('serverUrl');
+    if (storedUrl && validatedURL.startsWith(storedUrl)) {
+      mainWindow.loadFile('connect.html');
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow.webContents.send('auto-reconnect', {
+          status: 'failed', url: storedUrl,
+          error: `Connection failed: ${errorDescription || 'unknown error'}`
+        });
+      });
+    }
+  });
+
+  // Always load connect page first, then auto-reconnect if we have a stored URL
   const serverUrl = store.get('serverUrl');
+  mainWindow.loadFile('connect.html');
+
   if (serverUrl) {
-    mainWindow.loadURL(serverUrl);
-  } else {
-    mainWindow.loadFile('connect.html');
+    mainWindow.webContents.once('did-finish-load', async () => {
+      mainWindow.webContents.send('auto-reconnect', { status: 'connecting', url: serverUrl });
+      const result = await validateServerUrl(serverUrl);
+      if (result.success) {
+        mainWindow.loadURL(serverUrl);
+      } else {
+        mainWindow.webContents.send('auto-reconnect', {
+          status: 'failed', url: serverUrl, error: result.error
+        });
+      }
+    });
   }
 }
 
@@ -195,9 +220,9 @@ function createTray() {
   });
 }
 
-// IPC handlers
+// Server URL validation helper
 
-ipcMain.on('submit-server-url', async (event, url) => {
+async function validateServerUrl(url) {
   try {
     const response = await fetch(`${url}/api/config`, {
       headers: { 'User-Agent': 'Den-Desktop' },
@@ -205,13 +230,8 @@ ipcMain.on('submit-server-url', async (event, url) => {
     });
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
     const data = await response.json();
-    if (typeof data !== 'object' || data === null) {
-      throw new Error('Invalid response from server');
-    }
-
-    store.set('serverUrl', url);
-    event.reply('url-validation-result', { success: true });
-    mainWindow.loadURL(url);
+    if (typeof data !== 'object' || data === null) throw new Error('Invalid response from server');
+    return { success: true };
   } catch (err) {
     let error = 'Could not connect to server';
     if (err.name === 'TimeoutError' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
@@ -221,7 +241,20 @@ ipcMain.on('submit-server-url', async (event, url) => {
     } else if (err.message) {
       error = err.message;
     }
-    event.reply('url-validation-result', { success: false, error });
+    return { success: false, error };
+  }
+}
+
+// IPC handlers
+
+ipcMain.on('submit-server-url', async (event, url) => {
+  const result = await validateServerUrl(url);
+  if (result.success) {
+    store.set('serverUrl', url);
+    event.reply('url-validation-result', { success: true });
+    mainWindow.loadURL(url);
+  } else {
+    event.reply('url-validation-result', result);
   }
 });
 

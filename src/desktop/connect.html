@@ -168,6 +168,21 @@
       }
       // On success, main process handles navigation
     });
+
+    if (window.denDesktop.onAutoReconnect) {
+      window.denDesktop.onAutoReconnect((data) => {
+        if (data.status === 'connecting') {
+          urlInput.value = data.url;
+          setLoading(true);
+          btnText.textContent = 'Reconnecting...';
+          error.textContent = '';
+        } else if (data.status === 'failed') {
+          setLoading(false);
+          urlInput.value = data.url;
+          error.textContent = data.error || 'Could not reconnect to server';
+        }
+      });
+    }
   </script>
 </body>
 </html>

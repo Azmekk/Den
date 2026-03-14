@@ -8,7 +8,7 @@
 
 **Current run:** Complete
 **Last completed run:** Run 21 — GitHub Workflows + README Rewrite + Auto-Updater
-**Last deviation:** Fix desktop release version from tag (2026-03-14)
+**Last deviation:** Fix desktop startup: always load connect.html first with auto-reconnect (2026-03-14)
 **Next run:** Run 22 — TBD
 
 ---
@@ -526,6 +526,15 @@ Applied ahead of Run 10 as a deviation (not a numbered run):
 ### Deviation — Fix Desktop Release Version from Tag (2026-03-14)
 - **Problem:** `src/desktop/package.json` has `"version": "1.0.0"` hardcoded. The desktop workflow never updated it from the git tag, so electron-builder always produced a 1.0.0 exe.
 - **Fix:** Added "Set version from tag" step in `.github/workflows/desktop.yml` before `npm install`. Uses `npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version` to strip the `v` prefix (e.g. `v0.1.13` → `0.1.13`) and update package.json in-place during CI only.
+
+### Deviation — Fix Desktop Startup: Auto-Reconnect via connect.html (2026-03-14)
+- **Problem:** Desktop app called `mainWindow.loadURL(serverUrl)` directly on startup with no validation or error handling. If the server was unreachable, the window showed a blank/error page with no recovery path. GitHub issue #2.
+- **Fix:** Three changes across `main.js`, `preload.js`, `connect.html`:
+  - Extracted `validateServerUrl()` helper from the `submit-server-url` IPC handler
+  - Changed startup to always load `connect.html` first, then validate stored URL in background and auto-navigate on success (shows "Reconnecting..." spinner briefly)
+  - Added `did-fail-load` safety net that falls back to `connect.html` with error if the server goes down after initial validation
+  - Exposed `onAutoReconnect` IPC channel in preload, `connect.html` handles `connecting`/`failed` states
+  - Fixed undeclared `wasAuthenticated` variable in tray menu handler
 
 ## Known Deviations from Plan
 
