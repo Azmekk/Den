@@ -97,6 +97,12 @@ function createAuth() {
 	}
 
 	async function logout(): Promise<void> {
+		// Dynamic imports to avoid circular dependency (auth is imported by voice/websocket)
+		const { voiceStore } = await import('./voice.svelte');
+		const { websocket } = await import('./websocket.svelte');
+		voiceStore.leave(true);
+		websocket.disconnect();
+
 		await fetch('/api/logout', {
 			method: 'POST',
 			credentials: 'include',

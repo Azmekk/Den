@@ -14,7 +14,6 @@ import { presence } from '$lib/stores/presence.svelte';
 import { typing } from '$lib/stores/typing.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
-import { voiceStore } from '$lib/stores/voice.svelte';
 import { websocket } from '$lib/stores/websocket.svelte';
 import ChannelSidebar from '$lib/components/ChannelSidebar.svelte';
 import ConnectionBanner from '$lib/components/ConnectionBanner.svelte';
@@ -192,8 +191,6 @@ onMount(() => {
 	websocket.on('typing_start', typing.handleTypingStart);
 	websocket.on('typing_stop', typing.handleTypingStop);
 	websocket.on('emote_list_update', emoteStore.refresh);
-	websocket.on('voice_state_initial', voiceStore.handleVoiceStateInitial);
-	websocket.on('voice_state_update', voiceStore.handleVoiceStateUpdate);
 
 	function handleWsOpen() {
 		const id = channelStore.selectedChannelId;
@@ -205,12 +202,7 @@ onMount(() => {
 	}
 	websocket.on('open', handleWsOpen);
 
-	// Connect WebSocket BEFORE API fetches to avoid browser connection-limit queuing
-	if (auth.accessToken) {
-		websocket.connect(auth.accessToken);
-	}
-
-	// Fetch initial data (after WS connect so it doesn't block the upgrade)
+	// Fetch initial data
 	channelStore.fetch().then(() => {
 		if (channelStore.channels.length > 0 && !channelStore.selectedChannelId) {
 			channelStore.select(channelStore.channels[0].id);
@@ -223,21 +215,6 @@ onMount(() => {
 	unreadStore.fetch();
 	dmStore.fetchConversations();
 
-	// Refresh token when tab becomes visible (handles sleep/background)
-	function handleVisibilityChange() {
-		if (document.visibilityState === 'visible') {
-			auth.refresh().then((ok) => {
-				if (ok && auth.accessToken) {
-					websocket.updateToken(auth.accessToken);
-					if (!websocket.connected) {
-						websocket.connect(auth.accessToken);
-					}
-				} else {
-					goto('/login');
-				}
-			});
-		}
-	}
 	function handleKeydown(e: KeyboardEvent) {
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
@@ -245,7 +222,6 @@ onMount(() => {
 		}
 	}
 	document.addEventListener('keydown', handleKeydown);
-	document.addEventListener('visibilitychange', handleVisibilityChange);
 
 	// Track mobile virtual keyboard — set explicit viewport height for iOS Safari
 	function updateViewportHeight() {
@@ -278,7 +254,6 @@ onMount(() => {
 
 	return () => {
 		document.removeEventListener('keydown', handleKeydown);
-		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		if (window.visualViewport) {
 			window.visualViewport.removeEventListener('resize', updateViewportHeight);
 			window.visualViewport.removeEventListener('scroll', updateViewportHeight);
@@ -301,11 +276,7 @@ onMount(() => {
 		websocket.off('typing_start', typing.handleTypingStart);
 		websocket.off('typing_stop', typing.handleTypingStop);
 		websocket.off('emote_list_update', emoteStore.refresh);
-		websocket.off('voice_state_initial', voiceStore.handleVoiceStateInitial);
-		websocket.off('voice_state_update', voiceStore.handleVoiceStateUpdate);
 		websocket.off('open', handleWsOpen);
-		voiceStore.leave(true);
-		websocket.disconnect();
 	};
 });
 
@@ -333,18 +304,6 @@ $effect(() => {
 	if (id) {
 		untrack(() => {
 			dmStore.fetchHistory(id);
-		});
-	}
-});
-
-// Safety net: reconnect WS if logged in but not connected
-$effect(() => {
-	const token = auth.accessToken;
-	const isConnected = websocket.connected;
-	const isReconnecting = websocket.reconnecting;
-	if (auth.isLoggedIn && token && !isConnected && !isReconnecting) {
-		untrack(() => {
-			websocket.connect(token);
 		});
 	}
 });
