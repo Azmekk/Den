@@ -532,11 +532,18 @@ function handleDrop(e: DragEvent) {
 }
 
 function handlePaste(e: ClipboardEvent) {
-	if (!configStore.uploadsEnabled) return;
-	const file = e.clipboardData?.files[0];
-	if (file && (isImageFile(file) || isVideoFile(file))) {
-		e.preventDefault();
-		uploadFile(file);
+if (!configStore.uploadsEnabled) return;
+	const items = e.clipboardData?.items;
+	if (!items) return;
+	for (const item of items) {
+		if (item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
+			const file = item.getAsFile();
+			if (file) {
+				e.preventDefault();
+				uploadFile(file);
+				return;
+			}
+		}
 	}
 }
 </script>
