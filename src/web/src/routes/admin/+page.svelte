@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { goto } from '$app/navigation';
+import { api, ApiError } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { convertToWebP, isAnimatedGif } from '$lib/media';
@@ -129,12 +130,6 @@ let confirmDelete = $state<{
 } | null>(null);
 let error = $state('');
 
-function headers() {
-	return {
-		Authorization: `Bearer ${auth.accessToken}`,
-		'Content-Type': 'application/json',
-	};
-}
 
 onMount(() => {
 	if (!auth.isLoggedIn || !auth.user?.is_admin) {
@@ -148,8 +143,7 @@ onMount(() => {
 async function fetchUsers() {
 	usersLoading = true;
 	try {
-		const res = await fetch('/api/admin/users', { headers: headers() });
-		if (res.ok) users = await res.json();
+		users = await api.get<UserInfo[]>('/admin/users');
 	} finally {
 		usersLoading = false;
 	}
@@ -158,23 +152,20 @@ async function fetchUsers() {
 async function fetchChannels() {
 	channelsLoading = true;
 	try {
-		const res = await fetch('/api/admin/channels', { headers: headers() });
-		if (res.ok) channels = await res.json();
+		channels = await api.get<ChannelInfo[]>('/admin/channels');
 	} finally {
 		channelsLoading = false;
 	}
 }
 
 async function fetchStats() {
-	const res = await fetch('/api/admin/stats', { headers: headers() });
-	if (res.ok) stats = await res.json();
+	try { stats = await api.get<AdminStats>('/admin/stats'); } catch {}
 }
 
 async function fetchSettings() {
 	settingsLoading = true;
 	try {
-		const res = await fetch('/api/admin/settings', { headers: headers() });
-		if (res.ok) settings = await res.json();
+		settings = await api.get<AdminSettings>('/admin/settings');
 	} finally {
 		settingsLoading = false;
 	}
@@ -182,14 +173,10 @@ async function fetchSettings() {
 
 async function toggleAdmin(user: UserInfo) {
 	error = '';
-	const res = await fetch(`/api/admin/users/${user.id}/admin`, {
-		method: 'PUT',
-		headers: headers(),
-		body: JSON.stringify({ is_admin: !user.is_admin }),
-	});
-	if (!res.ok) {
-		const body = await res.json().catch(() => ({ error: 'failed' }));
-		error = body.error;
+	try {
+		await api.put(`/admin/users/${user.id}/admin`, { is_admin: !user.is_admin });
+	} catch (e: any) {
+		error = e.message || 'failed';
 		return;
 	}
 	await fetchUsers();
@@ -197,47 +184,35 @@ async function toggleAdmin(user: UserInfo) {
 
 async function resetPassword(userId: string) {
 	error = '';
-	const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
-		method: 'POST',
-		headers: headers(),
-	});
-	if (!res.ok) {
+	try {
+		const data = await api.post<{ temp_password: string }>(`/admin/users/${userId}/reset-password`);
+		tempPassword = data.temp_password;
+	} catch {
 		error = 'Failed to reset password';
-		return;
 	}
-	const data = await res.json();
-	tempPassword = data.temp_password;
 }
 
 async function deleteUser(userId: string) {
 	error = '';
-	const res = await fetch(`/api/admin/users/${userId}`, {
-		method: 'DELETE',
-		headers: headers(),
-	});
-	if (!res.ok) {
-		const body = await res.json().catch(() => ({ error: 'failed' }));
-		error = body.error;
-		return;
+	try {
+		await api.del(`/admin/users/${userId}`);
+		confirmDelete = null;
+		await fetchUsers();
+	} catch (e: any) {
+		error = e.message || 'failed';
 	}
-	confirmDelete = null;
-	await fetchUsers();
 }
 
 async function saveChannel() {
 	error = '';
-	const method = editingChannelId ? 'PUT' : 'POST';
-	const url = editingChannelId
-		? `/api/channels/${editingChannelId}`
-		: '/api/channels';
-	const res = await fetch(url, {
-		method,
-		headers: headers(),
-		body: JSON.stringify(channelForm),
-	});
-	if (!res.ok) {
-		const body = await res.json().catch(() => ({ error: 'failed' }));
-		error = body.error;
+	try {
+		if (editingChannelId) {
+			await api.put(`/channels/${editingChannelId}`, channelForm);
+		} else {
+			await api.post('/channels', channelForm);
+		}
+	} catch (e: any) {
+		error = e.message || 'failed';
 		return;
 	}
 	showChannelForm = false;
@@ -254,31 +229,20 @@ function editChannel(ch: ChannelInfo) {
 
 async function deleteChannel(id: string) {
 	error = '';
-	const res = await fetch(`/api/channels/${id}`, {
-		method: 'DELETE',
-		headers: headers(),
-	});
-	if (!res.ok) {
+	try {
+		await api.del(`/channels/${id}`);
+		confirmDelete = null;
+		await fetchChannels();
+	} catch {
 		error = 'Failed to delete channel';
-		return;
 	}
-	confirmDelete = null;
-	await fetchChannels();
 }
 
 async function cleanupMessages() {
 	error = '';
 	cleanupLoading = true;
 	try {
-		const res = await fetch('/api/admin/messages/cleanup', {
-			method: 'POST',
-			headers: headers(),
-			body: JSON.stringify({ count: cleanupCount }),
-		});
-		if (!res.ok) {
-			error = 'Failed to cleanup messages';
-			return;
-		}
+		await api.post('/admin/messages/cleanup', { count: cleanupCount });
 		await fetchStats();
 	} finally {
 		cleanupLoading = false;
@@ -290,18 +254,9 @@ async function saveSettings() {
 	settingsSaved = false;
 	settingsLoading = true;
 	try {
-		const res = await fetch('/api/admin/settings', {
-			method: 'PUT',
-			headers: headers(),
-			body: JSON.stringify(settings),
-		});
-		if (res.ok) {
-			settings = await res.json();
-			settingsSaved = true;
-			setTimeout(() => (settingsSaved = false), 3000);
-		} else {
-			error = 'Failed to save settings';
-		}
+		settings = await api.put<AdminSettings>('/admin/settings', settings);
+		settingsSaved = true;
+		setTimeout(() => (settingsSaved = false), 3000);
 	} finally {
 		settingsLoading = false;
 	}
@@ -310,8 +265,7 @@ async function saveSettings() {
 async function fetchEmotes() {
 	emotesLoading = true;
 	try {
-		const res = await fetch('/api/emotes', { headers: headers() });
-		if (res.ok) emotes = await res.json();
+		emotes = await api.get<EmoteInfo[]>('/emotes');
 	} finally {
 		emotesLoading = false;
 	}
@@ -334,16 +288,7 @@ async function uploadEmote() {
 		const formData = new FormData();
 		formData.append('name', emoteForm.name);
 		formData.append('image', fileToUpload, filename);
-		const res = await fetch('/api/emotes', {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-			body: formData,
-		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'upload failed' }));
-			error = body.error;
-			return;
-		}
+		await api.upload('/emotes', formData);
 		emoteForm = { name: '' };
 		emoteFile = null;
 		await fetchEmotes();
@@ -355,16 +300,13 @@ async function uploadEmote() {
 async function fetchMedia() {
 	mediaLoading = true;
 	try {
-		const [listRes, statsRes] = await Promise.all([
-			fetch(`/api/admin/media?page=${mediaPage}&page_size=${mediaPageSize}`, { headers: headers() }),
-			fetch('/api/admin/media/stats', { headers: headers() }),
+		const [listData, statsData] = await Promise.all([
+			api.get<PaginatedMedia>(`/admin/media?page=${mediaPage}&page_size=${mediaPageSize}`),
+			api.get<MediaStats>('/admin/media/stats'),
 		]);
-		if (listRes.ok) {
-			const data: PaginatedMedia = await listRes.json();
-			mediaUploads = data.items ?? [];
-			mediaTotalCount = data.total_count;
-		}
-		if (statsRes.ok) mediaStats = await statsRes.json();
+		mediaUploads = listData.items ?? [];
+		mediaTotalCount = listData.total_count;
+		mediaStats = statsData;
 		selectedMedia = new Set();
 	} finally {
 		mediaLoading = false;
@@ -374,12 +316,9 @@ async function fetchMedia() {
 async function fetchDeletedMedia() {
 	deletedMediaLoading = true;
 	try {
-		const res = await fetch(`/api/admin/media/deleted?page=${deletedMediaPage}&page_size=${mediaPageSize}`, { headers: headers() });
-		if (res.ok) {
-			const data: PaginatedMedia = await res.json();
-			deletedMedia = data.items ?? [];
-			deletedMediaTotalCount = data.total_count;
-		}
+		const data = await api.get<PaginatedMedia>(`/admin/media/deleted?page=${deletedMediaPage}&page_size=${mediaPageSize}`);
+		deletedMedia = data.items ?? [];
+		deletedMediaTotalCount = data.total_count;
 	} finally {
 		deletedMediaLoading = false;
 	}
@@ -387,32 +326,25 @@ async function fetchDeletedMedia() {
 
 async function deleteMediaItem(id: string) {
 	error = '';
-	const res = await fetch(`/api/admin/media/${id}`, {
-		method: 'DELETE',
-		headers: headers(),
-	});
-	if (!res.ok) {
+	try {
+		await api.del(`/admin/media/${id}`);
+		confirmDelete = null;
+		await fetchMedia();
+	} catch {
 		error = 'Failed to delete media';
-		return;
 	}
-	confirmDelete = null;
-	await fetchMedia();
 }
 
 async function bulkDeleteMedia() {
 	error = '';
 	const ids = Array.from(selectedMedia);
-	const res = await fetch('/api/admin/media/bulk-delete', {
-		method: 'POST',
-		headers: headers(),
-		body: JSON.stringify({ ids }),
-	});
-	if (!res.ok) {
+	try {
+		await api.post('/admin/media/bulk-delete', { ids });
+		selectedMedia = new Set();
+		await fetchMedia();
+	} catch {
 		error = 'Failed to bulk delete media';
-		return;
 	}
-	selectedMedia = new Set();
-	await fetchMedia();
 }
 
 function mediaTotalPages(): number {
@@ -435,23 +367,19 @@ function goToDeletedMediaPage(p: number) {
 
 async function deleteEmote(id: string) {
 	error = '';
-	const res = await fetch(`/api/emotes/${id}`, {
-		method: 'DELETE',
-		headers: headers(),
-	});
-	if (!res.ok) {
+	try {
+		await api.del(`/emotes/${id}`);
+		confirmDelete = null;
+		await fetchEmotes();
+	} catch {
 		error = 'Failed to delete emote';
-		return;
 	}
-	confirmDelete = null;
-	await fetchEmotes();
 }
 
 async function fetchInviteCodes() {
 	invitesLoading = true;
 	try {
-		const res = await fetch('/api/admin/invite-codes', { headers: headers() });
-		if (res.ok) inviteCodes = await res.json();
+		inviteCodes = await api.get<any[]>('/admin/invite-codes');
 	} finally {
 		invitesLoading = false;
 	}
@@ -462,17 +390,13 @@ async function createInviteCode() {
 	const body: Record<string, number> = {};
 	if (inviteMaxUses !== undefined && inviteMaxUses > 0) body.max_uses = inviteMaxUses;
 	if (inviteExpiresHours !== undefined && inviteExpiresHours > 0) body.expires_in_hours = inviteExpiresHours;
-	const res = await fetch('/api/admin/invite-codes', {
-		method: 'POST',
-		headers: headers(),
-		body: JSON.stringify(body),
-	});
-	if (!res.ok) {
+	try {
+		const data = await api.post<{ code: string }>('/admin/invite-codes', body);
+		createdInviteCode = data.code;
+	} catch {
 		error = 'Failed to create invite code';
 		return;
 	}
-	const data = await res.json();
-	createdInviteCode = data.code;
 	inviteCopied = false;
 	showInviteForm = false;
 	inviteMaxUses = undefined;
@@ -482,16 +406,13 @@ async function createInviteCode() {
 
 async function deleteInviteCode(id: string) {
 	error = '';
-	const res = await fetch(`/api/admin/invite-codes/${id}`, {
-		method: 'DELETE',
-		headers: headers(),
-	});
-	if (!res.ok) {
+	try {
+		await api.del(`/admin/invite-codes/${id}`);
+		confirmDelete = null;
+		await fetchInviteCodes();
+	} catch {
 		error = 'Failed to delete invite code';
-		return;
 	}
-	confirmDelete = null;
-	await fetchInviteCodes();
 }
 
 function switchTab(tab: typeof activeTab) {

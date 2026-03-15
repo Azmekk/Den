@@ -1,5 +1,5 @@
 import type { MessageInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 
 function createPins() {
 	let pinnedMessages = $state<Map<string, MessageInfo[]>>(new Map());
@@ -7,30 +7,22 @@ function createPins() {
 
 	async function fetchPins(targetId: string, isDM: boolean) {
 		const url = isDM
-			? `/api/dms/${targetId}/pins`
-			: `/api/channels/${targetId}/pins`;
-		const res = await globalThis.fetch(url, {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (!res.ok) return;
-		const data = await res.json();
-		const newMap = new Map(pinnedMessages);
-		newMap.set(targetId, data ?? []);
-		pinnedMessages = newMap;
+			? `/dms/${targetId}/pins`
+			: `/channels/${targetId}/pins`;
+		try {
+			const data = await api.get<MessageInfo[]>(url);
+			const newMap = new Map(pinnedMessages);
+			newMap.set(targetId, data ?? []);
+			pinnedMessages = newMap;
+		} catch {}
 	}
 
 	async function pinMessage(messageId: string) {
-		await globalThis.fetch(`/api/messages/${messageId}/pin`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
+		await api.put(`/messages/${messageId}/pin`);
 	}
 
 	async function unpinMessage(messageId: string) {
-		await globalThis.fetch(`/api/messages/${messageId}/pin`, {
-			method: 'DELETE',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
+		await api.del(`/messages/${messageId}/pin`);
 	}
 
 	function handlePinEvent(data: any) {

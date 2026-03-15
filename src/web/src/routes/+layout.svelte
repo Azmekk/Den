@@ -21,19 +21,19 @@
       websocket.on("voice_state_update", voiceStore.handleVoiceStateUpdate);
 
       // Connect WebSocket
-      if (auth.accessToken) {
-        websocket.connect(auth.accessToken);
-      }
+      auth.getToken().then((token) => {
+        if (token) websocket.connect(token);
+      });
     });
 
     // Refresh token when tab becomes visible (handles sleep/background)
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
-        auth.refresh().then((ok) => {
-          if (ok && auth.accessToken) {
-            websocket.updateToken(auth.accessToken);
+        auth.getToken().then((token) => {
+          if (token) {
+            websocket.updateToken(token);
             if (!websocket.connected) {
-              websocket.connect(auth.accessToken);
+              websocket.connect(token);
             }
           } else {
             goto("/login");
@@ -54,12 +54,14 @@
 
   // Safety net: reconnect WS if logged in but not connected
   $effect(() => {
-    const token = auth.accessToken;
+    const _token = auth.accessToken; // reactive trigger
     const isConnected = websocket.connected;
     const isReconnecting = websocket.reconnecting;
-    if (auth.isLoggedIn && token && !isConnected && !isReconnecting) {
+    if (auth.isLoggedIn && _token && !isConnected && !isReconnecting) {
       untrack(() => {
-        websocket.connect(token);
+        auth.getToken().then((freshToken) => {
+          if (freshToken) websocket.connect(freshToken);
+        });
       });
     }
   });

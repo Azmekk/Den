@@ -1,5 +1,5 @@
 import type { EmoteInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 
 function createEmotes() {
 	let emotes = $state<EmoteInfo[]>([]);
@@ -18,13 +18,10 @@ function createEmotes() {
 	}
 
 	async function fetch() {
-		const res = await globalThis.fetch('/api/emotes', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (res.ok) {
-			emotes = await res.json();
+		try {
+			emotes = await api.get<EmoteInfo[]>('/emotes');
 			buildMaps(emotes);
-		}
+		} catch {}
 	}
 
 	async function refresh() {

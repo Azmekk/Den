@@ -1,5 +1,5 @@
 import type { DMPairInfo, MessageInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 import { channelStore } from './channels.svelte';
 import { websocket } from './websocket.svelte';
 
@@ -41,31 +41,23 @@ function createDMs() {
 	}
 
 	async function fetchConversations() {
-		const res = await globalThis.fetch('/api/dms', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (res.ok) {
-			conversations = await res.json();
-		}
+		try {
+			conversations = await api.get<DMPairInfo[]>('/dms');
+		} catch {}
 	}
 
 	async function createOrGetDM(userId: string): Promise<DMPairInfo | null> {
-		const res = await globalThis.fetch('/api/dms', {
-			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${auth.accessToken}`,
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify({ user_id: userId }),
-		});
-		if (!res.ok) return null;
-		const pair: DMPairInfo = await res.json();
+		try {
+			const pair = await api.post<DMPairInfo>('/dms', { user_id: userId });
 
-		// Add to conversations if not already present
-		if (!conversations.find((c) => c.id === pair.id)) {
-			conversations = [pair, ...conversations];
+			// Add to conversations if not already present
+			if (!conversations.find((c) => c.id === pair.id)) {
+				conversations = [pair, ...conversations];
+			}
+			return pair;
+		} catch {
+			return null;
 		}
-		return pair;
 	}
 
 	function select(dmId: string) {
@@ -90,20 +82,18 @@ function createDMs() {
 	async function fetchHistory(dmId: string) {
 		if (loadedDMs.has(dmId)) return;
 
-		const res = await globalThis.fetch(`/api/dms/${dmId}/messages`, {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (!res.ok) return;
-		const data = await res.json();
-		const newMap = new Map(messagesByDM);
-		newMap.set(dmId, data.messages ?? []);
-		messagesByDM = newMap;
+		try {
+			const data = await api.get<{ messages: MessageInfo[]; has_more: boolean }>(`/dms/${dmId}/messages`);
+			const newMap = new Map(messagesByDM);
+			newMap.set(dmId, data.messages ?? []);
+			messagesByDM = newMap;
 
-		const newHasMore = new Map(hasMoreByDM);
-		newHasMore.set(dmId, data.has_more ?? false);
-		hasMoreByDM = newHasMore;
+			const newHasMore = new Map(hasMoreByDM);
+			newHasMore.set(dmId, data.has_more ?? false);
+			hasMoreByDM = newHasMore;
 
-		loadedDMs.add(dmId);
+			loadedDMs.add(dmId);
+		} catch {}
 	}
 
 	async function fetchOlder(dmId: string) {
@@ -118,12 +108,9 @@ function createDMs() {
 				before_time: oldest.created_at,
 				before_id: oldest.id,
 			});
-			const res = await globalThis.fetch(
-				`/api/dms/${dmId}/messages?${params}`,
-				{ headers: { Authorization: `Bearer ${auth.accessToken}` } },
+			const data = await api.get<{ messages: MessageInfo[]; has_more: boolean }>(
+				`/dms/${dmId}/messages?${params}`,
 			);
-			if (!res.ok) return;
-			const data = await res.json();
 			const older: MessageInfo[] = data.messages ?? [];
 
 			const newMap = new Map(messagesByDM);

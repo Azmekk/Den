@@ -1,16 +1,13 @@
 import type { UnreadInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 
 function createUnread() {
 	let unreadCounts = $state<Map<string, number>>(new Map());
 	let mentionCounts = $state<Map<string, number>>(new Map());
 
 	async function fetch() {
-		const res = await globalThis.fetch('/api/channels/unread', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (res.ok) {
-			const data: UnreadInfo[] = await res.json();
+		try {
+			const data = await api.get<UnreadInfo[]>('/channels/unread');
 			const newUnread = new Map<string, number>();
 			const newMentions = new Map<string, number>();
 			for (const item of data) {
@@ -21,7 +18,7 @@ function createUnread() {
 			}
 			unreadCounts = newUnread;
 			mentionCounts = newMentions;
-		}
+		} catch {}
 	}
 
 	function increment(channelId: string) {
@@ -43,10 +40,7 @@ function createUnread() {
 		newMentions.delete(channelId);
 		mentionCounts = newMentions;
 
-		await globalThis.fetch(`/api/channels/${channelId}/read`, {
-			method: 'PUT',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
+		await api.put(`/channels/${channelId}/read`);
 	}
 
 	function getUnread(channelId: string): number {

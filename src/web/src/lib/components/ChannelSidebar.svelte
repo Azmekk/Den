@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Popover } from 'bits-ui';
 import { goto } from '$app/navigation';
+import { api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
 import { configStore } from '$lib/stores/config.svelte';
@@ -475,10 +476,7 @@ const tab = $derived(layoutStore.sidebarTab);
 								<button
 									onclick={async () => {
 										try {
-											const res = await fetch('/api/export', {
-												headers: { Authorization: `Bearer ${auth.accessToken}` }
-											});
-											if (!res.ok) throw new Error('Export failed');
+											const res = await api.fetchRaw('/export');
 											const blob = await res.blob();
 											const url = URL.createObjectURL(blob);
 											const a = document.createElement('a');

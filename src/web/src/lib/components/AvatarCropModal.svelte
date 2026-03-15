@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Dialog } from 'bits-ui';
+import { api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 
@@ -148,21 +149,15 @@ async function handleSave() {
 		const formData = new FormData();
 		formData.append('avatar', blob, 'avatar.webp');
 
-		const res = await globalThis.fetch('/api/users/me/avatar', {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-			body: formData,
-		});
-
-		if (res.ok) {
-			const updated = await res.json();
+		try {
+			const updated = await api.upload<{ id: string; avatar_url: string }>('/users/me/avatar', formData);
 			usersStore.updateUser(updated.id, { avatar_url: updated.avatar_url });
 			if (auth.user) {
 				(auth.user as any).avatar_url = updated.avatar_url;
 			}
 			open = false;
 			onClose();
-		}
+		} catch {}
 	} finally {
 		saving = false;
 	}

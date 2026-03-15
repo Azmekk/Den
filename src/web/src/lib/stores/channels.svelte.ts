@@ -1,5 +1,5 @@
 import type { ChannelInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 import { websocket } from './websocket.svelte';
 
 function createChannels() {
@@ -8,21 +8,15 @@ function createChannels() {
 	let selectedChannelId = $state<string | null>(null);
 
 	async function fetch() {
-		const res = await globalThis.fetch('/api/channels', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (res.ok) {
-			channels = await res.json();
-		}
+		try {
+			channels = await api.get<ChannelInfo[]>('/channels');
+		} catch {}
 	}
 
 	async function fetchVoice() {
-		const res = await globalThis.fetch('/api/channels/voice', {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (res.ok) {
-			voiceChannels = await res.json();
-		}
+		try {
+			voiceChannels = await api.get<ChannelInfo[]>('/channels/voice');
+		} catch {}
 	}
 
 	function select(id: string) {

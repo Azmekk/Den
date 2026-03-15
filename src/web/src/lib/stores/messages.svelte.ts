@@ -1,5 +1,5 @@
 import type { MessageInfo } from '$lib/types';
-import { auth } from './auth.svelte';
+import { api } from '$lib/api';
 import { websocket } from './websocket.svelte';
 
 function createMessages() {
@@ -33,20 +33,18 @@ function createMessages() {
 	async function fetchHistory(channelId: string) {
 		if (loadedChannels.has(channelId)) return;
 
-		const res = await globalThis.fetch(`/api/channels/${channelId}/messages`, {
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
-		if (!res.ok) return;
-		const data = await res.json();
-		const newMap = new Map(messagesByChannel);
-		newMap.set(channelId, data.messages ?? []);
-		messagesByChannel = newMap;
+		try {
+			const data = await api.get<{ messages: MessageInfo[]; has_more: boolean }>(`/channels/${channelId}/messages`);
+			const newMap = new Map(messagesByChannel);
+			newMap.set(channelId, data.messages ?? []);
+			messagesByChannel = newMap;
 
-		const newHasMore = new Map(hasMoreByChannel);
-		newHasMore.set(channelId, data.has_more ?? false);
-		hasMoreByChannel = newHasMore;
+			const newHasMore = new Map(hasMoreByChannel);
+			newHasMore.set(channelId, data.has_more ?? false);
+			hasMoreByChannel = newHasMore;
 
-		loadedChannels.add(channelId);
+			loadedChannels.add(channelId);
+		} catch {}
 	}
 
 	async function fetchOlder(channelId: string) {
@@ -61,12 +59,9 @@ function createMessages() {
 				before_time: oldest.created_at,
 				before_id: oldest.id,
 			});
-			const res = await globalThis.fetch(
-				`/api/channels/${channelId}/messages?${params}`,
-				{ headers: { Authorization: `Bearer ${auth.accessToken}` } },
+			const data = await api.get<{ messages: MessageInfo[]; has_more: boolean }>(
+				`/channels/${channelId}/messages?${params}`,
 			);
-			if (!res.ok) return;
-			const data = await res.json();
 			const older: MessageInfo[] = data.messages ?? [];
 
 			const newMap = new Map(messagesByChannel);
@@ -85,34 +80,33 @@ function createMessages() {
 		// Mark as loaded to prevent fetchHistory from double-fetching
 		loadedChannels.add(channelId);
 
-		const res = await globalThis.fetch(
-			`/api/channels/${channelId}/messages/around?message_id=${messageId}`,
-			{ headers: { Authorization: `Bearer ${auth.accessToken}` } },
-		);
-		if (!res.ok) return;
-		const data = await res.json();
+		try {
+			const data = await api.get<{ messages: MessageInfo[]; has_more_before: boolean; has_more_after: boolean }>(
+				`/channels/${channelId}/messages/around?message_id=${messageId}`,
+			);
 
-		const newMap = new Map(messagesByChannel);
-		newMap.set(channelId, data.messages ?? []);
-		messagesByChannel = newMap;
+			const newMap = new Map(messagesByChannel);
+			newMap.set(channelId, data.messages ?? []);
+			messagesByChannel = newMap;
 
-		const newHasMore = new Map(hasMoreByChannel);
-		newHasMore.set(channelId, data.has_more_before ?? false);
-		hasMoreByChannel = newHasMore;
+			const newHasMore = new Map(hasMoreByChannel);
+			newHasMore.set(channelId, data.has_more_before ?? false);
+			hasMoreByChannel = newHasMore;
 
-		const newHasMoreAfter = new Map(hasMoreAfterByChannel);
-		newHasMoreAfter.set(channelId, data.has_more_after ?? false);
-		hasMoreAfterByChannel = newHasMoreAfter;
+			const newHasMoreAfter = new Map(hasMoreAfterByChannel);
+			newHasMoreAfter.set(channelId, data.has_more_after ?? false);
+			hasMoreAfterByChannel = newHasMoreAfter;
 
-		const newJumped = new Map(jumpedByChannel);
-		if (data.has_more_after) {
-			newJumped.set(channelId, true);
-		} else {
-			newJumped.delete(channelId);
-		}
-		jumpedByChannel = newJumped;
+			const newJumped = new Map(jumpedByChannel);
+			if (data.has_more_after) {
+				newJumped.set(channelId, true);
+			} else {
+				newJumped.delete(channelId);
+			}
+			jumpedByChannel = newJumped;
 
-		scrollTarget = { channelId, messageId };
+			scrollTarget = { channelId, messageId };
+		} catch {}
 	}
 
 	async function fetchNewer(channelId: string) {
@@ -127,12 +121,9 @@ function createMessages() {
 				after_time: last.created_at,
 				after_id: last.id,
 			});
-			const res = await globalThis.fetch(
-				`/api/channels/${channelId}/messages/newer?${params}`,
-				{ headers: { Authorization: `Bearer ${auth.accessToken}` } },
+			const data = await api.get<{ messages: MessageInfo[]; has_more: boolean }>(
+				`/channels/${channelId}/messages/newer?${params}`,
 			);
-			if (!res.ok) return;
-			const data = await res.json();
 			const newer: MessageInfo[] = data.messages ?? [];
 
 			const newMap = new Map(messagesByChannel);

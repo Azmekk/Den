@@ -1,5 +1,6 @@
 <script lang="ts">
 import { tick } from 'svelte';
+import { api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
 import { configStore } from '$lib/stores/config.svelte';
@@ -464,28 +465,22 @@ async function uploadFile(file: File) {
 			const webp = await convertToWebP(file);
 			body = new FormData();
 			body.append('file', webp, 'image.webp');
-			endpoint = '/api/upload/image';
+			endpoint = '/upload/image';
 		} else if (isVideoFile(file)) {
 			body = new FormData();
 			body.append('file', file, file.name);
-			endpoint = '/api/upload/video';
+			endpoint = '/upload/video';
 		} else {
 			return;
 		}
 
-		const res = await globalThis.fetch(endpoint, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-			body,
-		});
-
-		if (res.ok) {
-			const data = await res.json();
+		try {
+			const data = await api.upload<{ url?: string }>(endpoint, body);
 			if (data.url) {
 				const type = isImageFile(file) ? 'image' as const : 'video' as const;
 				attachments = [...attachments, { url: data.url, type }];
 			}
-		}
+		} catch {}
 	} finally {
 		uploading = false;
 		if (fileInputEl) fileInputEl.value = '';
