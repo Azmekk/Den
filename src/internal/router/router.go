@@ -120,14 +120,31 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			})
 		})
 
-		// WebSocket (auth via query param)
+		// WebSocket (auth via first message)
 		r.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc))
 	})
 
-	// SPA static files
-	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+	// SPA static files — serve real files directly, fall back to index.html
+	r.Handle("/*", spaHandler(staticFS))
 
 	return r
+}
+
+// spaHandler serves static files from the given FS, falling back to
+// index.html for paths that don't match a real file (SPA client routing).
+func spaHandler(staticFS fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(staticFS))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path != "/" {
+			// Strip leading slash for fs.Open
+			if _, err := fs.Stat(staticFS, path[1:]); err != nil {
+				// File doesn't exist — serve index.html for client-side routing
+				r.URL.Path = "/"
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // cloudflareRealIP copies CF-Connecting-IP into X-Real-IP so Chi's

@@ -1,8 +1,10 @@
 package ws
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -18,34 +20,61 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type authMessage struct {
+	Type  string `json:"type"`
+	Token string `json:"token"`
+}
+
+func writeError(conn *websocket.Conn, errMsg string) {
+	msg, _ := json.Marshal(map[string]string{"type": "auth_error", "error": errMsg})
+	conn.WriteMessage(websocket.TextMessage, msg)
+	conn.Close()
+}
+
 func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandler, dmHandler DMMessageHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tokenString := r.URL.Query().Get("token")
-		if tokenString == "" {
-			http.Error(w, "missing token", http.StatusUnauthorized)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("ws upgrade error: %v", err)
 			return
 		}
 
-		claims, err := authService.ValidateAccessToken(tokenString)
+		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+		_, raw, err := conn.ReadMessage()
 		if err != nil {
-			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			writeError(conn, "expected auth message")
+			return
+		}
+
+		var auth authMessage
+		if err := json.Unmarshal(raw, &auth); err != nil || auth.Type != "auth" || auth.Token == "" {
+			writeError(conn, "invalid auth message")
+			return
+		}
+
+		claims, err := authService.ValidateAccessToken(auth.Token)
+		if err != nil {
+			writeError(conn, "invalid or expired token")
 			return
 		}
 
 		sub, _ := claims["sub"].(string)
 		userID, err := uuid.Parse(sub)
 		if err != nil {
-			http.Error(w, "invalid token claims", http.StatusUnauthorized)
+			writeError(conn, "invalid token claims")
 			return
 		}
 		username, _ := claims["username"].(string)
 		isAdmin, _ := claims["is_admin"].(bool)
 
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Printf("ws upgrade error: %v", err)
+		okMsg, _ := json.Marshal(map[string]string{"type": "auth_ok"})
+		if err := conn.WriteMessage(websocket.TextMessage, okMsg); err != nil {
+			conn.Close()
 			return
 		}
+
+		conn.SetReadDeadline(time.Time{})
 
 		client := newClient(hub, conn, userID, username, isAdmin, msgHandler, dmHandler)
 		hub.register <- client

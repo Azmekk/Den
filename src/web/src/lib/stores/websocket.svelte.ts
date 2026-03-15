@@ -8,6 +8,8 @@ function createWebSocket() {
 	let reconnectDelay = 1000;
 	let token: string | null = null;
 	let intentionalClose = false;
+	let authenticated = false;
+	let authSent = false;
 	const listeners = new Map<string, Set<WsCallback>>();
 
 	function connect(accessToken: string) {
@@ -38,25 +40,26 @@ function createWebSocket() {
 		}
 
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const url = `${protocol}//${window.location.host}/api/ws?token=${token}`;
+		const url = `${protocol}//${window.location.host}/api/ws`;
 		ws = new WebSocket(url);
 
 		ws.onopen = () => {
-			connected = true;
-			reconnecting = false;
-			reconnectDelay = 1000;
-			const cbs = listeners.get('open');
-			if (cbs) {
-				for (const cb of cbs) {
-					cb({});
-				}
-			}
+			authenticated = false;
+			authSent = true;
+			ws!.send(JSON.stringify({ type: 'auth', token }));
 		};
 
 		ws.onclose = () => {
+			const wasAuthenticated = authenticated;
+			const wasAuthSent = authSent;
 			connected = false;
+			authenticated = false;
+			authSent = false;
 			ws = null;
-			if (!intentionalClose) {
+			// Reconnect if: not intentional close AND either
+			// - we were authenticated (normal disconnect), or
+			// - auth was never sent (connection failed before open, e.g. server down)
+			if (!intentionalClose && (wasAuthenticated || !wasAuthSent)) {
 				reconnecting = true;
 				scheduleReconnect();
 			}
@@ -70,6 +73,27 @@ function createWebSocket() {
 			try {
 				const data = JSON.parse(event.data);
 				const type = data.type as string;
+
+				if (type === 'auth_ok') {
+					authenticated = true;
+					connected = true;
+					reconnecting = false;
+					reconnectDelay = 1000;
+					const cbs = listeners.get('open');
+					if (cbs) {
+						for (const cb of cbs) {
+							cb({});
+						}
+					}
+					return;
+				}
+
+				if (type === 'auth_error') {
+					intentionalClose = true;
+					ws?.close();
+					return;
+				}
+
 				const cbs = listeners.get(type);
 				if (cbs) {
 					for (const cb of cbs) {
