@@ -25,7 +25,21 @@ function createAuth() {
 		user = null;
 	}
 
+	let refreshPromise: Promise<boolean> | null = null;
+
 	async function refresh(): Promise<boolean> {
+		// Deduplicate concurrent refresh calls so multiple callers
+		// don't fire parallel refresh requests.
+		if (refreshPromise) return refreshPromise;
+		refreshPromise = doRefresh();
+		try {
+			return await refreshPromise;
+		} finally {
+			refreshPromise = null;
+		}
+	}
+
+	async function doRefresh(): Promise<boolean> {
 		try {
 			const res = await fetch('/api/refresh', {
 				method: 'POST',
@@ -38,6 +52,29 @@ function createAuth() {
 		} catch {
 			return false;
 		}
+	}
+
+	/**
+	 * Returns a fresh access token, proactively refreshing if the current
+	 * token is expired or close to expiring. Callers should use this instead
+	 * of reading `accessToken` directly for API requests.
+	 */
+	async function getToken(): Promise<string | null> {
+		if (!accessToken) return null;
+
+		try {
+			const payload = JSON.parse(atob(accessToken.split('.')[1]));
+			const expiresAtMs = payload.exp * 1000;
+			const bufferMs = 30_000;
+			if (Date.now() > expiresAtMs - bufferMs) {
+				await refresh();
+			}
+		} catch {
+			// If we can't decode the token, return it as-is and let the
+			// server decide — the caller can handle 401 normally.
+		}
+
+		return accessToken;
 	}
 
 	async function init() {
@@ -126,6 +163,7 @@ function createAuth() {
 		setSession,
 		clear,
 		refresh,
+		getToken,
 		init,
 		login,
 		register,

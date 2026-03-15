@@ -237,21 +237,13 @@ function createVoiceStore() {
 	}
 
 	async function fetchVoiceToken(channelId: string): Promise<{ token: string; url: string }> {
-		let response = await globalThis.fetch(`/api/voice/${channelId}/join`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${auth.accessToken}` },
-		});
+		const accessToken = await auth.getToken();
+		if (!accessToken) throw new Error('Not authenticated');
 
-		if (response.status === 401) {
-			const refreshed = await auth.refresh();
-			if (!refreshed) {
-				throw new Error('Failed to refresh auth token');
-			}
-			response = await globalThis.fetch(`/api/voice/${channelId}/join`, {
-				method: 'POST',
-				headers: { Authorization: `Bearer ${auth.accessToken}` },
-			});
-		}
+		const response = await globalThis.fetch(`/api/voice/${channelId}/join`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${accessToken}` },
+		});
 
 		if (!response.ok) {
 			throw new Error(`Voice join API returned ${response.status}`);
