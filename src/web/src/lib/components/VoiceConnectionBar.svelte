@@ -4,8 +4,9 @@
   import { voiceStore, SCREEN_SHARE_PRESETS } from "$lib/stores/voice.svelte";
   import AudioSettingsPopover from "./AudioSettingsPopover.svelte";
 
+  const activeChannelId = $derived(voiceStore.currentChannelId ?? voiceStore.pendingChannelId);
   const currentVoiceChannel = $derived(
-    channelStore.sortedVoiceChannels.find((c) => c.id === voiceStore.currentChannelId),
+    channelStore.sortedVoiceChannels.find((c) => c.id === activeChannelId),
   );
 
   let screenSharePopoverOpen = $state(false);
@@ -16,11 +17,19 @@
   }
 </script>
 
-{#if voiceStore.currentChannelId}
+{#if voiceStore.currentChannelId || voiceStore.isConnecting}
   <div class="border-t border-border bg-card/80 px-3 py-2">
     <div class="flex items-center gap-1.5 mb-1.5">
-      <div class="h-2 w-2 rounded-full bg-green-500 shrink-0"></div>
-      <span class="text-xs font-medium text-green-500 truncate"> Voice Connected </span>
+      {#if voiceStore.isConnecting}
+        <div class="h-2 w-2 rounded-full bg-yellow-500 animate-pulse shrink-0"></div>
+        <span class="text-xs font-medium text-yellow-500 truncate">Connecting...</span>
+      {:else if voiceStore.isReconnecting}
+        <div class="h-2 w-2 rounded-full bg-yellow-500 animate-pulse shrink-0"></div>
+        <span class="text-xs font-medium text-yellow-500 truncate">Reconnecting...</span>
+      {:else}
+        <div class="h-2 w-2 rounded-full bg-green-500 shrink-0"></div>
+        <span class="text-xs font-medium text-green-500 truncate">Voice Connected</span>
+      {/if}
     </div>
     <div class="flex items-center gap-1 text-xs text-muted-foreground mb-1.5 pl-3.5">
       <svg
@@ -45,6 +54,12 @@
       >
       <span class="truncate">{currentVoiceChannel?.name ?? "Unknown"}</span>
     </div>
+    {#if voiceStore.microphoneError}
+      <div class="flex items-center gap-1 text-xs text-destructive mb-1.5 pl-3.5">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span class="truncate">{voiceStore.microphoneError}</span>
+      </div>
+    {/if}
     <div class="flex items-center gap-0.5 pl-2">
       <!-- Mic toggle -->
       <button

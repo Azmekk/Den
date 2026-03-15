@@ -43,6 +43,14 @@ func (h *VoiceHandler) Join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pre-create the room on LiveKit so it's ready when the client connects.
+	// This avoids the race condition where the first WebSocket connection to a
+	// stale/non-existent room fails while LiveKit initializes it.
+	if err := h.voiceSvc.EnsureRoom(r.Context(), channelID.String()); err != nil {
+		httputil.WriteInternalError(w, "failed to ensure voice room", err)
+		return
+	}
+
 	userID := middleware.UserIDFromContext(r.Context())
 	username := middleware.UsernameFromContext(r.Context())
 

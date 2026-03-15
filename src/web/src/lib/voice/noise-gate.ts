@@ -1,286 +1,169 @@
-import { type AudioProcessorOptions } from 'livekit-client';
+const ANALYSIS_INTERVAL_MS = 50;
+const FFT_SIZE = 256;
+const RMS_SCALE_FACTOR = 1800;
+const MAX_LEVEL = 100;
+const GATE_CLOSE_FRAME_COUNT = 3;
+const GAIN_SMOOTHING_TIME = 0.015;
 
-export interface NoiseGateProcessor {
-	name: string;
+/**
+ * A Web Audio–based noise gate that monitors an input audio track's RMS level
+ * and gates (mutes/unmutes) the output based on a user-adjustable threshold.
+ *
+ * The same pipeline is used whether the input is a raw microphone track or
+ * the output of an upstream processor like RNNoise.
+ */
+export class NoiseGatePipeline {
 	processedTrack?: MediaStreamTrack;
-	init(opts: AudioProcessorOptions): Promise<void>;
-	restart(opts: AudioProcessorOptions): Promise<void>;
-	destroy(): Promise<void>;
-	setThreshold(value: number): void;
-}
 
-export function createCompositeProcessor(
-	krispProcessor: Omit<NoiseGateProcessor, 'setThreshold'>,
-	threshold: number,
-	onGateChange: (open: boolean) => void,
-	onLevelChange?: (level: number) => void,
-): NoiseGateProcessor {
-	let currentThreshold = threshold;
-	let closedCount = 0;
-	let gateOpen = false;
-	let armed = false;
+	private threshold: number;
+	private readonly onGateStateChange: (isOpen: boolean) => void;
+	private readonly onMicLevelChange?: (normalizedLevel: number) => void;
 
-	let analyser: AnalyserNode | null = null;
-	let gainNode: GainNode | null = null;
-	let sourceNode: MediaStreamAudioSourceNode | null = null;
-	let destinationNode: MediaStreamAudioDestinationNode | null = null;
-	let interval: ReturnType<typeof setInterval> | null = null;
-	let dataArray: Float32Array<ArrayBuffer> | null = null;
+	private analyserNode: AnalyserNode | null = null;
+	private gainNode: GainNode | null = null;
+	private sourceNode: MediaStreamAudioSourceNode | null = null;
+	private destinationNode: MediaStreamAudioDestinationNode | null = null;
+	private analysisInterval: ReturnType<typeof setInterval> | null = null;
+	private timeDomainData: Float32Array<ArrayBuffer> | null = null;
 
-	function startAnalysis() {
-		if (interval) clearInterval(interval);
-		if (!analyser) return;
+	private isGateOpen = false;
+	private isArmed = false;
+	private consecutiveClosedFrames = 0;
 
-		dataArray = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
-
-		interval = setInterval(() => {
-			if (!analyser || !dataArray) return;
-			analyser.getFloatTimeDomainData(dataArray);
-
-			let sum = 0;
-			for (let i = 0; i < dataArray.length; i++) {
-				sum += dataArray[i] * dataArray[i];
-			}
-			const rms = Math.sqrt(sum / dataArray.length);
-			const level = rms * 3000;
-			onLevelChange?.(Math.min(Math.max(level, 0), 100));
-
-			if (!armed) {
-				if (level >= currentThreshold) {
-					armed = true;
-				} else {
-					return;
-				}
-			}
-
-			if (level < currentThreshold) {
-				closedCount++;
-				if (closedCount >= 3 && gateOpen) {
-					gateOpen = false;
-					if (gainNode) {
-						gainNode.gain.setTargetAtTime(0, gainNode.context.currentTime, 0.015);
-					}
-					onGateChange(false);
-				}
-			} else {
-				closedCount = 0;
-				if (!gateOpen) {
-					gateOpen = true;
-					if (gainNode) {
-						gainNode.gain.setTargetAtTime(1, gainNode.context.currentTime, 0.015);
-					}
-					onGateChange(true);
-				}
-			}
-		}, 50);
+	constructor(
+		initialThreshold: number,
+		onGateStateChange: (isOpen: boolean) => void,
+		onMicLevelChange?: (normalizedLevel: number) => void,
+	) {
+		this.threshold = initialThreshold;
+		this.onGateStateChange = onGateStateChange;
+		this.onMicLevelChange = onMicLevelChange;
 	}
 
-	function buildGatePipeline(krispOutputTrack: MediaStreamTrack, audioContext: AudioContext) {
-		destroyGatePipeline();
+	/**
+	 * Build the Web Audio graph from an input track. Can be called with a raw
+	 * microphone track or the output of an upstream processor (e.g. RNNoise).
+	 */
+	build(inputTrack: MediaStreamTrack, audioContext: AudioContext): void {
+		this.teardown();
 
-		const stream = new MediaStream([krispOutputTrack]);
-		sourceNode = audioContext.createMediaStreamSource(stream);
+		const inputStream = new MediaStream([inputTrack]);
+		this.sourceNode = audioContext.createMediaStreamSource(inputStream);
 
-		analyser = audioContext.createAnalyser();
-		analyser.fftSize = 256;
+		this.analyserNode = audioContext.createAnalyser();
+		this.analyserNode.fftSize = FFT_SIZE;
 
-		gainNode = audioContext.createGain();
-		gainNode.gain.value = 0;
+		this.gainNode = audioContext.createGain();
+		this.gainNode.gain.value = 0; // Start with gate closed
 
-		destinationNode = audioContext.createMediaStreamDestination();
+		this.destinationNode = audioContext.createMediaStreamDestination();
 
-		sourceNode.connect(analyser);
-		analyser.connect(gainNode);
-		gainNode.connect(destinationNode);
+		// Pipeline: source → analyser → gain → destination
+		this.sourceNode.connect(this.analyserNode);
+		this.analyserNode.connect(this.gainNode);
+		this.gainNode.connect(this.destinationNode);
 
-		processor.processedTrack = destinationNode.stream.getAudioTracks()[0];
+		this.processedTrack = this.destinationNode.stream.getAudioTracks()[0];
 
-		closedCount = 0;
-		gateOpen = false;
-		armed = false;
-
-		startAnalysis();
+		this.resetGateState();
+		this.startAnalysisLoop();
 	}
 
-	function destroyGatePipeline() {
-		if (interval) {
-			clearInterval(interval);
-			interval = null;
+	teardown(): void {
+		if (this.analysisInterval) {
+			clearInterval(this.analysisInterval);
+			this.analysisInterval = null;
 		}
-		sourceNode?.disconnect();
-		analyser?.disconnect();
-		gainNode?.disconnect();
-		sourceNode = null;
-		analyser = null;
-		gainNode = null;
-		destinationNode = null;
-		dataArray = null;
+		this.sourceNode?.disconnect();
+		this.analyserNode?.disconnect();
+		this.gainNode?.disconnect();
+
+		this.sourceNode = null;
+		this.analyserNode = null;
+		this.gainNode = null;
+		this.destinationNode = null;
+		this.timeDomainData = null;
+		this.processedTrack = undefined;
 	}
 
-	const processor: NoiseGateProcessor = {
-		name: 'composite-krisp-gate',
-		processedTrack: undefined,
+	setThreshold(value: number): void {
+		this.threshold = value;
+	}
 
-		async init(opts: AudioProcessorOptions) {
-			await krispProcessor.init(opts);
-			const krispOutput = krispProcessor.processedTrack;
-			if (krispOutput) {
-				buildGatePipeline(krispOutput, opts.audioContext);
-			}
-		},
+	private resetGateState(): void {
+		this.consecutiveClosedFrames = 0;
+		this.isGateOpen = false;
+		this.isArmed = false;
+	}
 
-		async restart(opts: AudioProcessorOptions) {
-			await krispProcessor.restart(opts);
-			const krispOutput = krispProcessor.processedTrack;
-			if (krispOutput) {
-				buildGatePipeline(krispOutput, opts.audioContext);
-			}
-		},
+	private startAnalysisLoop(): void {
+		if (!this.analyserNode) return;
 
-		async destroy() {
-			destroyGatePipeline();
-			await krispProcessor.destroy();
-		},
+		this.timeDomainData = new Float32Array(this.analyserNode.fftSize);
 
-		setThreshold(value: number) {
-			currentThreshold = value;
-		},
-	};
+		this.analysisInterval = setInterval(() => {
+			this.analyzeFrame();
+		}, ANALYSIS_INTERVAL_MS);
+	}
 
-	return processor;
-}
+	private analyzeFrame(): void {
+		if (!this.analyserNode || !this.timeDomainData) return;
 
-export function createNoiseGateProcessor(
-	threshold: number,
-	onGateChange: (open: boolean) => void,
-	onLevelChange?: (level: number) => void,
-): NoiseGateProcessor {
-	let currentThreshold = threshold;
-	let closedCount = 0;
-	let gateOpen = false;
-	let armed = false;
+		this.analyserNode.getFloatTimeDomainData(this.timeDomainData);
 
-	let analyser: AnalyserNode | null = null;
-	let gainNode: GainNode | null = null;
-	let sourceNode: MediaStreamAudioSourceNode | null = null;
-	let destinationNode: MediaStreamAudioDestinationNode | null = null;
-	let interval: ReturnType<typeof setInterval> | null = null;
-	let dataArray: Float32Array<ArrayBuffer> | null = null;
+		const rawLevel = this.computeRawLevel(this.timeDomainData);
 
-	function startAnalysis() {
-		if (interval) clearInterval(interval);
-		if (!analyser) return;
+		// Cap the level at 0-100 for the UI meter, but use the uncapped value
+		// for gate decisions so that threshold=100 actually blocks everything.
+		const displayLevel = Math.min(Math.max(rawLevel, 0), MAX_LEVEL);
+		this.onMicLevelChange?.(displayLevel);
 
-		dataArray = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
-
-		interval = setInterval(() => {
-			if (!analyser || !dataArray) return;
-			analyser.getFloatTimeDomainData(dataArray);
-
-			let sum = 0;
-			for (let i = 0; i < dataArray.length; i++) {
-				sum += dataArray[i] * dataArray[i];
-			}
-			const rms = Math.sqrt(sum / dataArray.length);
-			const level = rms * 3000;
-			onLevelChange?.(Math.min(Math.max(level, 0), 100));
-
-			if (!armed) {
-				if (level >= currentThreshold) {
-					armed = true;
-				} else {
-					return;
-				}
-			}
-
-			if (level < currentThreshold) {
-				closedCount++;
-				if (closedCount >= 3 && gateOpen) {
-					gateOpen = false;
-					if (gainNode) {
-						gainNode.gain.setTargetAtTime(0, gainNode.context.currentTime, 0.015);
-					}
-					onGateChange(false);
-				}
+		// Wait for the first signal above threshold before gating
+		if (!this.isArmed) {
+			if (rawLevel >= this.threshold) {
+				this.isArmed = true;
 			} else {
-				closedCount = 0;
-				if (!gateOpen) {
-					gateOpen = true;
-					if (gainNode) {
-						gainNode.gain.setTargetAtTime(1, gainNode.context.currentTime, 0.015);
-					}
-					onGateChange(true);
-				}
+				return;
 			}
-		}, 50);
-	}
-
-	function buildPipeline(track: MediaStreamTrack, audioContext: AudioContext) {
-		// Clean up previous pipeline
-		destroyPipeline();
-
-		const stream = new MediaStream([track]);
-		sourceNode = audioContext.createMediaStreamSource(stream);
-
-		analyser = audioContext.createAnalyser();
-		analyser.fftSize = 256;
-
-		gainNode = audioContext.createGain();
-		// Start with gate closed (gain 0) — will open when audio detected
-		gainNode.gain.value = 0;
-
-		destinationNode = audioContext.createMediaStreamDestination();
-
-		// Pipeline: source -> analyser -> gain -> destination
-		sourceNode.connect(analyser);
-		analyser.connect(gainNode);
-		gainNode.connect(destinationNode);
-
-		processor.processedTrack = destinationNode.stream.getAudioTracks()[0];
-
-		// Reset state
-		closedCount = 0;
-		gateOpen = false;
-		armed = false;
-
-		startAnalysis();
-	}
-
-	function destroyPipeline() {
-		if (interval) {
-			clearInterval(interval);
-			interval = null;
 		}
-		sourceNode?.disconnect();
-		analyser?.disconnect();
-		gainNode?.disconnect();
-		sourceNode = null;
-		analyser = null;
-		gainNode = null;
-		destinationNode = null;
-		dataArray = null;
+
+		this.updateGateState(rawLevel);
 	}
 
-	const processor: NoiseGateProcessor = {
-		name: 'noise-gate',
-		processedTrack: undefined,
+	private computeRawLevel(samples: Float32Array<ArrayBuffer>): number {
+		let sumOfSquares = 0;
+		for (let i = 0; i < samples.length; i++) {
+			sumOfSquares += samples[i] * samples[i];
+		}
+		const rms = Math.sqrt(sumOfSquares / samples.length);
+		return rms * RMS_SCALE_FACTOR;
+	}
 
-		async init(opts: AudioProcessorOptions) {
-			buildPipeline(opts.track, opts.audioContext);
-		},
+	private updateGateState(level: number): void {
+		if (level < this.threshold) {
+			this.consecutiveClosedFrames++;
+			if (this.consecutiveClosedFrames >= GATE_CLOSE_FRAME_COUNT && this.isGateOpen) {
+				this.isGateOpen = false;
+				this.setGainSmooth(0);
+				this.onGateStateChange(false);
+			}
+		} else {
+			this.consecutiveClosedFrames = 0;
+			if (!this.isGateOpen) {
+				this.isGateOpen = true;
+				this.setGainSmooth(1);
+				this.onGateStateChange(true);
+			}
+		}
+	}
 
-		async restart(opts: AudioProcessorOptions) {
-			buildPipeline(opts.track, opts.audioContext);
-		},
-
-		async destroy() {
-			destroyPipeline();
-		},
-
-		setThreshold(value: number) {
-			currentThreshold = value;
-		},
-	};
-
-	return processor;
+	private setGainSmooth(targetValue: number): void {
+		if (this.gainNode) {
+			this.gainNode.gain.setTargetAtTime(
+				targetValue,
+				this.gainNode.context.currentTime,
+				GAIN_SMOOTHING_TIME,
+			);
+		}
+	}
 }

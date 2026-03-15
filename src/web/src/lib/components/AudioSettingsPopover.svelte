@@ -18,31 +18,20 @@ import { voiceStore } from '$lib/stores/voice.svelte';
 		>
 			<h3 class="mb-3 text-sm font-medium text-foreground">Audio Settings</h3>
 			<div class="space-y-3">
-				<!-- Noise Cancellation (Krisp when available, browser when not) -->
-				<div>
-					<div class="flex items-center justify-between">
-						<span class="text-xs text-muted-foreground">
-							Noise Cancellation
-							{#if voiceStore.krispActive}
-								<span class="ml-1 rounded bg-primary/20 px-1 py-0.5 text-[10px] font-medium text-primary">Krisp</span>
-							{/if}
-						</span>
-						{#if voiceStore.krispActive || voiceStore.krispEnabled}
-							<button
-								onclick={() => voiceStore.setKrispEnabled(!voiceStore.krispEnabled)}
-								class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {voiceStore.krispEnabled ? 'bg-primary' : 'bg-secondary'}"
-							>
-								<span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform {voiceStore.krispEnabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
-							</button>
-						{:else}
-							<button
-								onclick={() => voiceStore.setNoiseCancellationEnabled(!voiceStore.noiseCancellationEnabled)}
-								class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {voiceStore.noiseCancellationEnabled ? 'bg-primary' : 'bg-secondary'}"
-							>
-								<span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform {voiceStore.noiseCancellationEnabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
-							</button>
+				<!-- Noise Suppression (RNNoise) -->
+				<div class="flex items-center justify-between">
+					<span class="text-xs text-muted-foreground">
+						Noise Suppression
+						{#if voiceStore.rnnoiseActive}
+							<span class="ml-1 rounded bg-primary/20 px-1 py-0.5 text-[10px] font-medium text-primary">RNNoise</span>
 						{/if}
-					</div>
+					</span>
+					<button
+						onclick={() => voiceStore.setRnnoiseEnabled(!voiceStore.rnnoiseEnabled)}
+						class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {voiceStore.rnnoiseEnabled ? 'bg-primary' : 'bg-secondary'}"
+					>
+						<span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform {voiceStore.rnnoiseEnabled ? 'translate-x-4' : 'translate-x-0.5'}"></span>
+					</button>
 				</div>
 
 				<!-- Noise Gate -->
@@ -58,7 +47,7 @@ import { voiceStore } from '$lib/stores/voice.svelte';
 					</div>
 				</div>
 
-				<!-- Threshold slider (visible in both modes for speaking detection) -->
+				<!-- Threshold slider (only shown when noise gate is enabled) -->
 				{#if voiceStore.noiseGateEnabled}
 					<div>
 						<span class="text-xs text-muted-foreground">Gate Threshold</span>
