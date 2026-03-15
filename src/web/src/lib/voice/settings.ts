@@ -6,6 +6,8 @@ export interface VoiceSettings {
 	rnnoiseEnabled: boolean;
 	echoCancellationEnabled: boolean;
 	screenSharePresetIndex: number;
+	inputDeviceId: string | null;
+	outputDeviceId: string | null;
 }
 
 function defaultSettings(): VoiceSettings {
@@ -15,6 +17,8 @@ function defaultSettings(): VoiceSettings {
 		rnnoiseEnabled: true,
 		echoCancellationEnabled: true,
 		screenSharePresetIndex: 2, // 1080p 30fps
+		inputDeviceId: null,
+		outputDeviceId: null,
 	};
 }
 

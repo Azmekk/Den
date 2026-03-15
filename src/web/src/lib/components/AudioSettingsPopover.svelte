@@ -1,9 +1,15 @@
 <script lang="ts">
 import { Popover } from 'bits-ui';
 import { voiceStore } from '$lib/stores/voice.svelte';
+
+function handleOpenChange(open: boolean) {
+	if (open) {
+		voiceStore.refreshDevices();
+	}
+}
 </script>
 
-<Popover.Root>
+<Popover.Root onOpenChange={handleOpenChange}>
 	<Popover.Trigger
 		class="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
 		title="Audio settings"
@@ -12,12 +18,50 @@ import { voiceStore } from '$lib/stores/voice.svelte';
 	</Popover.Trigger>
 	<Popover.Portal>
 		<Popover.Content
-			class="z-50 w-64 rounded-lg border border-border bg-card p-4 shadow-lg"
+			class="z-50 w-72 rounded-lg border border-border bg-card p-4 shadow-lg"
 			sideOffset={8}
 			side="top"
 		>
 			<h3 class="mb-3 text-sm font-medium text-foreground">Audio Settings</h3>
 			<div class="space-y-3">
+				<!-- Input Device -->
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">Input Device</label>
+					<div class="relative">
+						<select
+							class="w-full appearance-none rounded bg-secondary p-1.5 pr-6 text-xs text-foreground outline-none"
+							value={voiceStore.inputDeviceId ?? ''}
+							onchange={(e) => voiceStore.setInputDevice((e.target as HTMLSelectElement).value || null)}
+						>
+							<option value="">Default</option>
+							{#each voiceStore.availableInputDevices as device}
+								<option value={device.deviceId}>{device.label || `Microphone (${device.deviceId.slice(0, 8)})`}</option>
+							{/each}
+						</select>
+						<svg class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+					</div>
+				</div>
+
+				<!-- Output Device -->
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">Output Device</label>
+					<div class="relative">
+						<select
+							class="w-full appearance-none rounded bg-secondary p-1.5 pr-6 text-xs text-foreground outline-none"
+							value={voiceStore.outputDeviceId ?? ''}
+							onchange={(e) => voiceStore.setOutputDevice((e.target as HTMLSelectElement).value || null)}
+						>
+							<option value="">Default</option>
+							{#each voiceStore.availableOutputDevices as device}
+								<option value={device.deviceId}>{device.label || `Speaker (${device.deviceId.slice(0, 8)})`}</option>
+							{/each}
+						</select>
+						<svg class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+					</div>
+				</div>
+
+				<div class="border-t border-border"></div>
+
 				<!-- Noise Suppression (RNNoise) -->
 				<div class="flex items-center justify-between">
 					<span class="text-xs text-muted-foreground">

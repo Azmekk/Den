@@ -48,6 +48,10 @@ function createVoiceStore() {
 	let rnnoiseEnabled = $state(initialSettings.rnnoiseEnabled);
 	let rnnoiseActive = $state(false);
 	let micLevel = $state(0);
+	let inputDeviceId = $state<string | null>(initialSettings.inputDeviceId);
+	let outputDeviceId = $state<string | null>(initialSettings.outputDeviceId);
+	let availableInputDevices = $state<MediaDeviceInfo[]>([]);
+	let availableOutputDevices = $state<MediaDeviceInfo[]>([]);
 
 	// ── Non-reactive internal state ──────────────────────────────────────
 	let room: Room | null = null;
@@ -126,8 +130,51 @@ function createVoiceStore() {
 			rnnoiseEnabled,
 			echoCancellationEnabled,
 			screenSharePresetIndex,
+			inputDeviceId,
+			outputDeviceId,
 		});
 	}
+
+	// ── Device selection ────────────────────────────────────────────────
+
+	async function refreshDevices(): Promise<void> {
+		try {
+			const devices = await navigator.mediaDevices.enumerateDevices();
+			availableInputDevices = devices.filter((d) => d.kind === 'audioinput');
+			availableOutputDevices = devices.filter((d) => d.kind === 'audiooutput');
+
+			// Reset to default if selected device disappeared
+			if (inputDeviceId && !availableInputDevices.some((d) => d.deviceId === inputDeviceId)) {
+				inputDeviceId = null;
+				persistSettings();
+			}
+			if (outputDeviceId && !availableOutputDevices.some((d) => d.deviceId === outputDeviceId)) {
+				outputDeviceId = null;
+				persistSettings();
+			}
+		} catch (error) {
+			console.warn('Failed to enumerate devices:', error);
+		}
+	}
+
+	async function setInputDevice(deviceId: string | null): Promise<void> {
+		inputDeviceId = deviceId;
+		persistSettings();
+		if (room && !isMuted) {
+			await room.switchActiveDevice('audioinput', deviceId ?? '');
+			await setupAudioProcessing();
+		}
+	}
+
+	async function setOutputDevice(deviceId: string | null): Promise<void> {
+		outputDeviceId = deviceId;
+		persistSettings();
+		if (room) {
+			await room.switchActiveDevice('audiooutput', deviceId ?? '');
+		}
+	}
+
+	navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
 
 	// ── Audio processing setup ───────────────────────────────────────────
 
@@ -199,6 +246,7 @@ function createVoiceStore() {
 			await room.localParticipant.setMicrophoneEnabled(true, {
 				echoCancellation: echoCancellationEnabled,
 				noiseSuppression: false, // RNNoise handles suppression when enabled
+				deviceId: inputDeviceId ?? undefined,
 			});
 			microphoneError = null;
 			await setupAudioProcessing();
@@ -330,11 +378,21 @@ function createVoiceStore() {
 			await room.localParticipant.setMicrophoneEnabled(true, {
 				echoCancellation: echoCancellationEnabled,
 				noiseSuppression: false, // RNNoise handles suppression when enabled
+				deviceId: inputDeviceId ?? undefined,
 			});
 			microphoneError = null;
 		} catch (error) {
 			microphoneError = error instanceof Error ? error.message : 'Failed to access microphone';
 			console.error('Microphone publish failed:', error);
+		}
+
+		// Apply output device preference
+		if (outputDeviceId) {
+			try {
+				await room.switchActiveDevice('audiooutput', outputDeviceId);
+			} catch (error) {
+				console.warn('Failed to set output device:', error);
+			}
 		}
 
 		await setupAudioProcessing();
@@ -703,6 +761,10 @@ function createVoiceStore() {
 		get rnnoiseEnabled() { return rnnoiseEnabled; },
 		get rnnoiseActive() { return rnnoiseActive; },
 		get micLevel() { return micLevel; },
+		get inputDeviceId() { return inputDeviceId; },
+		get outputDeviceId() { return outputDeviceId; },
+		get availableInputDevices() { return availableInputDevices; },
+		get availableOutputDevices() { return availableOutputDevices; },
 		handleVoiceStateInitial,
 		handleVoiceStateUpdate,
 		join,
@@ -719,6 +781,9 @@ function createVoiceStore() {
 		setNoiseGateThreshold,
 		setEchoCancellationEnabled,
 		setRnnoiseEnabled,
+		refreshDevices,
+		setInputDevice,
+		setOutputDevice,
 	};
 }
 
