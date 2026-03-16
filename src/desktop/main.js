@@ -357,6 +357,10 @@ app.whenReady().then(() => {
     }
   });
 
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err);
+  });
+
   autoUpdater.checkForUpdatesAndNotify();
 });
 
