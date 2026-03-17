@@ -46,6 +46,11 @@ func main() {
 		log.Fatal("SUPABASE_SERVICE_ROLE_KEY is required")
 	}
 
+	supabaseAnonKey := os.Getenv("SUPABASE_ANON_KEY")
+	if supabaseAnonKey == "" {
+		log.Fatal("SUPABASE_ANON_KEY is required")
+	}
+
 	conn, openError := sql.Open("postgres", dbURL)
 	if openError != nil {
 		log.Fatalf("failed to connect to database: %v", openError)
@@ -119,7 +124,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil)
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

@@ -1,5 +1,5 @@
-import { supabase } from '$lib/supabase';
-import type { Session } from '@supabase/supabase-js';
+import { getSupabase } from '$lib/supabase';
+import type { Session, SupabaseClient } from '@supabase/supabase-js';
 
 interface User {
 	id: string;
@@ -13,6 +13,14 @@ function createAuth() {
 	let session = $state<Session | null>(null);
 	let user = $state<User | null>(null);
 	let initialized = $state(false);
+	let supabaseClient: SupabaseClient | null = null;
+
+	async function ensureSupabase(): Promise<SupabaseClient> {
+		if (!supabaseClient) {
+			supabaseClient = await getSupabase();
+		}
+		return supabaseClient;
+	}
 
 	function clear() {
 		session = null;
@@ -39,6 +47,7 @@ function createAuth() {
 	async function getToken(): Promise<string | null> {
 		if (!session) return null;
 
+		const supabase = await ensureSupabase();
 		// Supabase SDK auto-refreshes when we call getSession()
 		const { data } = await supabase.auth.getSession();
 		if (data.session) {
@@ -53,6 +62,8 @@ function createAuth() {
 
 	async function init() {
 		if (initialized) return;
+
+		const supabase = await ensureSupabase();
 
 		// Get existing session from Supabase (stored in localStorage by the SDK)
 		const { data } = await supabase.auth.getSession();
@@ -74,6 +85,7 @@ function createAuth() {
 	}
 
 	async function login(email: string, password: string): Promise<void> {
+		const supabase = await ensureSupabase();
 		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 		if (error) throw new Error(error.message);
 		session = data.session;
@@ -81,6 +93,7 @@ function createAuth() {
 	}
 
 	async function register(email: string, password: string, username?: string, inviteCode?: string): Promise<void> {
+		const supabase = await ensureSupabase();
 		const metadata: Record<string, string | undefined> = { username };
 		if (inviteCode) {
 			metadata.invite_code = inviteCode;
@@ -100,6 +113,7 @@ function createAuth() {
 	}
 
 	async function loginWithOAuth(provider: 'google'): Promise<void> {
+		const supabase = await ensureSupabase();
 		const { error } = await supabase.auth.signInWithOAuth({
 			provider,
 			options: { redirectTo: window.location.origin },
@@ -108,6 +122,7 @@ function createAuth() {
 	}
 
 	async function resetPassword(email: string): Promise<void> {
+		const supabase = await ensureSupabase();
 		const { error } = await supabase.auth.resetPasswordForEmail(email, {
 			redirectTo: `${window.location.origin}/login`,
 		});
@@ -125,6 +140,7 @@ function createAuth() {
 		voiceStore.leave(true);
 		websocket.disconnect();
 
+		const supabase = await ensureSupabase();
 		await supabase.auth.signOut();
 		clear();
 	}

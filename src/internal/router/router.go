@@ -13,14 +13,14 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, unfurlSvc *service.UnfurlService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, unfurlSvc *service.UnfurlService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string) chi.Router {
 	authHandler := handler.NewAuthHandler(authSvc)
 	channelHandler := handler.NewChannelHandler(channelSvc)
 	messageHandler := handler.NewMessageHandler(messageSvc, hub)
 	userHandler := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminHandler := handler.NewAdminHandler(adminSvc, mediaSvc)
 	emoteHandler := handler.NewEmoteHandler(emoteSvc, hub)
-	configHandler := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration)
+	configHandler := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration, supabaseURL, supabaseAnonKey)
 	dmHandler := handler.NewDMHandler(dmSvc)
 	var mediaHandler *handler.MediaHandler
 	if mediaSvc != nil {

@@ -11,17 +11,28 @@ type ConfigHandler struct {
 	voiceEnabled        bool
 	getMaxChars         func() int
 	getOpenRegistration func() bool
+	supabaseURL         string
+	supabaseAnonKey     string
 }
 
-func NewConfigHandler(uploadsEnabled, voiceEnabled bool, getMaxChars func() int, getOpenRegistration func() bool) *ConfigHandler {
-	return &ConfigHandler{uploadsEnabled: uploadsEnabled, voiceEnabled: voiceEnabled, getMaxChars: getMaxChars, getOpenRegistration: getOpenRegistration}
+func NewConfigHandler(uploadsEnabled, voiceEnabled bool, getMaxChars func() int, getOpenRegistration func() bool, supabaseURL, supabaseAnonKey string) *ConfigHandler {
+	return &ConfigHandler{
+		uploadsEnabled:      uploadsEnabled,
+		voiceEnabled:        voiceEnabled,
+		getMaxChars:         getMaxChars,
+		getOpenRegistration: getOpenRegistration,
+		supabaseURL:         supabaseURL,
+		supabaseAnonKey:     supabaseAnonKey,
+	}
 }
 
-func (h *ConfigHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"uploads_enabled":   h.uploadsEnabled,
-		"voice_enabled":     h.voiceEnabled,
-		"max_message_chars": h.getMaxChars(),
-		"open_registration": h.getOpenRegistration(),
+func (handler *ConfigHandler) GetConfig(writer http.ResponseWriter, request *http.Request) {
+	httputil.WriteJSON(writer, http.StatusOK, map[string]any{
+		"uploads_enabled":   handler.uploadsEnabled,
+		"voice_enabled":     handler.voiceEnabled,
+		"max_message_chars": handler.getMaxChars(),
+		"open_registration": handler.getOpenRegistration(),
+		"supabase_url":      handler.supabaseURL,
+		"supabase_anon_key": handler.supabaseAnonKey,
 	})
 }

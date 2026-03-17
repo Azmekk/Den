@@ -108,7 +108,7 @@ docker compose down             # Stop everything
 - User cache (sync.Map with 2-min TTL) avoids DB lookup on every request
 - No refresh tokens or invite codes — Supabase handles session management
 - **Banning**: Admin sets local `banned` flag + calls Supabase admin API to ban. Banned users are kicked from WebSocket immediately and rejected at middleware (403) on subsequent requests.
-- Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
 
 ## Architecture Caveats
 

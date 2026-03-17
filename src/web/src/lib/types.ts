@@ -74,6 +74,8 @@ export interface AppConfig {
 	voice_enabled?: boolean;
 	max_message_chars: number;
 	open_registration?: boolean;
+	supabase_url: string;
+	supabase_anon_key: string;
 }
 
 export interface SearchResult {
