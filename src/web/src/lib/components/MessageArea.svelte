@@ -1,26 +1,25 @@
 <script lang="ts">
 import { tick } from 'svelte';
-import { api } from '$lib/api';
 import { auth } from '$lib/stores/auth.svelte';
 import { channelStore } from '$lib/stores/channels.svelte';
 import { configStore } from '$lib/stores/config.svelte';
 import { dmStore } from '$lib/stores/dms.svelte';
+import { emoteStore } from '$lib/stores/emotes.svelte';
 import { messageStore } from '$lib/stores/messages.svelte';
 import { pinStore } from '$lib/stores/pins.svelte';
 import { typing } from '$lib/stores/typing.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
-import type { MessageInfo } from '$lib/types';
-import { getUserColor, userColorFromHash, unresolveContent } from '$lib/utils';
-import { convertToWebP, isImageFile, isVideoFile } from '$lib/media';
-import { emoteStore } from '$lib/stores/emotes.svelte';
-import { layoutStore } from '$lib/stores/layout.svelte';
 import { websocket } from '$lib/stores/websocket.svelte';
-import EmoteAutocomplete from './EmoteAutocomplete.svelte';
-import EmotePicker from './EmotePicker.svelte';
-import MentionAutocomplete from './MentionAutocomplete.svelte';
-import MessageContent from './MessageContent.svelte';
+import { layoutStore } from '$lib/stores/layout.svelte';
+import type { MessageInfo } from '$lib/types';
+import { unresolveContent } from '$lib/utils';
+import { convertToWebP, isImageFile, isVideoFile } from '$lib/media';
+import { api } from '$lib/api';
 import MessageContextMenu from './MessageContextMenu.svelte';
-import UserProfilePopover from './UserProfilePopover.svelte';
+import MessageHeader from './message-area/MessageHeader.svelte';
+import MessageBubble from './message-area/MessageBubble.svelte';
+import ComposeBar from './message-area/ComposeBar.svelte';
+import DeleteMessageModal from './message-area/DeleteMessageModal.svelte';
 
 interface Props {
 	onSearchOpen?: () => void;
@@ -28,105 +27,12 @@ interface Props {
 
 let { onSearchOpen }: Props = $props();
 
-async function openDM(userId: string) {
-	if (userId === auth.user?.id) return;
-	const existing = dmStore.findByUserId(userId);
-	if (existing) {
-		dmStore.select(existing.id);
-		layoutStore.sidebarTab = 'messages';
-		return;
-	}
-	layoutStore.sidebarTab = 'messages';
-	const pair = await dmStore.createOrGetDM(userId);
-	if (pair) dmStore.select(pair.id);
-}
-
-function getColorForMessage(msg: MessageInfo): string {
-	const user = usersStore.users.find((u) => u.id === msg.user_id);
-	if (user) return getUserColor(user);
-	return userColorFromHash(msg.username);
-}
-
-function getDisplayNameForMessage(msg: MessageInfo): string {
-	const user = usersStore.users.find((u) => u.id === msg.user_id);
-	if (user) return user.display_name || user.username;
-	return msg.display_name || msg.username;
-}
-
-function formatTimestamp(iso: string): string {
-	const d = new Date(iso);
-	const now = new Date();
-	const hh = d.getHours().toString().padStart(2, '0');
-	const mm = d.getMinutes().toString().padStart(2, '0');
-	const time = `${hh}:${mm}`;
-
-	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-	const yesterday = new Date(today.getTime() - 86400000);
-	const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-	if (msgDay.getTime() === today.getTime()) return time;
-	if (msgDay.getTime() === yesterday.getTime()) return `Yesterday at ${time}`;
-	const day = d.getDate().toString().padStart(2, '0');
-	const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-	return `${day}/${month}/${d.getFullYear()} ${time}`;
-}
-
-function isDifferentDay(a: string, b: string): boolean {
-	const da = new Date(a);
-	const db = new Date(b);
-	return da.getFullYear() !== db.getFullYear() || da.getMonth() !== db.getMonth() || da.getDate() !== db.getDate();
-}
-
-function formatDateSeparator(iso: string): string {
-	const d = new Date(iso);
-	const now = new Date();
-	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-	const yesterday = new Date(today.getTime() - 86400000);
-	const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-	if (msgDay.getTime() === today.getTime()) return 'Today';
-	if (msgDay.getTime() === yesterday.getTime()) return 'Yesterday';
-	const day = d.getDate().toString().padStart(2, '0');
-	const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-	return `${day}/${month}/${d.getFullYear()}`;
-}
-
-function isGrouped(msgs: MessageInfo[], index: number): boolean {
-	if (index === 0) return false;
-	const prev = msgs[index - 1];
-	const curr = msgs[index];
-	if (prev.username !== curr.username) return false;
-	if (isDifferentDay(prev.created_at, curr.created_at)) return false;
-	const diff =
-		new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
-	return diff < 5 * 60 * 1000;
-}
-
-let messageInput = $state('');
-let messageListEl: HTMLDivElement | undefined = $state();
-let isNearBottom = $state(true);
-let prevMessageCount = $state(0);
-let cursorPosition = $state(0);
-let textareaEl: HTMLTextAreaElement | undefined = $state();
-let emoteAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(
-	() => false,
-);
-let mentionAutocompleteHandler: (e: KeyboardEvent) => boolean = $state(
-	() => false,
-);
-
-// Derive view mode
-const isDM = $derived(
-	!!dmStore.selectedDMId && !channelStore.selectedChannelId,
-);
+// Derived view state
+const isDM = $derived(!!dmStore.selectedDMId && !channelStore.selectedChannelId);
 const channelId = $derived(channelStore.selectedChannelId);
 const dmId = $derived(dmStore.selectedDMId);
 const channel = $derived(channelStore.selectedChannel);
-
-// Get the DM conversation info
-const dmConversation = $derived(
-	dmId ? dmStore.conversations.find((c) => c.id === dmId) : null,
-);
+const dmConversation = $derived(dmId ? dmStore.conversations.find((conv) => conv.id === dmId) : null);
 
 const messages = $derived(
 	isDM && dmId
@@ -136,9 +42,7 @@ const messages = $derived(
 			: [],
 );
 
-const typingUsers = $derived(
-	channelId ? typing.getTypingUsers(channelId) : [],
-);
+const typingUsers = $derived(channelId ? typing.getTypingUsers(channelId) : []);
 
 const hasMore = $derived(
 	isDM && dmId
@@ -148,216 +52,11 @@ const hasMore = $derived(
 			: false,
 );
 
-const isLoadingOlder = $derived(
-	isDM ? dmStore.loadingOlder : messageStore.loadingOlder,
-);
-
-// Active view identifier for pin panel
-const activeTargetId = $derived(isDM ? dmId : channelId);
-
-function typingText(users: string[]): string {
-	if (users.length === 0) return '';
-	if (users.length === 1) return `${users[0]} is typing...`;
-	if (users.length === 2) return `${users[0]} and ${users[1]} are typing...`;
-	return `${users[0]}, ${users[1]}, and others are typing...`;
-}
+const isLoadingOlder = $derived(isDM ? dmStore.loadingOlder : messageStore.loadingOlder);
 
 const isChannelJumped = $derived(channelId ? messageStore.isJumped(channelId) : false);
 const channelHasMoreAfter = $derived(channelId ? messageStore.hasMoreAfter(channelId) : false);
 
-function handleScroll() {
-	if (!messageListEl) return;
-	const { scrollTop, scrollHeight, clientHeight } = messageListEl;
-	isNearBottom = scrollHeight - scrollTop - clientHeight < 50;
-
-	if (scrollTop === 0 && hasMore) {
-		loadOlder();
-	}
-
-	// Forward pagination when near bottom in jumped mode
-	if (isNearBottom && !isDM && channelId && isChannelJumped && channelHasMoreAfter) {
-		loadNewer();
-	}
-}
-
-async function loadOlder() {
-	if (isLoadingOlder) return;
-	const el = messageListEl;
-	if (!el) return;
-	const prevScrollHeight = el.scrollHeight;
-
-	if (isDM && dmId) {
-		await dmStore.fetchOlder(dmId);
-	} else if (channelId) {
-		await messageStore.fetchOlder(channelId);
-	}
-
-	await tick();
-	el.scrollTop = el.scrollHeight - prevScrollHeight;
-}
-
-async function loadNewer() {
-	if (messageStore.loadingNewer || !channelId) return;
-	await messageStore.fetchNewer(channelId);
-}
-
-async function scrollToBottom() {
-	await tick();
-	if (messageListEl) {
-		messageListEl.scrollTop = messageListEl.scrollHeight;
-	}
-}
-
-// Re-scroll when media loads (images/videos change content height after initial render)
-function handleMediaLoad() {
-	if (isNearBottom && messageListEl) {
-		messageListEl.scrollTop = messageListEl.scrollHeight;
-	}
-}
-
-$effect(() => {
-	const el = messageListEl;
-	if (!el) return;
-	el.addEventListener('load', handleMediaLoad, true);
-	return () => el.removeEventListener('load', handleMediaLoad, true);
-});
-
-$effect(() => {
-	const count = messages.length;
-	if (count > prevMessageCount && isNearBottom) {
-		scrollToBottom();
-	}
-	prevMessageCount = count;
-});
-
-$effect(() => {
-	// When channel/DM changes, scroll to bottom and clear reply
-	if (channelId || dmId) {
-		isNearBottom = true;
-		replyingTo = null;
-		scrollToBottom();
-	}
-});
-
-// Scroll-to-message effect
-$effect(() => {
-	const target = messageStore.scrollTarget;
-	if (!target) return;
-	if (target.channelId !== channelId) return;
-
-	tick().then(() => {
-		const el = messageListEl?.querySelector(`[data-message-id="${target.messageId}"]`);
-		if (el) {
-			el.scrollIntoView({ block: 'center' });
-			el.classList.add('highlight-flash');
-			el.addEventListener('animationend', () => el.classList.remove('highlight-flash'), { once: true });
-		}
-		messageStore.scrollTarget = null;
-	});
-});
-
-function hasSelfMention(msg: MessageInfo): boolean {
-	const userId = auth.user?.id;
-	if (!userId) return false;
-	return (
-		msg.content.includes(`<mention:${userId}>`) ||
-		msg.content.includes('<mention:everyone>')
-	);
-}
-
-function handleKeydown(e: KeyboardEvent) {
-	if (mentionAutocompleteHandler(e)) return;
-	if (emoteAutocompleteHandler(e)) return;
-	if (e.key === 'Escape' && replyingTo) {
-		e.preventDefault();
-		cancelReply();
-		return;
-	}
-	if (e.key === 'Enter' && !e.shiftKey) {
-		e.preventDefault();
-		sendMsg();
-	} else if (e.key === 'ArrowUp' && !messageInput.trim()) {
-		const myLastMsg = [...messages].reverse().find((m) => m.user_id === auth.user?.id);
-		if (myLastMsg) {
-			e.preventDefault();
-			startEdit(myLastMsg);
-		}
-	}
-}
-
-function handleInput(e: Event) {
-	autoResize(e);
-	updateCursorPosition();
-	if (channelId && !isDM) {
-		typing.sendTyping(channelId);
-	}
-}
-
-function updateCursorPosition() {
-	if (textareaEl) {
-		cursorPosition = textareaEl.selectionStart ?? 0;
-	}
-}
-
-function handleEmoteSelect(shortcode: string, start: number, end: number) {
-	messageInput =
-		messageInput.slice(0, start) + shortcode + messageInput.slice(end);
-	const newPos = start + shortcode.length;
-	tick().then(() => {
-		if (textareaEl) {
-			textareaEl.selectionStart = newPos;
-			textareaEl.selectionEnd = newPos;
-			cursorPosition = newPos;
-			textareaEl.focus();
-		}
-	});
-}
-
-function sendMsg() {
-	const text = messageInput.trim();
-	const urls = attachments.map((a) => a.url);
-	if (!text && urls.length === 0) return;
-
-	const parts = [text, ...urls].filter(Boolean);
-	const content = parts.join('\n');
-	const replyId = replyingTo?.id;
-
-	if (isDM && dmId) {
-		dmStore.sendMessage(dmId, content, replyId);
-	} else if (channelId) {
-		typing.stopTyping(channelId);
-		messageStore.sendMessage(channelId, content, replyId);
-	} else {
-		return;
-	}
-	messageInput = '';
-	attachments = [];
-	replyingTo = null;
-}
-
-function removeAttachment(index: number) {
-	attachments = attachments.filter((_, i) => i !== index);
-}
-
-function autoResize(e: Event) {
-	const el = e.target as HTMLTextAreaElement;
-	el.style.height = 'auto';
-	el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-}
-
-function canPin(msg: MessageInfo): boolean {
-	return msg.user_id === auth.user?.id || auth.user?.is_admin === true;
-}
-
-function togglePin(msg: MessageInfo) {
-	if (msg.pinned) {
-		pinStore.unpinMessage(msg.id);
-	} else {
-		pinStore.pinMessage(msg.id);
-	}
-}
-
-// Header info
 const headerName = $derived(
 	isDM && dmConversation
 		? `@${dmConversation.other_display_name || dmConversation.other_username}`
@@ -378,32 +77,212 @@ const placeholderText = $derived(
 
 const hasActiveView = $derived(!!(channel || (isDM && dmConversation)));
 
-// In DM mode, restrict mention autocomplete to only the two participants
 const mentionFilterIds = $derived(
 	isDM && dmConversation && auth.user
 		? [auth.user.id, dmConversation.other_user_id]
 		: undefined,
 );
 
-let fileInputEl: HTMLInputElement | undefined = $state();
-let uploading = $state(false);
-let dragOver = $state(false);
-let attachments = $state<{ url: string; type: 'image' | 'video' }[]>([]);
-let plusMenuOpen = $state(false);
-let emojiPickerOpen = $state(false);
+// Scroll state
+let messageListEl: HTMLDivElement | undefined = $state();
+let isNearBottom = $state(true);
+let prevMessageCount = $state(0);
 
-// Edit/delete state
+// Edit state
 let editingMessageId = $state<string | null>(null);
 let editContent = $state('');
 let editTextareaEl: HTMLTextAreaElement | undefined = $state();
+
+// Delete state
 let deletingMessage = $state<MessageInfo | null>(null);
 
 // Reply state
 let replyingTo = $state<MessageInfo | null>(null);
 
+// Drag state
+let dragOver = $state(false);
+let dragCounter = 0;
+
+// Helper functions
+function formatTimestamp(iso: string): string {
+	const date = new Date(iso);
+	const now = new Date();
+	const hh = date.getHours().toString().padStart(2, '0');
+	const mm = date.getMinutes().toString().padStart(2, '0');
+	const time = `${hh}:${mm}`;
+
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const yesterday = new Date(today.getTime() - 86400000);
+	const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+	if (msgDay.getTime() === today.getTime()) return time;
+	if (msgDay.getTime() === yesterday.getTime()) return `Yesterday at ${time}`;
+	const day = date.getDate().toString().padStart(2, '0');
+	const month = date.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+	return `${day}/${month}/${date.getFullYear()} ${time}`;
+}
+
+function isDifferentDay(first: string, second: string): boolean {
+	const dateA = new Date(first);
+	const dateB = new Date(second);
+	return dateA.getFullYear() !== dateB.getFullYear() || dateA.getMonth() !== dateB.getMonth() || dateA.getDate() !== dateB.getDate();
+}
+
+function formatDateSeparator(iso: string): string {
+	const date = new Date(iso);
+	const now = new Date();
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const yesterday = new Date(today.getTime() - 86400000);
+	const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+	if (msgDay.getTime() === today.getTime()) return 'Today';
+	if (msgDay.getTime() === yesterday.getTime()) return 'Yesterday';
+	const day = date.getDate().toString().padStart(2, '0');
+	const month = date.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+	return `${day}/${month}/${date.getFullYear()}`;
+}
+
+function isGrouped(msgList: MessageInfo[], index: number): boolean {
+	if (index === 0) return false;
+	const prev = msgList[index - 1];
+	const curr = msgList[index];
+	if (prev.username !== curr.username) return false;
+	if (isDifferentDay(prev.created_at, curr.created_at)) return false;
+	const diff = new Date(curr.created_at).getTime() - new Date(prev.created_at).getTime();
+	return diff < 5 * 60 * 1000;
+}
+
+function hasSelfMention(msg: MessageInfo): boolean {
+	const userId = auth.user?.id;
+	if (!userId) return false;
+	return msg.content.includes(`<mention:${userId}>`) || msg.content.includes('<mention:everyone>');
+}
+
+function typingText(users: string[]): string {
+	if (users.length === 0) return '';
+	if (users.length === 1) return `${users[0]} is typing...`;
+	if (users.length === 2) return `${users[0]} and ${users[1]} are typing...`;
+	return `${users[0]}, ${users[1]}, and others are typing...`;
+}
+
+// Scroll management
+function handleScroll() {
+	if (!messageListEl) return;
+	const { scrollTop, scrollHeight, clientHeight } = messageListEl;
+	isNearBottom = scrollHeight - scrollTop - clientHeight < 50;
+
+	if (scrollTop === 0 && hasMore) {
+		loadOlder();
+	}
+
+	if (isNearBottom && !isDM && channelId && isChannelJumped && channelHasMoreAfter) {
+		loadNewer();
+	}
+}
+
+async function loadOlder() {
+	if (isLoadingOlder) return;
+	const element = messageListEl;
+	if (!element) return;
+	const prevScrollHeight = element.scrollHeight;
+
+	if (isDM && dmId) {
+		await dmStore.fetchOlder(dmId);
+	} else if (channelId) {
+		await messageStore.fetchOlder(channelId);
+	}
+
+	await tick();
+	element.scrollTop = element.scrollHeight - prevScrollHeight;
+}
+
+async function loadNewer() {
+	if (messageStore.loadingNewer || !channelId) return;
+	await messageStore.fetchNewer(channelId);
+}
+
+async function scrollToBottom() {
+	await tick();
+	if (messageListEl) {
+		messageListEl.scrollTop = messageListEl.scrollHeight;
+	}
+}
+
+function handleMediaLoad() {
+	if (isNearBottom && messageListEl) {
+		messageListEl.scrollTop = messageListEl.scrollHeight;
+	}
+}
+
+$effect(() => {
+	const element = messageListEl;
+	if (!element) return;
+	element.addEventListener('load', handleMediaLoad, true);
+	return () => element.removeEventListener('load', handleMediaLoad, true);
+});
+
+$effect(() => {
+	const count = messages.length;
+	if (count > prevMessageCount && isNearBottom) {
+		scrollToBottom();
+	}
+	prevMessageCount = count;
+});
+
+$effect(() => {
+	if (channelId || dmId) {
+		isNearBottom = true;
+		replyingTo = null;
+		scrollToBottom();
+	}
+});
+
+$effect(() => {
+	const target = messageStore.scrollTarget;
+	if (!target) return;
+	if (target.channelId !== channelId) return;
+
+	tick().then(() => {
+		const element = messageListEl?.querySelector(`[data-message-id="${target.messageId}"]`);
+		if (element) {
+			element.scrollIntoView({ block: 'center' });
+			element.classList.add('highlight-flash');
+			element.addEventListener('animationend', () => element.classList.remove('highlight-flash'), { once: true });
+		}
+		messageStore.scrollTarget = null;
+	});
+});
+
+// DM helper
+async function openDM(userId: string) {
+	if (userId === auth.user?.id) return;
+	const existing = dmStore.findByUserId(userId);
+	if (existing) {
+		dmStore.select(existing.id);
+		layoutStore.sidebarTab = 'messages';
+		return;
+	}
+	layoutStore.sidebarTab = 'messages';
+	const pair = await dmStore.createOrGetDM(userId);
+	if (pair) dmStore.select(pair.id);
+}
+
+// Pin actions
+function canPin(msg: MessageInfo): boolean {
+	return msg.user_id === auth.user?.id || auth.user?.is_admin === true;
+}
+
+function togglePin(msg: MessageInfo) {
+	if (msg.pinned) {
+		pinStore.unpinMessage(msg.id);
+	} else {
+		pinStore.pinMessage(msg.id);
+	}
+}
+
+// Reply actions
 function startReply(msg: MessageInfo) {
 	replyingTo = msg;
-	textareaEl?.focus();
 }
 
 function cancelReply() {
@@ -414,21 +293,20 @@ async function scrollToReplyTarget(msg: MessageInfo) {
 	if (!msg.reply_to_id) return;
 	const targetId = msg.reply_to_id;
 
-	// Try finding in DOM first
-	const el = messageListEl?.querySelector(`[data-message-id="${targetId}"]`);
-	if (el) {
-		el.scrollIntoView({ block: 'center' });
-		el.classList.add('highlight-flash');
-		el.addEventListener('animationend', () => el.classList.remove('highlight-flash'), { once: true });
+	const element = messageListEl?.querySelector(`[data-message-id="${targetId}"]`);
+	if (element) {
+		element.scrollIntoView({ block: 'center' });
+		element.classList.add('highlight-flash');
+		element.addEventListener('animationend', () => element.classList.remove('highlight-flash'), { once: true });
 		return;
 	}
 
-	// Not loaded — fetch around the target message
 	if (!isDM && channelId) {
 		await messageStore.fetchAround(channelId, targetId);
 	}
 }
 
+// Edit actions
 function startEdit(msg: MessageInfo) {
 	editingMessageId = msg.id;
 	editContent = unresolveContent(msg.content, emoteStore.emoteMap, usersStore.users);
@@ -461,16 +339,17 @@ function cancelEdit() {
 	editContent = '';
 }
 
-function handleEditKeydown(e: KeyboardEvent) {
-	if (e.key === 'Enter' && !e.shiftKey) {
-		e.preventDefault();
+function handleEditKeydown(event: KeyboardEvent) {
+	if (event.key === 'Enter' && !event.shiftKey) {
+		event.preventDefault();
 		saveEdit();
-	} else if (e.key === 'Escape') {
-		e.preventDefault();
+	} else if (event.key === 'Escape') {
+		event.preventDefault();
 		cancelEdit();
 	}
 }
 
+// Delete actions
 function confirmDelete() {
 	if (!deletingMessage) return;
 	websocket.send({
@@ -480,76 +359,17 @@ function confirmDelete() {
 	deletingMessage = null;
 }
 
-function handlePickerSelect(text: string) {
-	const pos = textareaEl?.selectionStart ?? messageInput.length;
-	messageInput = messageInput.slice(0, pos) + text + messageInput.slice(pos);
-	const newPos = pos + text.length;
-	tick().then(() => {
-		if (textareaEl) {
-			textareaEl.selectionStart = newPos;
-			textareaEl.selectionEnd = newPos;
-			cursorPosition = newPos;
-			textareaEl.focus();
-		}
-	});
-}
-
-function getAvatarUrl(msg: MessageInfo): string | undefined {
-	const user = usersStore.users.find((u) => u.id === msg.user_id);
-	return user?.avatar_url;
-}
-
-async function uploadFile(file: File) {
-	if (uploading) return;
-	uploading = true;
-	try {
-		let body: FormData;
-		let endpoint: string;
-
-		if (isImageFile(file)) {
-			const webp = await convertToWebP(file);
-			body = new FormData();
-			body.append('file', webp, 'image.webp');
-			endpoint = '/upload/image';
-		} else if (isVideoFile(file)) {
-			body = new FormData();
-			body.append('file', file, file.name);
-			endpoint = '/upload/video';
-		} else {
-			return;
-		}
-
-		try {
-			const data = await api.upload<{ url?: string }>(endpoint, body);
-			if (data.url) {
-				const type = isImageFile(file) ? 'image' as const : 'video' as const;
-				attachments = [...attachments, { url: data.url, type }];
-			}
-		} catch {}
-	} finally {
-		uploading = false;
-		if (fileInputEl) fileInputEl.value = '';
-	}
-}
-
-function handleFileSelect(e: Event) {
-	const input = e.target as HTMLInputElement;
-	const file = input.files?.[0];
-	if (file) uploadFile(file);
-}
-
-let dragCounter = 0;
-
-function handleDragEnter(e: DragEvent) {
+// Drag-drop
+function handleDragEnter(event: DragEvent) {
 	if (!configStore.uploadsEnabled) return;
-	e.preventDefault();
+	event.preventDefault();
 	dragCounter++;
 	dragOver = true;
 }
 
-function handleDragOver(e: DragEvent) {
+function handleDragOver(event: DragEvent) {
 	if (!configStore.uploadsEnabled) return;
-	e.preventDefault();
+	event.preventDefault();
 }
 
 function handleDragLeave() {
@@ -560,31 +380,49 @@ function handleDragLeave() {
 	}
 }
 
-function handleDrop(e: DragEvent) {
-	e.preventDefault();
+function handleDrop(event: DragEvent) {
+	event.preventDefault();
 	dragCounter = 0;
 	dragOver = false;
 	if (!configStore.uploadsEnabled) return;
-	const file = e.dataTransfer?.files[0];
+	const file = event.dataTransfer?.files[0];
 	if (file && (isImageFile(file) || isVideoFile(file))) {
-		uploadFile(file);
+		// File will be handled by ComposeBar's upload mechanism via drag-drop on main area
+		// For now we trigger the upload directly
+		uploadDroppedFile(file);
 	}
 }
 
-function handlePaste(e: ClipboardEvent) {
-if (!configStore.uploadsEnabled) return;
-	const items = e.clipboardData?.items;
-	if (!items) return;
-	for (const item of items) {
-		if (item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
-			const file = item.getAsFile();
-			if (file) {
-				e.preventDefault();
-				uploadFile(file);
-				return;
-			}
-		}
+async function uploadDroppedFile(file: File) {
+	let body: FormData;
+	let endpoint: string;
+
+	if (isImageFile(file)) {
+		const webp = await convertToWebP(file);
+		body = new FormData();
+		body.append('file', webp, 'image.webp');
+		endpoint = '/upload/image';
+	} else if (isVideoFile(file)) {
+		body = new FormData();
+		body.append('file', file, file.name);
+		endpoint = '/upload/video';
+	} else {
+		return;
 	}
+
+	try {
+		const data = await api.upload<{ url?: string }>(endpoint, body);
+		if (data.url) {
+			const content = data.url;
+			const replyId = replyingTo?.id;
+			if (isDM && dmId) {
+				dmStore.sendMessage(dmId, content, replyId);
+			} else if (channelId) {
+				messageStore.sendMessage(channelId, content, replyId);
+			}
+			replyingTo = null;
+		}
+	} catch {}
 }
 </script>
 
@@ -606,54 +444,15 @@ if (!configStore.uploadsEnabled) return;
 		</div>
 	{/if}
 	{#if hasActiveView}
-		<!-- Header -->
-		<div class="flex h-12 items-center justify-between border-b border-border px-4">
-			<div class="flex min-w-0 flex-1 items-center gap-2">
-				<button
-					onclick={() => layoutStore.toggleSidebar()}
-					class="rounded p-1.5 min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden"
-					title="Toggle sidebar"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
-				</button>
-				<span class="mr-2 text-muted-foreground">{headerIcon}</span>
-				<h2 class="font-semibold text-foreground">
-					{isDM && dmConversation
-						? dmConversation.other_display_name || dmConversation.other_username
-						: channel?.name}
-				</h2>
-				{#if !isDM && channel?.topic}
-					<span class="ml-3 truncate text-sm text-muted-foreground">{channel.topic}</span>
-				{/if}
-			</div>
-			<div class="flex shrink-0 items-center gap-1">
-				{#if onSearchOpen}
-					<button
-						onclick={onSearchOpen}
-						class="rounded p-1.5 min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground"
-						title="Search messages"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-					</button>
-				{/if}
-				<button
-					onclick={() => pinStore.togglePanel()}
-					class="rounded p-1.5 min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground"
-					title="Pinned messages"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-				</button>
-				{#if !isDM}
-					<button
-						onclick={() => layoutStore.toggleMemberList()}
-						class="rounded p-1.5 min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground md:hidden"
-						title="Toggle member list"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-					</button>
-				{/if}
-			</div>
-		</div>
+		<MessageHeader
+			{headerIcon}
+			headerName={isDM && dmConversation
+				? dmConversation.other_display_name || dmConversation.other_username
+				: channel?.name ?? ''}
+			channelTopic={channel?.topic}
+			{isDM}
+			{onSearchOpen}
+		/>
 
 		<!-- Message list -->
 		<div
@@ -677,9 +476,9 @@ if (!configStore.uploadsEnabled) return;
 					</div>
 				</div>
 			{:else}
-				{#each messages as msg, i (msg.id)}
-					{@const grouped = isGrouped(messages, i)}
-					{@const showDateSep = i === 0 || isDifferentDay(messages[i - 1].created_at, msg.created_at)}
+				{#each messages as msg, msgIndex (msg.id)}
+					{@const grouped = isGrouped(messages, msgIndex)}
+					{@const showDateSep = msgIndex === 0 || isDifferentDay(messages[msgIndex - 1].created_at, msg.created_at)}
 					{#if showDateSep}
 						<div class="flex items-center gap-3 my-4 px-2">
 							<div class="flex-1 h-px bg-border"></div>
@@ -688,128 +487,31 @@ if (!configStore.uploadsEnabled) return;
 						</div>
 					{/if}
 					<MessageContextMenu
-					msg={msg}
-					canPin={canPin(msg)}
-					canEdit={msg.user_id === auth.user?.id}
-					canDelete={msg.user_id === auth.user?.id || auth.user?.is_admin === true}
-					onTogglePin={() => togglePin(msg)}
-					onEdit={() => startEdit(msg)}
-					onDelete={() => deletingMessage = msg}
-					onReply={() => startReply(msg)}
-				>
-						{#if grouped}
-							<div data-message-id={msg.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-								<div class="w-8 flex items-center justify-center shrink-0">
-									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTimestamp(msg.created_at)}</span>
-								</div>
-								<div class="flex-1 min-w-0">
-									{#if msg.is_reply}
-										<!-- svelte-ignore a11y_click_events_have_key_events -->
-										<!-- svelte-ignore a11y_no_static_element_interactions -->
-										<div
-											class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5 cursor-pointer hover:text-foreground transition-colors"
-											onclick={() => scrollToReplyTarget(msg)}
-										>
-											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-											{#if msg.reply_to_id && msg.reply_to_username}
-												<span class="font-medium" style="color: {userColorFromHash(msg.reply_to_username)}">@{msg.reply_to_username}</span>
-												<span class="truncate max-w-[300px] opacity-70">{msg.reply_to_content}</span>
-											{:else}
-												<span class="italic opacity-70">Original message was deleted</span>
-											{/if}
-										</div>
-									{/if}
-									{#if editingMessageId === msg.id}
-										<div class="py-1">
-											<textarea
-												bind:this={editTextareaEl}
-												bind:value={editContent}
-												onkeydown={handleEditKeydown}
-												oninput={(e) => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }}
-												rows="1"
-												class="w-full min-h-[38px] max-h-[120px] resize-none rounded-lg border border-primary bg-secondary px-3 py-2 text-sm text-foreground focus:outline-none"
-											></textarea>
-											<div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-												<span>Escape to <button class="text-primary hover:underline" onclick={cancelEdit}>cancel</button></span>
-												<span>Enter to <button class="text-primary hover:underline" onclick={saveEdit}>save</button></span>
-											</div>
-										</div>
-									{:else}
-										<MessageContent content={msg.content} />
-									{/if}
-								</div>
-							</div>
-						{:else}
-							<div data-message-id={msg.id} class="flex gap-3 hover:bg-secondary/30 -mx-2 px-2 rounded group {i > 0 ? 'mt-3' : ''} {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
-								<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} avatarUrl={getAvatarUrl(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
-									{#if getAvatarUrl(msg)}
-										<img
-											src={getAvatarUrl(msg)}
-											alt={msg.username}
-											class="w-8 h-8 rounded-full shrink-0 mt-1.5 cursor-pointer hover:opacity-80 object-cover"
-											onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
-										/>
-										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1.5 cursor-pointer hover:opacity-80 hidden" style="background-color: {getColorForMessage(msg)}">
-											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
-										</div>
-									{:else}
-										<div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1.5 cursor-pointer hover:opacity-80" style="background-color: {getColorForMessage(msg)}">
-											<span class="text-white text-xs font-bold">{msg.username.charAt(0).toUpperCase()}</span>
-										</div>
-									{/if}
-								</UserProfilePopover>
-								<div class="flex-1 min-w-0">
-									{#if msg.is_reply}
-										<!-- svelte-ignore a11y_click_events_have_key_events -->
-										<!-- svelte-ignore a11y_no_static_element_interactions -->
-										<div
-											class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5 cursor-pointer hover:text-foreground transition-colors"
-											onclick={() => scrollToReplyTarget(msg)}
-										>
-											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-											{#if msg.reply_to_id && msg.reply_to_username}
-												<span class="font-medium" style="color: {userColorFromHash(msg.reply_to_username)}">@{msg.reply_to_username}</span>
-												<span class="truncate max-w-[300px] opacity-70">{msg.reply_to_content}</span>
-											{:else}
-												<span class="italic opacity-70">Original message was deleted</span>
-											{/if}
-										</div>
-									{/if}
-									<div class="flex items-baseline gap-2">
-										<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
-											<span class="font-medium text-sm cursor-pointer hover:underline" style="color: {getColorForMessage(msg)}">
-												{getDisplayNameForMessage(msg)}
-											</span>
-										</UserProfilePopover>
-										<span class="text-xs text-muted-foreground">{formatTimestamp(msg.created_at)}</span>
-										{#if msg.edited_at}
-											<span class="text-xs text-muted-foreground italic">(edited)</span>
-										{/if}
-										{#if msg.pinned}
-											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-										{/if}
-									</div>
-									{#if editingMessageId === msg.id}
-										<div class="py-1">
-											<textarea
-												bind:this={editTextareaEl}
-												bind:value={editContent}
-												onkeydown={handleEditKeydown}
-												oninput={(e) => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }}
-												rows="1"
-												class="w-full min-h-[38px] max-h-[120px] resize-none rounded-lg border border-primary bg-secondary px-3 py-2 text-sm text-foreground focus:outline-none"
-											></textarea>
-											<div class="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-												<span>Escape to <button class="text-primary hover:underline" onclick={cancelEdit}>cancel</button></span>
-												<span>Enter to <button class="text-primary hover:underline" onclick={saveEdit}>save</button></span>
-											</div>
-										</div>
-									{:else}
-										<MessageContent content={msg.content} />
-									{/if}
-								</div>
-							</div>
-						{/if}
+						msg={msg}
+						canPin={canPin(msg)}
+						canEdit={msg.user_id === auth.user?.id}
+						canDelete={msg.user_id === auth.user?.id || auth.user?.is_admin === true}
+						onTogglePin={() => togglePin(msg)}
+						onEdit={() => startEdit(msg)}
+						onDelete={() => deletingMessage = msg}
+						onReply={() => startReply(msg)}
+					>
+						<MessageBubble
+							message={msg}
+							{grouped}
+							{editingMessageId}
+							{editContent}
+							onEditContentChange={(value) => editContent = value}
+							onEditTextareaMount={(element) => editTextareaEl = element}
+							onEditKeydown={handleEditKeydown}
+							onCancelEdit={cancelEdit}
+							onSaveEdit={saveEdit}
+							onScrollToReplyTarget={scrollToReplyTarget}
+							onOpenDM={openDM}
+							{formatTimestamp}
+							hasSelfMention={hasSelfMention(msg)}
+							index={msgIndex}
+						/>
 					</MessageContextMenu>
 				{/each}
 			{/if}
@@ -835,174 +537,24 @@ if (!configStore.uploadsEnabled) return;
 			{/if}
 		</div>
 
-		<!-- Reply compose bar -->
-		{#if replyingTo}
-			<div class="flex items-center gap-2 border-t border-border bg-secondary/50 px-4 py-2">
-				<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-				<span class="text-xs text-muted-foreground">Replying to</span>
-				<span class="text-xs font-medium text-foreground">@{replyingTo.display_name || replyingTo.username}</span>
-				<span class="flex-1 truncate text-xs text-muted-foreground">{replyingTo.content.slice(0, 100)}</span>
-				<button
-					onclick={cancelReply}
-					class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-					title="Cancel reply"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-				</button>
-			</div>
-		{/if}
+		<ComposeBar
+			{isDM}
+			{channelId}
+			{dmId}
+			{replyingTo}
+			onCancelReply={cancelReply}
+			onStartEdit={startEdit}
+			{placeholderText}
+			{mentionFilterIds}
+			{messages}
+		/>
 
-		<!-- Input -->
-		<div class="relative border-t border-border p-2 md:p-4">
-			<MentionAutocomplete
-				inputValue={messageInput}
-				{cursorPosition}
-				onSelect={handleEmoteSelect}
-				onKeydown={(handler) => mentionAutocompleteHandler = handler}
-				filterUserIds={mentionFilterIds}
-				{isDM}
-			/>
-			<EmoteAutocomplete
-				inputValue={messageInput}
-				{cursorPosition}
-				onSelect={handleEmoteSelect}
-				onKeydown={(handler) => emoteAutocompleteHandler = handler}
-			/>
-			{#if attachments.length > 0}
-				<div class="mb-2 flex flex-wrap gap-2">
-					{#each attachments as attachment, i}
-						<div class="relative group">
-							{#if attachment.type === 'image'}
-								<img
-									src={attachment.url}
-									alt="attachment"
-									class="h-20 w-20 rounded-lg object-cover border border-border"
-								/>
-							{:else}
-								<div class="h-20 w-20 rounded-lg border border-border bg-secondary flex items-center justify-center">
-									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
-								</div>
-							{/if}
-							<button
-								onclick={() => removeAttachment(i)}
-								class="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow"
-								title="Remove"
-							>
-								<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-							</button>
-						</div>
-					{/each}
-				</div>
-			{/if}
-			<input
-				bind:this={fileInputEl}
-				type="file"
-				accept="image/*,video/mp4,video/webm"
-				class="hidden"
-				onchange={handleFileSelect}
-			/>
-			<div class="flex items-end gap-1.5 md:gap-2 min-w-0">
-				<div class="relative shrink-0">
-					<button
-						onclick={() => plusMenuOpen = !plusMenuOpen}
-						disabled={uploading}
-						class="h-[38px] w-[38px] flex items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50"
-						title="More actions"
-					>
-						{#if uploading}
-							<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-						{:else}
-							<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-						{/if}
-					</button>
-					{#if plusMenuOpen}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class="fixed inset-0 z-40"
-							onclick={() => plusMenuOpen = false}
-							onkeydown={(e) => { if (e.key === 'Escape') plusMenuOpen = false; }}
-						></div>
-						<div class="absolute bottom-full left-0 mb-2 z-50 min-w-[160px] rounded-lg border border-border bg-popover p-1 shadow-lg">
-							{#if configStore.uploadsEnabled}
-								<button
-									onclick={() => { plusMenuOpen = false; fileInputEl?.click(); }}
-									class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-									Upload file
-								</button>
-							{/if}
-						</div>
-					{/if}
-				</div>
-				<textarea
-					bind:this={textareaEl}
-					bind:value={messageInput}
-					onkeydown={handleKeydown}
-					oninput={handleInput}
-					onpaste={handlePaste}
-					onclick={updateCursorPosition}
-					onkeyup={updateCursorPosition}
-					placeholder={placeholderText}
-					rows="1"
-					class="flex-1 min-w-0 min-h-[38px] max-h-[120px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
-				></textarea>
-				<EmotePicker
-					onSelect={handlePickerSelect}
-					open={emojiPickerOpen}
-					onOpenChange={(v) => emojiPickerOpen = v}
-				/>
-				<button
-					onclick={sendMsg}
-					class="shrink-0 h-[38px] w-[38px] flex items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-					disabled={(!messageInput.trim() && attachments.length === 0) || messageInput.length > configStore.maxMessageChars}
-					title="Send message"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
-				</button>
-			</div>
-			{#if messageInput.length > 0}
-				<div class="flex justify-end px-1 pt-1">
-					<span class="text-xs {messageInput.length > configStore.maxMessageChars ? 'text-destructive font-medium' : 'text-muted-foreground'}">
-						{messageInput.length}/{configStore.maxMessageChars}
-					</span>
-				</div>
-			{/if}
-		</div>
-		<!-- Delete confirmation dialog -->
 		{#if deletingMessage}
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-				onclick={() => deletingMessage = null}
-				onkeydown={(e) => { if (e.key === 'Escape') deletingMessage = null; }}
-			>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="mx-4 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl"
-					onclick={(e) => e.stopPropagation()}
-				>
-					<h3 class="text-lg font-semibold text-foreground">Delete Message</h3>
-					<p class="mt-2 text-sm text-muted-foreground">Are you sure you want to delete this message? This cannot be undone.</p>
-					<div class="mt-2 rounded bg-secondary/50 p-3 text-sm text-foreground/70 max-h-24 overflow-hidden">
-						<MessageContent content={deletingMessage.content} />
-					</div>
-					<div class="mt-4 flex justify-end gap-2">
-						<button
-							onclick={() => deletingMessage = null}
-							class="rounded-lg px-4 py-2 text-sm text-foreground hover:bg-secondary transition-colors"
-						>
-							Cancel
-						</button>
-						<button
-							onclick={confirmDelete}
-							class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
-						>
-							Delete
-						</button>
-					</div>
-				</div>
-			</div>
+			<DeleteMessageModal
+				message={deletingMessage}
+				onConfirm={confirmDelete}
+				onCancel={() => deletingMessage = null}
+			/>
 		{/if}
 	{:else}
 		<div class="flex flex-1 items-center justify-center">
