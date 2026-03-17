@@ -13,6 +13,7 @@ import { usersStore } from '$lib/stores/users.svelte';
 import { voiceStore } from '$lib/stores/voice.svelte';
 import { getUserColor, userColorFromHash, USER_COLORS } from '$lib/utils';
 import AvatarCropModal from './AvatarCropModal.svelte';
+import StreamPreviewTooltip from './StreamPreviewTooltip.svelte';
 import VoiceConnectionBar from './VoiceConnectionBar.svelte';
 
 interface Props {
@@ -235,21 +236,31 @@ const tab = $derived(layoutStore.sidebarTab);
 								{@const user = usersStore.users.find((u) => u.id === uid)}
 								{#if user}
 									{@const color = getUserColor(user)}
-									<div class="flex items-center gap-1.5 py-0.5 px-1">
-										<div
-											class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow"
-											style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
-										>
-											{user.username.charAt(0).toUpperCase()}
+									{@const isRemoteScreenSharer = voiceStore.isUserScreenSharing(uid) && uid !== auth.user?.id && voiceStore.screenShareTrack}
+									{#snippet participantRow()}
+										<div class="flex items-center gap-1.5 py-0.5 px-1">
+											<div
+												class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow"
+												style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
+											>
+												{user.username.charAt(0).toUpperCase()}
+											</div>
+											<span class="text-xs text-muted-foreground truncate">{user.display_name || user.username}</span>
+										{#if voiceStore.isUserMuted(uid)}
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><line x1="1" x2="23" y1="1" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/><line x1="12" x2="12" y1="19" y2="24"/><line x1="8" x2="16" y1="24" y2="24"/></svg>
+										{/if}
+										{#if voiceStore.isUserScreenSharing(uid)}
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-green-500"><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /></svg>
+										{/if}
 										</div>
-										<span class="text-xs text-muted-foreground truncate">{user.display_name || user.username}</span>
-									{#if voiceStore.isUserMuted(uid)}
-										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><line x1="1" x2="23" y1="1" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/><line x1="12" x2="12" y1="19" y2="24"/><line x1="8" x2="16" y1="24" y2="24"/></svg>
+									{/snippet}
+									{#if isRemoteScreenSharer}
+										<StreamPreviewTooltip>
+											{@render participantRow()}
+										</StreamPreviewTooltip>
+									{:else}
+										{@render participantRow()}
 									{/if}
-									{#if voiceStore.isUserScreenSharing(uid)}
-										<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-green-500"><rect width="20" height="14" x="2" y="3" rx="2" /><line x1="8" x2="16" y1="21" y2="21" /><line x1="12" x2="12" y1="17" y2="21" /></svg>
-									{/if}
-									</div>
 								{/if}
 							{/each}
 						</div>
