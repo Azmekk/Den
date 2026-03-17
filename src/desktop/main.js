@@ -31,6 +31,7 @@ let mainWindow = null;
 let tray = null;
 let selectedSourceId = null;
 let wasAuthenticated = false;
+let pendingUpdate = null; // { version: string, downloaded: boolean, downloadPercent: number }
 
 // Set app identity for Windows notifications
 if (process.platform === 'win32') {
@@ -357,20 +358,39 @@ app.whenReady().then(() => {
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('update-available', (info) => {
+    pendingUpdate = { version: info.version, downloaded: false, downloadPercent: 0 };
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-available', info.version);
+      mainWindow.loadFile('update.html');
     }
   });
 
   autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.round(progress.percent);
+    if (pendingUpdate) {
+      pendingUpdate.downloadPercent = percent;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('download-progress', Math.round(progress.percent));
+      mainWindow.webContents.send('download-progress', percent);
     }
   });
 
   autoUpdater.on('update-downloaded', () => {
+    if (pendingUpdate) {
+      pendingUpdate.downloaded = true;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('update-downloaded');
+    }
+  });
+
+  // Re-send cached update state whenever a page finishes loading
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!pendingUpdate) return;
+    mainWindow.webContents.send('update-available', pendingUpdate.version);
+    if (pendingUpdate.downloaded) {
+      mainWindow.webContents.send('update-downloaded');
+    } else if (pendingUpdate.downloadPercent > 0) {
+      mainWindow.webContents.send('download-progress', pendingUpdate.downloadPercent);
     }
   });
 
