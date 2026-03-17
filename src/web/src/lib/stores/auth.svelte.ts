@@ -66,10 +66,18 @@ function createAuth() {
 		const supabase = await ensureSupabase();
 
 		// Get existing session from Supabase (stored in localStorage by the SDK)
-		const { data } = await supabase.auth.getSession();
-		if (data.session) {
-			session = data.session;
-			await fetchDenUser();
+		const { data: sessionData } = await supabase.auth.getSession();
+		if (sessionData.session) {
+			// Verify the user still exists in Supabase (server-side check).
+			// getSession() only reads localStorage — a deleted user's JWT remains valid until expiry.
+			const { error: userError } = await supabase.auth.getUser();
+			if (userError) {
+				await supabase.auth.signOut();
+				clear();
+			} else {
+				session = sessionData.session;
+				await fetchDenUser();
+			}
 		}
 		initialized = true;
 
