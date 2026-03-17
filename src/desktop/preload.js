@@ -48,6 +48,10 @@ contextBridge.exposeInMainWorld('denDesktop', {
     ipcRenderer.on('update-downloaded', () => callback());
   },
 
+  downloadUpdate: () => {
+    ipcRenderer.send('download-update');
+  },
+
   installUpdate: () => {
     ipcRenderer.send('install-update');
   }

@@ -286,6 +286,10 @@ ipcMain.on('select-screen-source', (_event, id) => {
   selectedSourceId = id;
 });
 
+ipcMain.on('download-update', () => {
+  autoUpdater.downloadUpdate();
+});
+
 ipcMain.on('install-update', () => {
   autoUpdater.quitAndInstall();
 });
@@ -336,7 +340,7 @@ app.whenReady().then(() => {
   createTray();
 
   // Auto-updater
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('update-available', (info) => {
@@ -361,7 +365,7 @@ app.whenReady().then(() => {
     console.error('Auto-updater error:', err);
   });
 
-  autoUpdater.checkForUpdatesAndNotify();
+  autoUpdater.checkForUpdates();
 });
 
 app.on('window-all-closed', () => {

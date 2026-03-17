@@ -14,6 +14,7 @@ import { voiceStore } from '$lib/stores/voice.svelte';
 import { getUserColor, userColorFromHash, USER_COLORS } from '$lib/utils';
 import AvatarCropModal from './AvatarCropModal.svelte';
 import StreamPreviewTooltip from './StreamPreviewTooltip.svelte';
+import UpdateBanner from './UpdateBanner.svelte';
 import VoiceConnectionBar from './VoiceConnectionBar.svelte';
 
 interface Props {
@@ -302,6 +303,7 @@ const tab = $derived(layoutStore.sidebarTab);
 		{/if}
 	</nav>
 
+	<UpdateBanner />
 	<VoiceConnectionBar />
 
 	<div class="border-t border-border p-3">

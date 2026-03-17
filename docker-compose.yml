@@ -20,7 +20,7 @@ services:
     image: livekit/livekit-server:latest
     ports:
       - "7880:7880"
-      - "50000-50200:50000-50200/udp"
+      - "50500-50700:50500-50700/udp"
     volumes:
       - ./livekit.yaml:/livekit.yaml
     command: --config /livekit.yaml
