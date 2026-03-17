@@ -18,6 +18,11 @@ export interface MessageInfo {
 	pinned?: boolean;
 	created_at: string;
 	edited_at?: string;
+	is_reply?: boolean;
+	reply_to_id?: string;
+	reply_to_content?: string;
+	reply_to_user_id?: string;
+	reply_to_username?: string;
 }
 
 export interface DMPairInfo {

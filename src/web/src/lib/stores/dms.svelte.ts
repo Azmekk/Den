@@ -135,6 +135,11 @@ function createDMs() {
 			pinned: data.pinned ?? false,
 			created_at: data.created_at,
 			edited_at: data.edited_at,
+			is_reply: data.is_reply,
+			reply_to_id: data.reply_to_id,
+			reply_to_content: data.reply_to_content,
+			reply_to_user_id: data.reply_to_user_id,
+			reply_to_username: data.reply_to_username,
 		};
 		const dmId = data.dm_pair_id as string;
 		const newMap = new Map(messagesByDM);
@@ -185,12 +190,16 @@ function createDMs() {
 		messagesByDM = newMap;
 	}
 
-	function sendMessage(dmId: string, content: string) {
-		websocket.send({
+	function sendMessage(dmId: string, content: string, replyToId?: string) {
+		const payload: any = {
 			type: 'send_dm',
 			dm_pair_id: dmId,
 			content,
-		});
+		};
+		if (replyToId) {
+			payload.reply_to_id = replyToId;
+		}
+		websocket.send(payload);
 	}
 
 	return {

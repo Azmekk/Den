@@ -231,9 +231,10 @@ $effect(() => {
 });
 
 $effect(() => {
-	// When channel/DM changes, scroll to bottom
+	// When channel/DM changes, scroll to bottom and clear reply
 	if (channelId || dmId) {
 		isNearBottom = true;
+		replyingTo = null;
 		scrollToBottom();
 	}
 });
@@ -267,6 +268,11 @@ function hasSelfMention(msg: MessageInfo): boolean {
 function handleKeydown(e: KeyboardEvent) {
 	if (mentionAutocompleteHandler(e)) return;
 	if (emoteAutocompleteHandler(e)) return;
+	if (e.key === 'Escape' && replyingTo) {
+		e.preventDefault();
+		cancelReply();
+		return;
+	}
 	if (e.key === 'Enter' && !e.shiftKey) {
 		e.preventDefault();
 		sendMsg();
@@ -314,17 +320,19 @@ function sendMsg() {
 
 	const parts = [text, ...urls].filter(Boolean);
 	const content = parts.join('\n');
+	const replyId = replyingTo?.id;
 
 	if (isDM && dmId) {
-		dmStore.sendMessage(dmId, content);
+		dmStore.sendMessage(dmId, content, replyId);
 	} else if (channelId) {
 		typing.stopTyping(channelId);
-		messageStore.sendMessage(channelId, content);
+		messageStore.sendMessage(channelId, content, replyId);
 	} else {
 		return;
 	}
 	messageInput = '';
 	attachments = [];
+	replyingTo = null;
 }
 
 function removeAttachment(index: number) {
@@ -389,6 +397,37 @@ let editingMessageId = $state<string | null>(null);
 let editContent = $state('');
 let editTextareaEl: HTMLTextAreaElement | undefined = $state();
 let deletingMessage = $state<MessageInfo | null>(null);
+
+// Reply state
+let replyingTo = $state<MessageInfo | null>(null);
+
+function startReply(msg: MessageInfo) {
+	replyingTo = msg;
+	textareaEl?.focus();
+}
+
+function cancelReply() {
+	replyingTo = null;
+}
+
+async function scrollToReplyTarget(msg: MessageInfo) {
+	if (!msg.reply_to_id) return;
+	const targetId = msg.reply_to_id;
+
+	// Try finding in DOM first
+	const el = messageListEl?.querySelector(`[data-message-id="${targetId}"]`);
+	if (el) {
+		el.scrollIntoView({ block: 'center' });
+		el.classList.add('highlight-flash');
+		el.addEventListener('animationend', () => el.classList.remove('highlight-flash'), { once: true });
+		return;
+	}
+
+	// Not loaded — fetch around the target message
+	if (!isDM && channelId) {
+		await messageStore.fetchAround(channelId, targetId);
+	}
+}
 
 function startEdit(msg: MessageInfo) {
 	editingMessageId = msg.id;
@@ -656,6 +695,7 @@ if (!configStore.uploadsEnabled) return;
 					onTogglePin={() => togglePin(msg)}
 					onEdit={() => startEdit(msg)}
 					onDelete={() => deletingMessage = msg}
+					onReply={() => startReply(msg)}
 				>
 						{#if grouped}
 							<div data-message-id={msg.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention(msg) ? 'bg-amber-500/10' : ''}">
@@ -663,6 +703,22 @@ if (!configStore.uploadsEnabled) return;
 									<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTimestamp(msg.created_at)}</span>
 								</div>
 								<div class="flex-1 min-w-0">
+									{#if msg.is_reply}
+										<!-- svelte-ignore a11y_click_events_have_key_events -->
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div
+											class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5 cursor-pointer hover:text-foreground transition-colors"
+											onclick={() => scrollToReplyTarget(msg)}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+											{#if msg.reply_to_id && msg.reply_to_username}
+												<span class="font-medium" style="color: {userColorFromHash(msg.reply_to_username)}">@{msg.reply_to_username}</span>
+												<span class="truncate max-w-[300px] opacity-70">{msg.reply_to_content}</span>
+											{:else}
+												<span class="italic opacity-70">Original message was deleted</span>
+											{/if}
+										</div>
+									{/if}
 									{#if editingMessageId === msg.id}
 										<div class="py-1">
 											<textarea
@@ -703,6 +759,22 @@ if (!configStore.uploadsEnabled) return;
 									{/if}
 								</UserProfilePopover>
 								<div class="flex-1 min-w-0">
+									{#if msg.is_reply}
+										<!-- svelte-ignore a11y_click_events_have_key_events -->
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div
+											class="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5 cursor-pointer hover:text-foreground transition-colors"
+											onclick={() => scrollToReplyTarget(msg)}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+											{#if msg.reply_to_id && msg.reply_to_username}
+												<span class="font-medium" style="color: {userColorFromHash(msg.reply_to_username)}">@{msg.reply_to_username}</span>
+												<span class="truncate max-w-[300px] opacity-70">{msg.reply_to_content}</span>
+											{:else}
+												<span class="italic opacity-70">Original message was deleted</span>
+											{/if}
+										</div>
+									{/if}
 									<div class="flex items-baseline gap-2">
 										<UserProfilePopover username={msg.username} displayName={getDisplayNameForMessage(msg)} color={getColorForMessage(msg)} onMessage={() => openDM(msg.user_id)} isSelf={msg.user_id === auth.user?.id}>
 											<span class="font-medium text-sm cursor-pointer hover:underline" style="color: {getColorForMessage(msg)}">
@@ -762,6 +834,23 @@ if (!configStore.uploadsEnabled) return;
 				<p class="text-xs text-muted-foreground italic">{typingText(typingUsers)}</p>
 			{/if}
 		</div>
+
+		<!-- Reply compose bar -->
+		{#if replyingTo}
+			<div class="flex items-center gap-2 border-t border-border bg-secondary/50 px-4 py-2">
+				<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+				<span class="text-xs text-muted-foreground">Replying to</span>
+				<span class="text-xs font-medium text-foreground">@{replyingTo.display_name || replyingTo.username}</span>
+				<span class="flex-1 truncate text-xs text-muted-foreground">{replyingTo.content.slice(0, 100)}</span>
+				<button
+					onclick={cancelReply}
+					class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+					title="Cancel reply"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+				</button>
+			</div>
+		{/if}
 
 		<!-- Input -->
 		<div class="relative border-t border-border p-2 md:p-4">

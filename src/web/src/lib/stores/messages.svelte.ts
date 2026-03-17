@@ -200,6 +200,11 @@ function createMessages() {
 			pinned: data.pinned ?? false,
 			created_at: data.created_at,
 			edited_at: data.edited_at,
+			is_reply: data.is_reply,
+			reply_to_id: data.reply_to_id,
+			reply_to_content: data.reply_to_content,
+			reply_to_user_id: data.reply_to_user_id,
+			reply_to_username: data.reply_to_username,
 		};
 		const newMap = new Map(messagesByChannel);
 		const existing = newMap.get(channelId) ?? [];
@@ -253,12 +258,16 @@ function createMessages() {
 		messagesByChannel = newMap;
 	}
 
-	function sendMessage(channelId: string, content: string) {
-		websocket.send({
+	function sendMessage(channelId: string, content: string, replyToId?: string) {
+		const payload: any = {
 			type: 'send_message',
 			channel_id: channelId,
 			content,
-		});
+		};
+		if (replyToId) {
+			payload.reply_to_id = replyToId;
+		}
+		websocket.send(payload);
 	}
 
 	return {

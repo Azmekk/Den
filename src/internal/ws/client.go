@@ -59,6 +59,7 @@ type incomingMessage struct {
 	DMPairID  uuid.UUID `json:"dm_pair_id"`
 	MessageID uuid.UUID `json:"message_id"`
 	Content   string    `json:"content"`
+	ReplyToID string    `json:"reply_to_id"`
 }
 
 func (c *Client) ReadPump() {
@@ -133,7 +134,14 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			c.sendError("not subscribed to channel")
 			return
 		}
-		data, _, err := c.msgHandler.SendMessage(ctx, msg.ChannelID, c.UserID, c.Username, msg.Content)
+		var replyToID *uuid.UUID
+		if msg.ReplyToID != "" {
+			parsed, parseErr := uuid.Parse(msg.ReplyToID)
+			if parseErr == nil {
+				replyToID = &parsed
+			}
+		}
+		data, _, err := c.msgHandler.SendMessage(ctx, msg.ChannelID, c.UserID, c.Username, msg.Content, replyToID)
 		if err != nil {
 			c.sendError(err.Error())
 			return
@@ -155,7 +163,14 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			c.sendError(err.Error())
 			return
 		}
-		data, _, err := c.dmHandler.SendDMMessage(ctx, msg.DMPairID, c.UserID, c.Username, msg.Content)
+		var replyToID *uuid.UUID
+		if msg.ReplyToID != "" {
+			parsed, parseErr := uuid.Parse(msg.ReplyToID)
+			if parseErr == nil {
+				replyToID = &parsed
+			}
+		}
+		data, _, err := c.dmHandler.SendDMMessage(ctx, msg.DMPairID, c.UserID, c.Username, msg.Content, replyToID)
 		if err != nil {
 			c.sendError(err.Error())
 			return

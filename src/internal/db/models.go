@@ -81,6 +81,8 @@ type Message struct {
 	Pinned    bool
 	EditedAt  sql.NullTime
 	CreatedAt time.Time
+	ReplyToID uuid.NullUUID
+	IsReply   bool
 }
 
 type MessageMention struct {

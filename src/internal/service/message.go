@@ -32,17 +32,42 @@ func NewMessageService(queries *db.Queries, emoteSvc *EmoteService, getMaxChars 
 }
 
 type MessageInfo struct {
-	ID          uuid.UUID  `json:"id"`
-	ChannelID   *uuid.UUID `json:"channel_id,omitempty"`
-	DMPairID    *uuid.UUID `json:"dm_pair_id,omitempty"`
-	UserID      uuid.UUID  `json:"user_id"`
-	Username    string     `json:"username"`
-	DisplayName string     `json:"display_name,omitempty"`
-	AvatarURL   string     `json:"avatar_url,omitempty"`
-	Content     string     `json:"content"`
-	Pinned      bool       `json:"pinned"`
-	EditedAt    string     `json:"edited_at,omitempty"`
-	CreatedAt   string     `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	ChannelID       *uuid.UUID `json:"channel_id,omitempty"`
+	DMPairID        *uuid.UUID `json:"dm_pair_id,omitempty"`
+	UserID          uuid.UUID  `json:"user_id"`
+	Username        string     `json:"username"`
+	DisplayName     string     `json:"display_name,omitempty"`
+	AvatarURL       string     `json:"avatar_url,omitempty"`
+	Content         string     `json:"content"`
+	Pinned          bool       `json:"pinned"`
+	EditedAt        string     `json:"edited_at,omitempty"`
+	CreatedAt       string     `json:"created_at"`
+	IsReply         bool       `json:"is_reply,omitempty"`
+	ReplyToID       *uuid.UUID `json:"reply_to_id,omitempty"`
+	ReplyToContent  string     `json:"reply_to_content,omitempty"`
+	ReplyToUserID   *uuid.UUID `json:"reply_to_user_id,omitempty"`
+	ReplyToUsername  string     `json:"reply_to_username,omitempty"`
+}
+
+func populateReplyFields(info *MessageInfo, replyToID uuid.NullUUID, isReply bool, replyToContent sql.NullString, replyToUserID uuid.NullUUID, replyToUsername sql.NullString) {
+	info.IsReply = isReply
+	if replyToID.Valid {
+		info.ReplyToID = &replyToID.UUID
+	}
+	if replyToContent.Valid {
+		content := replyToContent.String
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		info.ReplyToContent = content
+	}
+	if replyToUserID.Valid {
+		info.ReplyToUserID = &replyToUserID.UUID
+	}
+	if replyToUsername.Valid {
+		info.ReplyToUsername = replyToUsername.String
+	}
 }
 
 func messageInfoFromRow(row db.GetLatestMessagesByChannelRow) MessageInfo {
@@ -66,6 +91,7 @@ func messageInfoFromRow(row db.GetLatestMessagesByChannelRow) MessageInfo {
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 
@@ -90,6 +116,7 @@ func messageInfoFromCursorRow(row db.GetMessagesByChannelRow) MessageInfo {
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 
@@ -114,10 +141,11 @@ func messageInfoFromPinnedChannelRow(row db.GetPinnedMessagesByChannelRow) Messa
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 
-func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error) {
+func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid.UUID, username, content string, replyToID *uuid.UUID) ([]byte, []uuid.UUID, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > s.getMaxChars() {
 		return nil, nil, ErrInvalidInput
@@ -131,13 +159,41 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 
 	content, mentionedIDs, mentionedEveryone := s.resolveMentions(ctx, content)
 
-	msg, err := s.queries.CreateMessage(ctx, db.CreateMessageParams{
+	createParams := db.CreateMessageParams{
 		ChannelID: uuid.NullUUID{UUID: channelID, Valid: true},
 		UserID:    userID,
 		Content:   content,
-	})
+	}
+	if replyToID != nil {
+		createParams.ReplyToID = uuid.NullUUID{UUID: *replyToID, Valid: true}
+		createParams.IsReply = true
+	}
+
+	msg, err := s.queries.CreateMessage(ctx, createParams)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Look up replied-to message for auto-ping and envelope info
+	var repliedMsg *db.GetMessageByIDRow
+	if replyToID != nil {
+		row, lookupErr := s.queries.GetMessageByID(ctx, *replyToID)
+		if lookupErr == nil {
+			repliedMsg = &row
+			// Auto-ping the replied-to user (if not the sender)
+			if row.UserID != userID {
+				alreadyMentioned := false
+				for _, uid := range mentionedIDs {
+					if uid == row.UserID {
+						alreadyMentioned = true
+						break
+					}
+				}
+				if !alreadyMentioned {
+					mentionedIDs = append(mentionedIDs, row.UserID)
+				}
+			}
+		}
 	}
 
 	// Insert mention rows
@@ -149,8 +205,8 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 	}
 
 	mentionedStrings := make([]string, len(mentionedIDs))
-	for i, uid := range mentionedIDs {
-		mentionedStrings[i] = uid.String()
+	for index, uid := range mentionedIDs {
+		mentionedStrings[index] = uid.String()
 	}
 
 	envelope := map[string]any{
@@ -167,6 +223,24 @@ func (s *MessageService) SendMessage(ctx context.Context, channelID, userID uuid
 	if mentionedEveryone {
 		envelope["mentioned_everyone"] = true
 	}
+
+	// Include reply info in the envelope
+	if replyToID != nil && repliedMsg != nil {
+		replyContent := repliedMsg.Content
+		if len(replyContent) > 200 {
+			replyContent = replyContent[:200] + "..."
+		}
+		envelope["is_reply"] = true
+		envelope["reply_to_id"] = replyToID.String()
+		envelope["reply_to_content"] = replyContent
+		envelope["reply_to_user_id"] = repliedMsg.UserID.String()
+		// Look up the replied-to message author's username
+		repliedUser, userErr := s.queries.GetUserByID(ctx, repliedMsg.UserID)
+		if userErr == nil {
+			envelope["reply_to_username"] = repliedUser.Username
+		}
+	}
+
 	data, err := json.Marshal(envelope)
 	if err != nil {
 		return nil, nil, err
@@ -406,17 +480,22 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, channelID uuid.U
 }
 
 type SearchResult struct {
-	ID          uuid.UUID `json:"id"`
-	ChannelID   uuid.UUID `json:"channel_id"`
-	ChannelName string    `json:"channel_name"`
-	UserID      uuid.UUID `json:"user_id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name,omitempty"`
-	AvatarURL   string    `json:"avatar_url,omitempty"`
-	Content     string    `json:"content"`
-	Pinned      bool      `json:"pinned"`
-	EditedAt    string    `json:"edited_at,omitempty"`
-	CreatedAt   string    `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	ChannelID       uuid.UUID  `json:"channel_id"`
+	ChannelName     string     `json:"channel_name"`
+	UserID          uuid.UUID  `json:"user_id"`
+	Username        string     `json:"username"`
+	DisplayName     string     `json:"display_name,omitempty"`
+	AvatarURL       string     `json:"avatar_url,omitempty"`
+	Content         string     `json:"content"`
+	Pinned          bool       `json:"pinned"`
+	EditedAt        string     `json:"edited_at,omitempty"`
+	CreatedAt       string     `json:"created_at"`
+	IsReply         bool       `json:"is_reply,omitempty"`
+	ReplyToID       *uuid.UUID `json:"reply_to_id,omitempty"`
+	ReplyToContent  string     `json:"reply_to_content,omitempty"`
+	ReplyToUserID   *uuid.UUID `json:"reply_to_user_id,omitempty"`
+	ReplyToUsername  string     `json:"reply_to_username,omitempty"`
 }
 
 func (s *MessageService) SearchMessages(ctx context.Context, query *string, channelID, authorID *uuid.UUID, afterTime, beforeTime *time.Time) ([]SearchResult, error) {
@@ -443,8 +522,8 @@ func (s *MessageService) SearchMessages(ctx context.Context, query *string, chan
 	}
 
 	results := make([]SearchResult, len(rows))
-	for i, row := range rows {
-		r := SearchResult{
+	for index, row := range rows {
+		result := SearchResult{
 			ID:          row.ID,
 			ChannelID:   row.ChannelID.UUID,
 			ChannelName: row.ChannelName,
@@ -453,17 +532,34 @@ func (s *MessageService) SearchMessages(ctx context.Context, query *string, chan
 			Content:     row.Content,
 			Pinned:      row.Pinned,
 			CreatedAt:   row.CreatedAt.Format(time.RFC3339Nano),
+			IsReply:     row.IsReply,
 		}
 		if row.DisplayName.Valid {
-			r.DisplayName = row.DisplayName.String
+			result.DisplayName = row.DisplayName.String
 		}
 		if row.AvatarUrl.Valid {
-			r.AvatarURL = row.AvatarUrl.String
+			result.AvatarURL = row.AvatarUrl.String
 		}
 		if row.EditedAt.Valid {
-			r.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+			result.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 		}
-		results[i] = r
+		if row.ReplyToID.Valid {
+			result.ReplyToID = &row.ReplyToID.UUID
+		}
+		if row.ReplyToContent.Valid {
+			content := row.ReplyToContent.String
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			result.ReplyToContent = content
+		}
+		if row.ReplyToUserID.Valid {
+			result.ReplyToUserID = &row.ReplyToUserID.UUID
+		}
+		if row.ReplyToUsername.Valid {
+			result.ReplyToUsername = row.ReplyToUsername.String
+		}
+		results[index] = result
 	}
 	return results, nil
 }
@@ -489,6 +585,7 @@ func messageInfoFromAroundRow(row db.GetMessagesAroundTargetRow) MessageInfo {
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 
@@ -513,6 +610,7 @@ func messageInfoFromAfterCursorRow(row db.GetMessagesAfterCursorRow) MessageInfo
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 

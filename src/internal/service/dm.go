@@ -39,16 +39,21 @@ type DMPairInfo struct {
 }
 
 type DMMessageInfo struct {
-	ID          uuid.UUID `json:"id"`
-	DMPairID    uuid.UUID `json:"dm_pair_id"`
-	UserID      uuid.UUID `json:"user_id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name,omitempty"`
-	AvatarURL   string    `json:"avatar_url,omitempty"`
-	Content     string    `json:"content"`
-	Pinned      bool      `json:"pinned"`
-	EditedAt    string    `json:"edited_at,omitempty"`
-	CreatedAt   string    `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	DMPairID        uuid.UUID  `json:"dm_pair_id"`
+	UserID          uuid.UUID  `json:"user_id"`
+	Username        string     `json:"username"`
+	DisplayName     string     `json:"display_name,omitempty"`
+	AvatarURL       string     `json:"avatar_url,omitempty"`
+	Content         string     `json:"content"`
+	Pinned          bool       `json:"pinned"`
+	EditedAt        string     `json:"edited_at,omitempty"`
+	CreatedAt       string     `json:"created_at"`
+	IsReply         bool       `json:"is_reply,omitempty"`
+	ReplyToID       *uuid.UUID `json:"reply_to_id,omitempty"`
+	ReplyToContent  string     `json:"reply_to_content,omitempty"`
+	ReplyToUserID   *uuid.UUID `json:"reply_to_user_id,omitempty"`
+	ReplyToUsername  string     `json:"reply_to_username,omitempty"`
 }
 
 func (s *DMService) CreateOrGetDMPair(ctx context.Context, currentUserID, otherUserID uuid.UUID) (*DMPairInfo, error) {
@@ -146,7 +151,7 @@ func (s *DMService) GetDMHistory(ctx context.Context, dmPairID uuid.UUID, before
 	return messages, len(rows) == 50, nil
 }
 
-func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUID, username, content string) ([]byte, []uuid.UUID, error) {
+func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUID, username, content string, replyToID *uuid.UUID) ([]byte, []uuid.UUID, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len(content) > s.getMaxChars() {
 		return nil, nil, ErrInvalidInput
@@ -172,13 +177,40 @@ func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUI
 		mentionedIDs = filtered
 	}
 
-	msg, err := s.queries.CreateDMMessage(ctx, db.CreateDMMessageParams{
+	createParams := db.CreateDMMessageParams{
 		DmPairID: uuid.NullUUID{UUID: dmPairID, Valid: true},
 		UserID:   userID,
 		Content:  content,
-	})
+	}
+	if replyToID != nil {
+		createParams.ReplyToID = uuid.NullUUID{UUID: *replyToID, Valid: true}
+		createParams.IsReply = true
+	}
+
+	msg, err := s.queries.CreateDMMessage(ctx, createParams)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// Auto-ping the replied-to user (if they are a DM participant and not the sender)
+	var repliedMsg *db.GetMessageByIDRow
+	if replyToID != nil {
+		row, lookupErr := s.queries.GetMessageByID(ctx, *replyToID)
+		if lookupErr == nil {
+			repliedMsg = &row
+			if row.UserID != userID && err == nil && (row.UserID == pair.UserA || row.UserID == pair.UserB) {
+				alreadyMentioned := false
+				for _, uid := range mentionedIDs {
+					if uid == row.UserID {
+						alreadyMentioned = true
+						break
+					}
+				}
+				if !alreadyMentioned {
+					mentionedIDs = append(mentionedIDs, row.UserID)
+				}
+			}
+		}
 	}
 
 	for _, uid := range mentionedIDs {
@@ -189,8 +221,8 @@ func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUI
 	}
 
 	mentionedStrings := make([]string, len(mentionedIDs))
-	for i, uid := range mentionedIDs {
-		mentionedStrings[i] = uid.String()
+	for index, uid := range mentionedIDs {
+		mentionedStrings[index] = uid.String()
 	}
 
 	envelope := map[string]any{
@@ -204,6 +236,23 @@ func (s *DMService) SendDMMessage(ctx context.Context, dmPairID, userID uuid.UUI
 		"created_at":         msg.CreatedAt.Format(time.RFC3339Nano),
 		"mentioned_user_ids": mentionedStrings,
 	}
+
+	// Include reply info in the envelope
+	if replyToID != nil && repliedMsg != nil {
+		replyContent := repliedMsg.Content
+		if len(replyContent) > 200 {
+			replyContent = replyContent[:200] + "..."
+		}
+		envelope["is_reply"] = true
+		envelope["reply_to_id"] = replyToID.String()
+		envelope["reply_to_content"] = replyContent
+		envelope["reply_to_user_id"] = repliedMsg.UserID.String()
+		repliedUser, userErr := s.queries.GetUserByID(ctx, repliedMsg.UserID)
+		if userErr == nil {
+			envelope["reply_to_username"] = repliedUser.Username
+		}
+	}
+
 	data, err := json.Marshal(envelope)
 	if err != nil {
 		return nil, nil, err
@@ -235,8 +284,8 @@ func (s *DMService) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.UUID)
 		return nil, err
 	}
 	messages := make([]DMMessageInfo, len(rows))
-	for i, row := range rows {
-		messages[i] = DMMessageInfo{
+	for index, row := range rows {
+		messages[index] = DMMessageInfo{
 			ID:        row.ID,
 			DMPairID:  row.DmPairID.UUID,
 			UserID:    row.UserID,
@@ -246,14 +295,15 @@ func (s *DMService) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.UUID)
 			CreatedAt: row.CreatedAt.Format(time.RFC3339Nano),
 		}
 		if row.DisplayName.Valid {
-			messages[i].DisplayName = row.DisplayName.String
+			messages[index].DisplayName = row.DisplayName.String
 		}
 		if row.AvatarUrl.Valid {
-			messages[i].AvatarURL = row.AvatarUrl.String
+			messages[index].AvatarURL = row.AvatarUrl.String
 		}
 		if row.EditedAt.Valid {
-			messages[i].EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
+			messages[index].EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 		}
+		populateDMReplyFields(&messages[index], row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	}
 	return messages, nil
 }
@@ -302,6 +352,26 @@ func (s *DMService) resolveMentions(ctx context.Context, content string) (string
 	return content, mentionedIDs, nil
 }
 
+func populateDMReplyFields(info *DMMessageInfo, replyToID uuid.NullUUID, isReply bool, replyToContent sql.NullString, replyToUserID uuid.NullUUID, replyToUsername sql.NullString) {
+	info.IsReply = isReply
+	if replyToID.Valid {
+		info.ReplyToID = &replyToID.UUID
+	}
+	if replyToContent.Valid {
+		content := replyToContent.String
+		if len(content) > 200 {
+			content = content[:200] + "..."
+		}
+		info.ReplyToContent = content
+	}
+	if replyToUserID.Valid {
+		info.ReplyToUserID = &replyToUserID.UUID
+	}
+	if replyToUsername.Valid {
+		info.ReplyToUsername = replyToUsername.String
+	}
+}
+
 func dmMessageInfoFromLatestRow(row db.GetLatestDMMessagesRow) DMMessageInfo {
 	info := DMMessageInfo{
 		ID:        row.ID,
@@ -321,6 +391,7 @@ func dmMessageInfoFromLatestRow(row db.GetLatestDMMessagesRow) DMMessageInfo {
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateDMReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }
 
@@ -343,5 +414,6 @@ func dmMessageInfoFromCursorRow(row db.GetDMMessagesByPairRow) DMMessageInfo {
 	if row.EditedAt.Valid {
 		info.EditedAt = row.EditedAt.Time.Format(time.RFC3339Nano)
 	}
+	populateDMReplyFields(&info, row.ReplyToID, row.IsReply, row.ReplyToContent, row.ReplyToUserID, row.ReplyToUsername)
 	return info
 }

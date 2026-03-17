@@ -36,19 +36,27 @@ func (q *Queries) CountMessages(ctx context.Context) (int64, error) {
 }
 
 const createDMMessage = `-- name: CreateDMMessage :one
-INSERT INTO messages (dm_pair_id, user_id, content)
-VALUES ($1, $2, $3)
-RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+INSERT INTO messages (dm_pair_id, user_id, content, reply_to_id, is_reply)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at, reply_to_id, is_reply
 `
 
 type CreateDMMessageParams struct {
-	DmPairID uuid.NullUUID
-	UserID   uuid.UUID
-	Content  string
+	DmPairID  uuid.NullUUID
+	UserID    uuid.UUID
+	Content   string
+	ReplyToID uuid.NullUUID
+	IsReply   bool
 }
 
 func (q *Queries) CreateDMMessage(ctx context.Context, arg CreateDMMessageParams) (Message, error) {
-	row := q.db.QueryRowContext(ctx, createDMMessage, arg.DmPairID, arg.UserID, arg.Content)
+	row := q.db.QueryRowContext(ctx, createDMMessage,
+		arg.DmPairID,
+		arg.UserID,
+		arg.Content,
+		arg.ReplyToID,
+		arg.IsReply,
+	)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -59,24 +67,34 @@ func (q *Queries) CreateDMMessage(ctx context.Context, arg CreateDMMessageParams
 		&i.Pinned,
 		&i.EditedAt,
 		&i.CreatedAt,
+		&i.ReplyToID,
+		&i.IsReply,
 	)
 	return i, err
 }
 
 const createMessage = `-- name: CreateMessage :one
-INSERT INTO messages (channel_id, user_id, content)
-VALUES ($1, $2, $3)
-RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+INSERT INTO messages (channel_id, user_id, content, reply_to_id, is_reply)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at, reply_to_id, is_reply
 `
 
 type CreateMessageParams struct {
 	ChannelID uuid.NullUUID
 	UserID    uuid.UUID
 	Content   string
+	ReplyToID uuid.NullUUID
+	IsReply   bool
 }
 
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
-	row := q.db.QueryRowContext(ctx, createMessage, arg.ChannelID, arg.UserID, arg.Content)
+	row := q.db.QueryRowContext(ctx, createMessage,
+		arg.ChannelID,
+		arg.UserID,
+		arg.Content,
+		arg.ReplyToID,
+		arg.IsReply,
+	)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -87,6 +105,8 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Pinned,
 		&i.EditedAt,
 		&i.CreatedAt,
+		&i.ReplyToID,
+		&i.IsReply,
 	)
 	return i, err
 }
@@ -222,10 +242,11 @@ func (q *Queries) GetAllDMMessages(ctx context.Context, dmPairID uuid.NullUUID) 
 
 const getDMMessagesByPair = `-- name: GetDMMessagesByPair :many
 SELECT sub.id, sub.dm_pair_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
-       sub.username, sub.display_name, sub.avatar_url
+       sub.username, sub.display_name, sub.avatar_url,
+       sub.reply_to_id, sub.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM (
   SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-         u.username, u.display_name, u.avatar_url
+         u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
   FROM messages m
   JOIN users u ON u.id = m.user_id
   WHERE m.dm_pair_id = $1
@@ -233,6 +254,8 @@ FROM (
   ORDER BY m.created_at DESC, m.id DESC
   LIMIT 50
 ) sub
+LEFT JOIN messages rm ON rm.id = sub.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 ORDER BY sub.created_at ASC, sub.id ASC
 `
 
@@ -243,16 +266,21 @@ type GetDMMessagesByPairParams struct {
 }
 
 type GetDMMessagesByPairRow struct {
-	ID          uuid.UUID
-	DmPairID    uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	DmPairID        uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetDMMessagesByPair(ctx context.Context, arg GetDMMessagesByPairParams) ([]GetDMMessagesByPairRow, error) {
@@ -275,6 +303,11 @@ func (q *Queries) GetDMMessagesByPair(ctx context.Context, arg GetDMMessagesByPa
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -291,30 +324,38 @@ func (q *Queries) GetDMMessagesByPair(ctx context.Context, arg GetDMMessagesByPa
 
 const getLatestDMMessages = `-- name: GetLatestDMMessages :many
 SELECT sub.id, sub.dm_pair_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
-       sub.username, sub.display_name, sub.avatar_url
+       sub.username, sub.display_name, sub.avatar_url,
+       sub.reply_to_id, sub.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM (
   SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-         u.username, u.display_name, u.avatar_url
+         u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
   FROM messages m
   JOIN users u ON u.id = m.user_id
   WHERE m.dm_pair_id = $1
   ORDER BY m.created_at DESC, m.id DESC
   LIMIT 50
 ) sub
+LEFT JOIN messages rm ON rm.id = sub.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 ORDER BY sub.created_at ASC, sub.id ASC
 `
 
 type GetLatestDMMessagesRow struct {
-	ID          uuid.UUID
-	DmPairID    uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	DmPairID        uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetLatestDMMessages(ctx context.Context, dmPairID uuid.NullUUID) ([]GetLatestDMMessagesRow, error) {
@@ -337,6 +378,11 @@ func (q *Queries) GetLatestDMMessages(ctx context.Context, dmPairID uuid.NullUUI
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -353,30 +399,38 @@ func (q *Queries) GetLatestDMMessages(ctx context.Context, dmPairID uuid.NullUUI
 
 const getLatestMessagesByChannel = `-- name: GetLatestMessagesByChannel :many
 SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
-       sub.username, sub.display_name, sub.avatar_url
+       sub.username, sub.display_name, sub.avatar_url,
+       sub.reply_to_id, sub.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM (
   SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-         u.username, u.display_name, u.avatar_url
+         u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
   FROM messages m
   JOIN users u ON u.id = m.user_id
   WHERE m.channel_id = $1
   ORDER BY m.created_at DESC, m.id DESC
   LIMIT 50
 ) sub
+LEFT JOIN messages rm ON rm.id = sub.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 ORDER BY sub.created_at ASC, sub.id ASC
 `
 
 type GetLatestMessagesByChannelRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetLatestMessagesByChannel(ctx context.Context, channelID uuid.NullUUID) ([]GetLatestMessagesByChannelRow, error) {
@@ -399,6 +453,11 @@ func (q *Queries) GetLatestMessagesByChannel(ctx context.Context, channelID uuid
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -414,13 +473,31 @@ func (q *Queries) GetLatestMessagesByChannel(ctx context.Context, channelID uuid
 }
 
 const getMessageByID = `-- name: GetMessageByID :one
-SELECT id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at FROM messages
-WHERE id = $1
+SELECT m.id, m.channel_id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at, m.reply_to_id, m.is_reply, u.username AS reply_to_username, u.id AS reply_to_user_id
+FROM messages m
+LEFT JOIN messages rm ON rm.id = m.reply_to_id
+LEFT JOIN users u ON u.id = rm.user_id
+WHERE m.id = $1
 `
 
-func (q *Queries) GetMessageByID(ctx context.Context, id uuid.UUID) (Message, error) {
+type GetMessageByIDRow struct {
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	DmPairID        uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToUsername sql.NullString
+	ReplyToUserID   uuid.NullUUID
+}
+
+func (q *Queries) GetMessageByID(ctx context.Context, id uuid.UUID) (GetMessageByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getMessageByID, id)
-	var i Message
+	var i GetMessageByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.ChannelID,
@@ -430,15 +507,22 @@ func (q *Queries) GetMessageByID(ctx context.Context, id uuid.UUID) (Message, er
 		&i.Pinned,
 		&i.EditedAt,
 		&i.CreatedAt,
+		&i.ReplyToID,
+		&i.IsReply,
+		&i.ReplyToUsername,
+		&i.ReplyToUserID,
 	)
 	return i, err
 }
 
 const getMessagesAfterCursor = `-- name: GetMessagesAfterCursor :many
 SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
+       u.username, u.display_name, u.avatar_url,
+       m.reply_to_id, m.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM messages m
 JOIN users u ON u.id = m.user_id
+LEFT JOIN messages rm ON rm.id = m.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 WHERE m.channel_id = $1
   AND (m.created_at > $2 OR (m.created_at = $2 AND m.id > $3))
 ORDER BY m.created_at ASC, m.id ASC
@@ -452,16 +536,21 @@ type GetMessagesAfterCursorParams struct {
 }
 
 type GetMessagesAfterCursorRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetMessagesAfterCursor(ctx context.Context, arg GetMessagesAfterCursorParams) ([]GetMessagesAfterCursorRow, error) {
@@ -484,6 +573,11 @@ func (q *Queries) GetMessagesAfterCursor(ctx context.Context, arg GetMessagesAft
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -500,11 +594,12 @@ func (q *Queries) GetMessagesAfterCursor(ctx context.Context, arg GetMessagesAft
 
 const getMessagesAroundTarget = `-- name: GetMessagesAroundTarget :many
 SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
-       sub.username, sub.display_name, sub.avatar_url
+       sub.username, sub.display_name, sub.avatar_url,
+       sub.reply_to_id, sub.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM (
   (
     SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-           u.username, u.display_name, u.avatar_url
+           u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
     FROM messages m
     JOIN users u ON u.id = m.user_id
     WHERE m.channel_id = $1
@@ -516,7 +611,7 @@ FROM (
   UNION ALL
   (
     SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-           u.username, u.display_name, u.avatar_url
+           u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
     FROM messages m
     JOIN users u ON u.id = m.user_id
     WHERE m.id = $2
@@ -524,7 +619,7 @@ FROM (
   UNION ALL
   (
     SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-           u.username, u.display_name, u.avatar_url
+           u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
     FROM messages m
     JOIN users u ON u.id = m.user_id
     WHERE m.channel_id = $1
@@ -534,6 +629,8 @@ FROM (
     LIMIT 25
   )
 ) sub
+LEFT JOIN messages rm ON rm.id = sub.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 ORDER BY sub.created_at ASC, sub.id ASC
 `
 
@@ -543,16 +640,21 @@ type GetMessagesAroundTargetParams struct {
 }
 
 type GetMessagesAroundTargetRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetMessagesAroundTarget(ctx context.Context, arg GetMessagesAroundTargetParams) ([]GetMessagesAroundTargetRow, error) {
@@ -575,6 +677,11 @@ func (q *Queries) GetMessagesAroundTarget(ctx context.Context, arg GetMessagesAr
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -591,10 +698,11 @@ func (q *Queries) GetMessagesAroundTarget(ctx context.Context, arg GetMessagesAr
 
 const getMessagesByChannel = `-- name: GetMessagesByChannel :many
 SELECT sub.id, sub.channel_id, sub.user_id, sub.content, sub.pinned, sub.edited_at, sub.created_at,
-       sub.username, sub.display_name, sub.avatar_url
+       sub.username, sub.display_name, sub.avatar_url,
+       sub.reply_to_id, sub.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM (
   SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-         u.username, u.display_name, u.avatar_url
+         u.username, u.display_name, u.avatar_url, m.reply_to_id, m.is_reply
   FROM messages m
   JOIN users u ON u.id = m.user_id
   WHERE m.channel_id = $1
@@ -602,6 +710,8 @@ FROM (
   ORDER BY m.created_at DESC, m.id DESC
   LIMIT 50
 ) sub
+LEFT JOIN messages rm ON rm.id = sub.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 ORDER BY sub.created_at ASC, sub.id ASC
 `
 
@@ -612,16 +722,21 @@ type GetMessagesByChannelParams struct {
 }
 
 type GetMessagesByChannelRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetMessagesByChannel(ctx context.Context, arg GetMessagesByChannelParams) ([]GetMessagesByChannelRow, error) {
@@ -644,6 +759,11 @@ func (q *Queries) GetMessagesByChannel(ctx context.Context, arg GetMessagesByCha
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -660,24 +780,32 @@ func (q *Queries) GetMessagesByChannel(ctx context.Context, arg GetMessagesByCha
 
 const getPinnedDMMessages = `-- name: GetPinnedDMMessages :many
 SELECT m.id, m.dm_pair_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
+       u.username, u.display_name, u.avatar_url,
+       m.reply_to_id, m.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM messages m
 JOIN users u ON u.id = m.user_id
+LEFT JOIN messages rm ON rm.id = m.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 WHERE m.dm_pair_id = $1 AND m.pinned = true
 ORDER BY m.created_at DESC
 `
 
 type GetPinnedDMMessagesRow struct {
-	ID          uuid.UUID
-	DmPairID    uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	DmPairID        uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.NullUUID) ([]GetPinnedDMMessagesRow, error) {
@@ -700,6 +828,11 @@ func (q *Queries) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.NullUUI
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -716,24 +849,32 @@ func (q *Queries) GetPinnedDMMessages(ctx context.Context, dmPairID uuid.NullUUI
 
 const getPinnedMessagesByChannel = `-- name: GetPinnedMessagesByChannel :many
 SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url
+       u.username, u.display_name, u.avatar_url,
+       m.reply_to_id, m.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM messages m
 JOIN users u ON u.id = m.user_id
+LEFT JOIN messages rm ON rm.id = m.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 WHERE m.channel_id = $1 AND m.pinned = true
 ORDER BY m.created_at DESC
 `
 
 type GetPinnedMessagesByChannelRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) GetPinnedMessagesByChannel(ctx context.Context, channelID uuid.NullUUID) ([]GetPinnedMessagesByChannelRow, error) {
@@ -756,6 +897,11 @@ func (q *Queries) GetPinnedMessagesByChannel(ctx context.Context, channelID uuid
 			&i.Username,
 			&i.DisplayName,
 			&i.AvatarUrl,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -772,10 +918,13 @@ func (q *Queries) GetPinnedMessagesByChannel(ctx context.Context, channelID uuid
 
 const searchMessages = `-- name: SearchMessages :many
 SELECT m.id, m.channel_id, m.user_id, m.content, m.pinned, m.edited_at, m.created_at,
-       u.username, u.display_name, u.avatar_url, c.name AS channel_name
+       u.username, u.display_name, u.avatar_url, c.name AS channel_name,
+       m.reply_to_id, m.is_reply, rm.content AS reply_to_content, ru.id AS reply_to_user_id, ru.username AS reply_to_username
 FROM messages m
 JOIN users u ON u.id = m.user_id
 JOIN channels c ON c.id = m.channel_id
+LEFT JOIN messages rm ON rm.id = m.reply_to_id
+LEFT JOIN users ru ON ru.id = rm.user_id
 WHERE m.channel_id IS NOT NULL
   AND ($1::uuid IS NULL OR m.channel_id = $1)
   AND ($2::uuid IS NULL OR m.user_id = $2)
@@ -795,17 +944,22 @@ type SearchMessagesParams struct {
 }
 
 type SearchMessagesRow struct {
-	ID          uuid.UUID
-	ChannelID   uuid.NullUUID
-	UserID      uuid.UUID
-	Content     string
-	Pinned      bool
-	EditedAt    sql.NullTime
-	CreatedAt   time.Time
-	Username    string
-	DisplayName sql.NullString
-	AvatarUrl   sql.NullString
-	ChannelName string
+	ID              uuid.UUID
+	ChannelID       uuid.NullUUID
+	UserID          uuid.UUID
+	Content         string
+	Pinned          bool
+	EditedAt        sql.NullTime
+	CreatedAt       time.Time
+	Username        string
+	DisplayName     sql.NullString
+	AvatarUrl       sql.NullString
+	ChannelName     string
+	ReplyToID       uuid.NullUUID
+	IsReply         bool
+	ReplyToContent  sql.NullString
+	ReplyToUserID   uuid.NullUUID
+	ReplyToUsername sql.NullString
 }
 
 func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]SearchMessagesRow, error) {
@@ -835,6 +989,11 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.ChannelName,
+			&i.ReplyToID,
+			&i.IsReply,
+			&i.ReplyToContent,
+			&i.ReplyToUserID,
+			&i.ReplyToUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -851,7 +1010,7 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 
 const setMessagePinned = `-- name: SetMessagePinned :one
 UPDATE messages SET pinned = $2 WHERE id = $1
-RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at, reply_to_id, is_reply
 `
 
 type SetMessagePinnedParams struct {
@@ -871,6 +1030,8 @@ func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedPara
 		&i.Pinned,
 		&i.EditedAt,
 		&i.CreatedAt,
+		&i.ReplyToID,
+		&i.IsReply,
 	)
 	return i, err
 }
@@ -879,7 +1040,7 @@ const updateMessageContent = `-- name: UpdateMessageContent :one
 UPDATE messages
 SET content = $1, edited_at = now()
 WHERE id = $2
-RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at
+RETURNING id, channel_id, dm_pair_id, user_id, content, pinned, edited_at, created_at, reply_to_id, is_reply
 `
 
 type UpdateMessageContentParams struct {
@@ -899,6 +1060,8 @@ func (q *Queries) UpdateMessageContent(ctx context.Context, arg UpdateMessageCon
 		&i.Pinned,
 		&i.EditedAt,
 		&i.CreatedAt,
+		&i.ReplyToID,
+		&i.IsReply,
 	)
 	return i, err
 }

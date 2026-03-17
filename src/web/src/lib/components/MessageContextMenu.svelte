@@ -10,10 +10,11 @@ interface Props {
 	onTogglePin: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onReply: () => void;
 	children: Snippet;
 }
 
-let { msg, canPin, canEdit, canDelete, onTogglePin, onEdit, onDelete, children }: Props = $props();
+let { msg, canPin, canEdit, canDelete, onTogglePin, onEdit, onDelete, onReply, children }: Props = $props();
 
 let menuOpen = $state(false);
 let menuX = $state(0);
@@ -30,7 +31,7 @@ function openMenu(x: number, y: number) {
 	const vw = window.innerWidth;
 	const vh = window.visualViewport?.height ?? window.innerHeight;
 	menuX = Math.min(x, vw - 180);
-	menuY = Math.min(y, vh - 120);
+	menuY = Math.min(y, vh - 160);
 	menuOpen = true;
 }
 
@@ -86,6 +87,12 @@ function handleBackdropTouch(e: TouchEvent) {
 		closeMenu();
 	}
 }
+
+function handleHoverButtonClick(e: MouseEvent) {
+	e.stopPropagation();
+	const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+	openMenu(rect.left, rect.bottom + 4);
+}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -95,9 +102,17 @@ function handleBackdropTouch(e: TouchEvent) {
 	ontouchmove={handleTouchMove}
 	ontouchend={handleTouchEnd}
 	ontouchcancel={handleTouchEnd}
-	class="contents"
+	class="relative group/ctx"
 >
 	{@render children()}
+	<!-- Hover "..." button -->
+	<button
+		onclick={handleHoverButtonClick}
+		class="absolute right-1 top-0.5 z-10 flex h-6 w-7 items-center justify-center rounded border border-border bg-card text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground transition-opacity opacity-60 md:opacity-0 md:group-hover/ctx:opacity-100"
+		title="More actions"
+	>
+		<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+	</button>
 </div>
 
 {#if menuOpen}
@@ -113,6 +128,12 @@ function handleBackdropTouch(e: TouchEvent) {
 			class="absolute z-50 min-w-[160px] rounded-lg border border-border bg-card p-1 shadow-lg"
 			style="left: {menuX}px; top: {menuY}px;"
 		>
+			<button
+				class="flex w-full cursor-pointer items-center rounded px-3 py-1.5 text-sm text-foreground hover:bg-secondary"
+				onclick={() => handleItemClick(onReply)}
+			>
+				Reply
+			</button>
 			{#if canEdit}
 				<button
 					class="flex w-full cursor-pointer items-center rounded px-3 py-1.5 text-sm text-foreground hover:bg-secondary"
