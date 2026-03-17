@@ -1,5 +1,15 @@
 # Den — Development Guide
 
+## Code Quality Standards
+
+This project values **code readability**, **maintainability**, **best practices**, and **clean code**. All agents must:
+
+- Write clear, well-structured code that is easy to read and understand
+- Use full, descriptive variable and function names — no single-letter variables (e.g. `index` not `i`, `value` not `v`, `error` not `e`)
+- Prefer proper, maintainable solutions over quick hacks or workarounds
+- Proactively suggest fixes for existing code that is badly written, convoluted, or hard to follow
+- Never write hackfix or band-aid solutions unless the user specifically authorizes or requests one
+
 ## Database Migrations
 
 Uses `migrate` CLI installed locally.
