@@ -1,136 +1,121 @@
+import { supabase } from '$lib/supabase';
+import type { Session } from '@supabase/supabase-js';
+
 interface User {
 	id: string;
 	username: string;
 	display_name?: string;
 	is_admin: boolean;
-}
-
-interface AuthResponse {
-	access_token: string;
-	user: User;
+	needs_username: boolean;
 }
 
 function createAuth() {
-	let accessToken = $state<string | null>(null);
+	let session = $state<Session | null>(null);
 	let user = $state<User | null>(null);
 	let initialized = $state(false);
 
-	function setSession(res: AuthResponse) {
-		accessToken = res.access_token;
-		user = res.user;
-	}
-
 	function clear() {
-		accessToken = null;
+		session = null;
 		user = null;
 	}
 
-	let refreshPromise: Promise<boolean> | null = null;
+	/** Fetch the Den user profile from the backend using the current Supabase token. */
+	async function fetchDenUser(): Promise<void> {
+		const token = session?.access_token;
+		if (!token) return;
 
-	async function refresh(): Promise<boolean> {
-		// Deduplicate concurrent refresh calls so multiple callers
-		// don't fire parallel refresh requests.
-		if (refreshPromise) return refreshPromise;
-		refreshPromise = doRefresh();
-		try {
-			return await refreshPromise;
-		} finally {
-			refreshPromise = null;
-		}
-	}
-
-	async function doRefresh(): Promise<boolean> {
-		try {
-			const res = await fetch('/api/refresh', {
-				method: 'POST',
-				credentials: 'include',
-			});
-			if (!res.ok) return false;
-			const data: AuthResponse = await res.json();
-			setSession(data);
-			return true;
-		} catch {
-			return false;
+		const response = await fetch('/api/me', {
+			headers: { Authorization: `Bearer ${token}` },
+		});
+		if (response.ok) {
+			user = await response.json();
 		}
 	}
 
 	/**
-	 * Returns a fresh access token, proactively refreshing if the current
-	 * token is expired or close to expiring. Callers should use this instead
-	 * of reading `accessToken` directly for API requests.
+	 * Returns a fresh access token, using Supabase's built-in session refresh.
+	 * Callers should use this instead of reading session.access_token directly.
 	 */
 	async function getToken(): Promise<string | null> {
-		if (!accessToken) return null;
+		if (!session) return null;
 
-		try {
-			const payload = JSON.parse(atob(accessToken.split('.')[1]));
-			const expiresAtMs = payload.exp * 1000;
-			const bufferMs = 30_000;
-			if (Date.now() > expiresAtMs - bufferMs) {
-				await refresh();
-			}
-		} catch {
-			// If we can't decode the token, return it as-is and let the
-			// server decide — the caller can handle 401 normally.
+		// Supabase SDK auto-refreshes when we call getSession()
+		const { data } = await supabase.auth.getSession();
+		if (data.session) {
+			session = data.session;
+			return data.session.access_token;
 		}
 
-		return accessToken;
+		// Session expired and couldn't be refreshed
+		clear();
+		return null;
 	}
 
 	async function init() {
 		if (initialized) return;
-		await refresh();
+
+		// Get existing session from Supabase (stored in localStorage by the SDK)
+		const { data } = await supabase.auth.getSession();
+		if (data.session) {
+			session = data.session;
+			await fetchDenUser();
+		}
 		initialized = true;
-	}
 
-	async function login(username: string, password: string): Promise<void> {
-		const res = await fetch('/api/login', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ username, password }),
+		// Listen for auth state changes (login, logout, token refresh)
+		supabase.auth.onAuthStateChange((_event, newSession) => {
+			session = newSession;
+			if (newSession) {
+				fetchDenUser();
+			} else {
+				clear();
+			}
 		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'login failed' }));
-			throw new Error(body.error || 'login failed');
-		}
-		const data: AuthResponse = await res.json();
-		setSession(data);
 	}
 
-	async function register(username: string, password: string, inviteCode?: string): Promise<void> {
-		const body: Record<string, string> = { username, password };
-		if (inviteCode) body.invite_code = inviteCode;
-		const res = await fetch('/api/register', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify(body),
-		});
-		if (!res.ok) {
-			const body = await res
-				.json()
-				.catch(() => ({ error: 'registration failed' }));
-			throw new Error(body.error || 'registration failed');
-		}
-		const data: AuthResponse = await res.json();
-		setSession(data);
+	async function login(email: string, password: string): Promise<void> {
+		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+		if (error) throw new Error(error.message);
+		session = data.session;
+		await fetchDenUser();
 	}
 
-	async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-		const res = await fetch('/api/change-password', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${accessToken}`,
+	async function register(email: string, password: string, username?: string, inviteCode?: string): Promise<void> {
+		const metadata: Record<string, string | undefined> = { username };
+		if (inviteCode) {
+			metadata.invite_code = inviteCode;
+		}
+		const { data, error } = await supabase.auth.signUp({
+			email,
+			password,
+			options: {
+				data: metadata,
 			},
-			credentials: 'include',
-			body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
 		});
-		if (!res.ok) {
-			const body = await res.json().catch(() => ({ error: 'change password failed' }));
-			throw new Error(body.error || 'change password failed');
+		if (error) throw new Error(error.message);
+		if (data.session) {
+			session = data.session;
+			await fetchDenUser();
 		}
+	}
+
+	async function loginWithOAuth(provider: 'google'): Promise<void> {
+		const { error } = await supabase.auth.signInWithOAuth({
+			provider,
+			options: { redirectTo: window.location.origin },
+		});
+		if (error) throw new Error(error.message);
+	}
+
+	async function resetPassword(email: string): Promise<void> {
+		const { error } = await supabase.auth.resetPasswordForEmail(email, {
+			redirectTo: `${window.location.origin}/login`,
+		});
+		if (error) throw new Error(error.message);
+	}
+
+	async function refreshUser(): Promise<void> {
+		await fetchDenUser();
 	}
 
 	async function logout(): Promise<void> {
@@ -140,16 +125,13 @@ function createAuth() {
 		voiceStore.leave(true);
 		websocket.disconnect();
 
-		await fetch('/api/logout', {
-			method: 'POST',
-			credentials: 'include',
-		}).catch(() => {});
+		await supabase.auth.signOut();
 		clear();
 	}
 
 	return {
 		get accessToken() {
-			return accessToken;
+			return session?.access_token ?? null;
 		},
 		get user() {
 			return user;
@@ -158,16 +140,19 @@ function createAuth() {
 			return initialized;
 		},
 		get isLoggedIn() {
-			return !!accessToken;
+			return !!session;
 		},
-		setSession,
+		get session() {
+			return session;
+		},
 		clear,
-		refresh,
 		getToken,
 		init,
 		login,
 		register,
-		changePassword,
+		loginWithOAuth,
+		refreshUser,
+		resetPassword,
 		logout,
 	};
 }

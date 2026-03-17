@@ -60,6 +60,7 @@ type Hub struct {
 	userSend        chan userMsg
 	voiceJoin       chan voiceAction
 	voiceLeave      chan voiceAction
+	kickUser        chan uuid.UUID
 }
 
 type broadcastMsg struct {
@@ -84,6 +85,7 @@ func NewHub() *Hub {
 		userSend:        make(chan userMsg, 256),
 		voiceJoin:       make(chan voiceAction),
 		voiceLeave:      make(chan voiceAction),
+		kickUser:        make(chan uuid.UUID),
 	}
 }
 
@@ -367,6 +369,26 @@ func (h *Hub) Run() {
 			userID := action.client.UserID
 			h.removeUserFromVoice(userID)
 			_ = action // channelID not needed, we remove from whichever channel they're in
+
+		case userID := <-h.kickUser:
+			if conns, ok := h.onlineUsers[userID]; ok {
+				// Collect clients to remove (can't modify map while iterating)
+				clients := make([]*Client, 0, len(conns))
+				for client := range conns {
+					clients = append(clients, client)
+				}
+				for _, client := range clients {
+					h.removeClient(client)
+					client.conn.Close()
+				}
+				// Broadcast offline status
+				update, _ := json.Marshal(map[string]any{
+					"type":    "presence_update",
+					"user_id": userID,
+					"status":  "offline",
+				})
+				h.broadcastAll(update)
+			}
 		}
 	}
 }
@@ -401,4 +423,8 @@ func (h *Hub) VoiceJoin(client *Client, channelID uuid.UUID) {
 
 func (h *Hub) VoiceLeave(client *Client) {
 	h.voiceLeave <- voiceAction{client: client}
+}
+
+func (h *Hub) KickUser(userID uuid.UUID) {
+	h.kickUser <- userID
 }

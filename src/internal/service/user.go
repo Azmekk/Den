@@ -43,6 +43,7 @@ type PublicUserInfo struct {
 	AvatarURL   string    `json:"avatar_url,omitempty"`
 	Color       string    `json:"color,omitempty"`
 	IsAdmin     bool      `json:"is_admin"`
+	Banned      bool      `json:"banned"`
 }
 
 func (s *UserService) List(ctx context.Context) ([]PublicUserInfo, error) {

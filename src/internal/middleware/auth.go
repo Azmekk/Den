@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -19,48 +20,59 @@ const (
 	ctxIsAdmin  contextKey = "is_admin"
 )
 
+// RequireAuth validates a Supabase JWT from the Authorization header,
+// syncs/looks up the Den user, and populates request context with user info.
 func RequireAuth(authSvc *service.AuthService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			header := request.Header.Get("Authorization")
 			if !strings.HasPrefix(header, "Bearer ") {
-				httputil.WriteError(w, http.StatusUnauthorized, "missing or invalid authorization header")
+				httputil.WriteError(writer, http.StatusUnauthorized, "missing or invalid authorization header")
 				return
 			}
 			tokenString := strings.TrimPrefix(header, "Bearer ")
 
-			claims, err := authSvc.ValidateAccessToken(tokenString)
-			if err != nil {
-				httputil.WriteError(w, http.StatusUnauthorized, "invalid or expired token")
+			claims, validationError := authSvc.ValidateSupabaseToken(tokenString)
+			if validationError != nil {
+				if errors.Is(validationError, service.ErrUserBanned) {
+					httputil.WriteError(writer, http.StatusForbidden, "account is banned")
+					return
+				}
+				httputil.WriteError(writer, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 
-			sub, _ := claims["sub"].(string)
-			userID, err := uuid.Parse(sub)
-			if err != nil {
-				httputil.WriteError(w, http.StatusUnauthorized, "invalid token claims")
+			// Look up or create the Den user from Supabase claims
+			user, syncError := authSvc.SyncUser(request.Context(), claims)
+			if syncError != nil {
+				if errors.Is(syncError, service.ErrUserBanned) {
+					httputil.WriteError(writer, http.StatusForbidden, "account is banned")
+					return
+				}
+				if errors.Is(syncError, service.ErrInviteRequired) {
+					httputil.WriteError(writer, http.StatusForbidden, "valid invite code required")
+					return
+				}
+				httputil.WriteError(writer, http.StatusUnauthorized, "failed to resolve user")
 				return
 			}
 
-			username, _ := claims["username"].(string)
-			isAdmin, _ := claims["is_admin"].(bool)
+			ctx := context.WithValue(request.Context(), ctxUserID, user.ID)
+			ctx = context.WithValue(ctx, ctxUsername, user.Username)
+			ctx = context.WithValue(ctx, ctxIsAdmin, user.IsAdmin)
 
-			ctx := context.WithValue(r.Context(), ctxUserID, userID)
-			ctx = context.WithValue(ctx, ctxUsername, username)
-			ctx = context.WithValue(ctx, ctxIsAdmin, isAdmin)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(writer, request.WithContext(ctx))
 		})
 	}
 }
 
 func RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !IsAdminFromContext(r.Context()) {
-			httputil.WriteError(w, http.StatusForbidden, "admin access required")
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if !IsAdminFromContext(request.Context()) {
+			httputil.WriteError(writer, http.StatusForbidden, "admin access required")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(writer, request)
 	})
 }
 

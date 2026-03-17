@@ -25,24 +25,26 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, password_hash, display_name, is_admin)
-VALUES ($1, $2, $3, $4)
-RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+INSERT INTO users (username, password_hash, display_name, is_admin, supabase_id, needs_username)
+VALUES ($1, '', $2, $3, $4, $5)
+RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
 `
 
 type CreateUserParams struct {
-	Username     string
-	PasswordHash string
-	DisplayName  sql.NullString
-	IsAdmin      bool
+	Username      string
+	DisplayName   sql.NullString
+	IsAdmin       bool
+	SupabaseID    sql.NullString
+	NeedsUsername bool
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, createUser,
 		arg.Username,
-		arg.PasswordHash,
 		arg.DisplayName,
 		arg.IsAdmin,
+		arg.SupabaseID,
+		arg.NeedsUsername,
 	)
 	var i User
 	err := row.Scan(
@@ -55,6 +57,9 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
 }
@@ -68,8 +73,19 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getUserBannedBySupabaseID = `-- name: GetUserBannedBySupabaseID :one
+SELECT banned FROM users WHERE supabase_id = $1
+`
+
+func (q *Queries) GetUserBannedBySupabaseID(ctx context.Context, supabaseID sql.NullString) (bool, error) {
+	row := q.db.QueryRowContext(ctx, getUserBannedBySupabaseID, supabaseID)
+	var banned bool
+	err := row.Scan(&banned)
+	return banned, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color FROM users WHERE id = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -85,12 +101,39 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
+	)
+	return i, err
+}
+
+const getUserBySupabaseID = `-- name: GetUserBySupabaseID :one
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE supabase_id = $1
+`
+
+func (q *Queries) GetUserBySupabaseID(ctx context.Context, supabaseID sql.NullString) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserBySupabaseID, supabaseID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color FROM users WHERE username = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -106,6 +149,9 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
 }
@@ -143,7 +189,7 @@ func (q *Queries) GetUsersByUsernames(ctx context.Context, dollar_1 []string) ([
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, avatar_url, color, is_admin FROM users ORDER BY username
+SELECT id, username, display_name, avatar_url, color, is_admin, banned FROM users ORDER BY username
 `
 
 type ListUsersRow struct {
@@ -153,6 +199,7 @@ type ListUsersRow struct {
 	AvatarUrl   sql.NullString
 	Color       sql.NullString
 	IsAdmin     bool
+	Banned      bool
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -171,6 +218,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.AvatarUrl,
 			&i.Color,
 			&i.IsAdmin,
+			&i.Banned,
 		); err != nil {
 			return nil, err
 		}
@@ -199,8 +247,51 @@ func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) erro
 	return err
 }
 
+const setUserBanned = `-- name: SetUserBanned :exec
+UPDATE users SET banned = $2, updated_at = now() WHERE id = $1
+`
+
+type SetUserBannedParams struct {
+	ID     uuid.UUID
+	Banned bool
+}
+
+func (q *Queries) SetUserBanned(ctx context.Context, arg SetUserBannedParams) error {
+	_, err := q.db.ExecContext(ctx, setUserBanned, arg.ID, arg.Banned)
+	return err
+}
+
+const setUserUsername = `-- name: SetUserUsername :one
+UPDATE users SET username = $2, needs_username = false, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+`
+
+type SetUserUsernameParams struct {
+	ID       uuid.UUID
+	Username string
+}
+
+func (q *Queries) SetUserUsername(ctx context.Context, arg SetUserUsernameParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, setUserUsername, arg.ID, arg.Username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
+	)
+	return i, err
+}
+
 const updateUserAvatarUrl = `-- name: UpdateUserAvatarUrl :one
-UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
 `
 
 type UpdateUserAvatarUrlParams struct {
@@ -221,12 +312,15 @@ func (q *Queries) UpdateUserAvatarUrl(ctx context.Context, arg UpdateUserAvatarU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
 }
 
 const updateUserColor = `-- name: UpdateUserColor :one
-UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
 `
 
 type UpdateUserColorParams struct {
@@ -247,12 +341,15 @@ func (q *Queries) UpdateUserColor(ctx context.Context, arg UpdateUserColorParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
 }
 
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color
+UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -273,20 +370,9 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
+		&i.SupabaseID,
+		&i.Banned,
+		&i.NeedsUsername,
 	)
 	return i, err
-}
-
-const updateUserPassword = `-- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
-`
-
-type UpdateUserPasswordParams struct {
-	ID           uuid.UUID
-	PasswordHash string
-}
-
-func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
-	return err
 }

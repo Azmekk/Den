@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -37,17 +36,19 @@ func main() {
 		port = "8080"
 	}
 
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "dev-secret-change-me"
-		log.Println("WARNING: using default JWT_SECRET, set JWT_SECRET env var in production")
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		log.Fatal("SUPABASE_URL is required")
 	}
 
-	openRegistration := strings.ToLower(os.Getenv("OPEN_REGISTRATION")) != "false"
+	supabaseServiceRoleKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
+	if supabaseServiceRoleKey == "" {
+		log.Fatal("SUPABASE_SERVICE_ROLE_KEY is required")
+	}
 
-	conn, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+	conn, openError := sql.Open("postgres", dbURL)
+	if openError != nil {
+		log.Fatalf("failed to connect to database: %v", openError)
 	}
 	defer conn.Close()
 
@@ -69,14 +70,16 @@ func main() {
 		log.Println("bucket storage not configured, uploads disabled")
 	}
 
-	authSvc := service.NewAuthService(queries, jwtSecret, openRegistration)
+	hub := ws.NewHub()
+	go hub.Run()
+
+	authSvc := service.NewAuthService(queries, supabaseURL, supabaseServiceRoleKey)
 	channelSvc := service.NewChannelService(queries)
 	emoteSvc := service.NewEmoteService(queries, bucketSvc)
-	adminSvc := service.NewAdminService(queries, authSvc)
+	adminSvc := service.NewAdminService(queries, authSvc, hub)
 	if err := adminSvc.LoadSettings(context.Background()); err != nil {
 		log.Fatalf("failed to load admin settings: %v", err)
 	}
-	authSvc.SetInviteValidator(adminSvc.ValidateAndUseInviteCode)
 	messageSvc := service.NewMessageService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
 	dmSvc := service.NewDMService(queries, emoteSvc, adminSvc.GetMaxMessageChars)
 	userSvc := service.NewUserService(queries)
@@ -111,49 +114,46 @@ func main() {
 
 	unfurlSvc := service.NewUnfurlService(os.Getenv("UNFURL_USER_AGENT"))
 
-	hub := ws.NewHub()
-	go hub.Run()
-
-	staticFS, err := fs.Sub(StaticFiles, "web/build")
-	if err != nil {
-		log.Fatalf("failed to create sub filesystem: %v", err)
+	staticFS, fsError := fs.Sub(StaticFiles, "web/build")
+	if fsError != nil {
+		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	r := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil)
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, r); err != nil {
+	if err := http.ListenAndServe(addr, appRouter); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
 
 func runMigrations(conn *sql.DB) error {
-	migrationFS, err := fs.Sub(MigrationFiles, "db/migrations")
-	if err != nil {
-		return fmt.Errorf("creating migration sub-fs: %w", err)
+	migrationFS, subError := fs.Sub(MigrationFiles, "db/migrations")
+	if subError != nil {
+		return fmt.Errorf("creating migration sub-fs: %w", subError)
 	}
 
-	source, err := iofs.New(migrationFS, ".")
-	if err != nil {
-		return fmt.Errorf("creating migration source: %w", err)
+	source, sourceError := iofs.New(migrationFS, ".")
+	if sourceError != nil {
+		return fmt.Errorf("creating migration source: %w", sourceError)
 	}
 
-	driver, err := postgres.WithInstance(conn, &postgres.Config{})
-	if err != nil {
-		return fmt.Errorf("creating migration driver: %w", err)
+	driver, driverError := postgres.WithInstance(conn, &postgres.Config{})
+	if driverError != nil {
+		return fmt.Errorf("creating migration driver: %w", driverError)
 	}
 
-	m, err := migrate.NewWithInstance("iofs", source, "postgres", driver)
-	if err != nil {
-		return fmt.Errorf("creating migrate instance: %w", err)
+	migrator, migratorError := migrate.NewWithInstance("iofs", source, "postgres", driver)
+	if migratorError != nil {
+		return fmt.Errorf("creating migrate instance: %w", migratorError)
 	}
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+	if err := migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
-	version, dirty, _ := m.Version()
+	version, dirty, _ := migrator.Version()
 	log.Printf("migrations complete (version=%d, dirty=%v)", version, dirty)
 	return nil
 }

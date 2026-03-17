@@ -16,6 +16,12 @@
 
       if (!auth.isLoggedIn) return;
 
+      // Redirect OAuth users who haven't chosen a username yet
+      if (auth.user?.needs_username && window.location.pathname !== "/setup-username") {
+        goto("/setup-username");
+        return;
+      }
+
       // Voice state listeners — must persist across page navigations
       websocket.on("voice_state_initial", voiceStore.handleVoiceStateInitial);
       websocket.on("voice_state_update", voiceStore.handleVoiceStateUpdate);
@@ -54,10 +60,10 @@
 
   // Safety net: reconnect WS if logged in but not connected
   $effect(() => {
-    const _token = auth.accessToken; // reactive trigger
+    const currentToken = auth.accessToken; // reactive trigger
     const isConnected = websocket.connected;
     const isReconnecting = websocket.reconnecting;
-    if (auth.isLoggedIn && _token && !isConnected && !isReconnecting) {
+    if (auth.isLoggedIn && currentToken && !isConnected && !isReconnecting) {
       untrack(() => {
         auth.getToken().then((freshToken) => {
           if (freshToken) websocket.connect(freshToken);

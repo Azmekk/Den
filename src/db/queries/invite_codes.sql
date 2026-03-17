@@ -1,7 +1,6 @@
 -- name: CreateInviteCode :one
 INSERT INTO invite_codes (code, max_uses, expires_at, created_by)
-VALUES ($1, $2, $3, $4)
-RETURNING *;
+VALUES ($1, $2, $3, $4) RETURNING *;
 
 -- name: GetInviteCodeByCode :one
 SELECT * FROM invite_codes WHERE code = $1;

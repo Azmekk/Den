@@ -2,138 +2,188 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"database/sql"
 	"errors"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Azmekk/den/internal/db"
 )
 
 var (
-	ErrSelfDemotion    = errors.New("cannot remove your own admin status")
-	ErrSelfDeletion    = errors.New("cannot delete your own account")
-	ErrInvalidInviteCode = errors.New("invalid or expired invite code")
+	ErrSelfDemotion = errors.New("cannot remove your own admin status")
+	ErrSelfDeletion = errors.New("cannot delete your own account")
+	ErrSelfBan      = errors.New("cannot ban yourself")
 )
+
+// UserKicker is implemented by the WebSocket hub to disconnect a user.
+type UserKicker interface {
+	KickUser(userID uuid.UUID)
+}
 
 type AdminService struct {
 	queries         *db.Queries
 	authSvc         *AuthService
+	hub             UserKicker
 	mu              sync.RWMutex
 	maxMessages     int64
 	maxMessageChars int
 }
 
-func NewAdminService(queries *db.Queries, authSvc *AuthService) *AdminService {
+func NewAdminService(queries *db.Queries, authSvc *AuthService, hub UserKicker) *AdminService {
 	return &AdminService{
 		queries:         queries,
 		authSvc:         authSvc,
+		hub:             hub,
 		maxMessages:     100000,
 		maxMessageChars: 2000,
 	}
 }
 
-func (s *AdminService) LoadSettings(ctx context.Context) error {
-	row, err := s.queries.GetAdminSettings(ctx)
-	if err != nil {
-		return err
+func (service *AdminService) LoadSettings(ctx context.Context) error {
+	row, fetchError := service.queries.GetAdminSettings(ctx)
+	if fetchError != nil {
+		return fetchError
 	}
-	s.mu.Lock()
-	s.maxMessages = int64(row.MaxMessages)
-	s.maxMessageChars = int(row.MaxMessageChars)
-	s.mu.Unlock()
-	s.authSvc.SetOpenRegistration(row.OpenRegistration)
-	s.authSvc.SetInstanceName(row.InstanceName)
+	service.mu.Lock()
+	service.maxMessages = int64(row.MaxMessages)
+	service.maxMessageChars = int(row.MaxMessageChars)
+	service.mu.Unlock()
+	service.authSvc.SetOpenRegistration(row.OpenRegistration)
+	service.authSvc.SetInstanceName(row.InstanceName)
 	return nil
 }
 
-func (s *AdminService) GetMaxMessageChars() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.maxMessageChars
+func (service *AdminService) GetMaxMessageChars() int {
+	service.mu.RLock()
+	defer service.mu.RUnlock()
+	return service.maxMessageChars
 }
 
-func (s *AdminService) ListUsers(ctx context.Context) ([]PublicUserInfo, error) {
-	rows, err := s.queries.ListUsers(ctx)
-	if err != nil {
-		return nil, err
+func (service *AdminService) ListUsers(ctx context.Context) ([]PublicUserInfo, error) {
+	rows, fetchError := service.queries.ListUsers(ctx)
+	if fetchError != nil {
+		return nil, fetchError
 	}
 	users := make([]PublicUserInfo, len(rows))
-	for i, row := range rows {
-		u := PublicUserInfo{
+	for index, row := range rows {
+		userInfo := PublicUserInfo{
 			ID:       row.ID,
 			Username: row.Username,
 			IsAdmin:  row.IsAdmin,
+			Banned:   row.Banned,
 		}
 		if row.DisplayName.Valid {
-			u.DisplayName = row.DisplayName.String
+			userInfo.DisplayName = row.DisplayName.String
 		}
 		if row.AvatarUrl.Valid {
-			u.AvatarURL = row.AvatarUrl.String
+			userInfo.AvatarURL = row.AvatarUrl.String
 		}
-		users[i] = u
+		users[index] = userInfo
 	}
 	return users, nil
 }
 
-func (s *AdminService) SetAdmin(ctx context.Context, callerID, targetID uuid.UUID, isAdmin bool) error {
+func (service *AdminService) SetAdmin(ctx context.Context, callerID, targetID uuid.UUID, isAdmin bool) error {
 	if callerID == targetID && !isAdmin {
 		return ErrSelfDemotion
 	}
-	return s.queries.SetUserAdmin(ctx, db.SetUserAdminParams{
+	return service.queries.SetUserAdmin(ctx, db.SetUserAdminParams{
 		ID:      targetID,
 		IsAdmin: isAdmin,
 	})
 }
 
-func (s *AdminService) ResetPassword(ctx context.Context, userID uuid.UUID) (string, error) {
-	raw := make([]byte, 8)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	tempPassword := hex.EncodeToString(raw)
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-
-	if err := s.queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
-		ID:           userID,
-		PasswordHash: string(hash),
-	}); err != nil {
-		return "", err
-	}
-
-	_ = s.queries.DeleteRefreshTokensByUser(ctx, userID)
-
-	return tempPassword, nil
-}
-
-func (s *AdminService) DeleteUser(ctx context.Context, callerID, targetID uuid.UUID) error {
+func (service *AdminService) DeleteUser(ctx context.Context, callerID, targetID uuid.UUID) error {
 	if callerID == targetID {
 		return ErrSelfDeletion
 	}
-	return s.queries.DeleteUser(ctx, targetID)
+
+	// Look up the user to get their supabase_id before deleting
+	user, lookupError := service.queries.GetUserByID(ctx, targetID)
+	if lookupError != nil {
+		return lookupError
+	}
+
+	// Delete from local DB
+	if deleteError := service.queries.DeleteUser(ctx, targetID); deleteError != nil {
+		return deleteError
+	}
+
+	// Delete from Supabase if the user has a supabase_id
+	if user.SupabaseID.Valid && user.SupabaseID.String != "" {
+		if supabaseError := service.authSvc.SupabaseDeleteUser(user.SupabaseID.String); supabaseError != nil {
+			log.Printf("warning: failed to delete user from supabase: %v", supabaseError)
+		}
+		service.authSvc.InvalidateUserCache(user.SupabaseID.String)
+	}
+
+	// Kick from WebSocket
+	service.hub.KickUser(targetID)
+
+	return nil
 }
 
-func (s *AdminService) GetStats(ctx context.Context) (map[string]int64, error) {
-	msgCount, err := s.queries.CountMessages(ctx)
-	if err != nil {
-		return nil, err
+func (service *AdminService) BanUser(ctx context.Context, callerID, targetID uuid.UUID, ban bool) error {
+	if callerID == targetID {
+		return ErrSelfBan
 	}
-	userCount, err := s.queries.CountUsers(ctx)
-	if err != nil {
-		return nil, err
+
+	// Look up the user to get supabase_id
+	user, lookupError := service.queries.GetUserByID(ctx, targetID)
+	if lookupError != nil {
+		return lookupError
 	}
-	chanCount, err := s.queries.CountChannels(ctx)
-	if err != nil {
-		return nil, err
+
+	// Set local banned flag
+	if banError := service.queries.SetUserBanned(ctx, db.SetUserBannedParams{
+		ID:     targetID,
+		Banned: ban,
+	}); banError != nil {
+		return banError
+	}
+
+	// Ban/unban on Supabase
+	if user.SupabaseID.Valid && user.SupabaseID.String != "" {
+		var supabaseError error
+		if ban {
+			supabaseError = service.authSvc.SupabaseBanUser(user.SupabaseID.String)
+		} else {
+			supabaseError = service.authSvc.SupabaseUnbanUser(user.SupabaseID.String)
+		}
+		if supabaseError != nil {
+			log.Printf("warning: failed to update ban status on supabase: %v", supabaseError)
+		}
+		service.authSvc.InvalidateUserCache(user.SupabaseID.String)
+	}
+
+	// If banning, kick from WebSocket immediately
+	if ban {
+		service.hub.KickUser(targetID)
+	}
+
+	return nil
+}
+
+func (service *AdminService) DeleteUserMessages(ctx context.Context, userID uuid.UUID) (int64, error) {
+	return service.queries.DeleteMessagesByUserID(ctx, userID)
+}
+
+func (service *AdminService) GetStats(ctx context.Context) (map[string]int64, error) {
+	msgCount, msgError := service.queries.CountMessages(ctx)
+	if msgError != nil {
+		return nil, msgError
+	}
+	userCount, userError := service.queries.CountUsers(ctx)
+	if userError != nil {
+		return nil, userError
+	}
+	chanCount, chanError := service.queries.CountChannels(ctx)
+	if chanError != nil {
+		return nil, chanError
 	}
 	return map[string]int64{
 		"message_count": msgCount,
@@ -142,24 +192,24 @@ func (s *AdminService) GetStats(ctx context.Context) (map[string]int64, error) {
 	}, nil
 }
 
-func (s *AdminService) DeleteOldestMessages(ctx context.Context, count int32) error {
-	return s.queries.DeleteOldestMessages(ctx, count)
+func (service *AdminService) DeleteOldestMessages(ctx context.Context, count int32) error {
+	return service.queries.DeleteOldestMessages(ctx, count)
 }
 
-func (s *AdminService) GetSettings() map[string]any {
-	s.mu.RLock()
-	maxMsg := s.maxMessages
-	maxChars := s.maxMessageChars
-	s.mu.RUnlock()
+func (service *AdminService) GetSettings() map[string]any {
+	service.mu.RLock()
+	maxMsg := service.maxMessages
+	maxChars := service.maxMessageChars
+	service.mu.RUnlock()
 	return map[string]any{
-		"open_registration": s.authSvc.IsOpenRegistration(),
-		"instance_name":     s.authSvc.GetInstanceName(),
+		"open_registration": service.authSvc.IsOpenRegistration(),
+		"instance_name":     service.authSvc.GetInstanceName(),
 		"max_messages":      maxMsg,
 		"max_message_chars": maxChars,
 	}
 }
 
-func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int32, interval time.Duration) {
+func (service *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int32, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -167,21 +217,21 @@ func (s *AdminService) RunMessageCleanupLoop(ctx context.Context, batchSize int3
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.mu.RLock()
-			maxMessages := s.maxMessages
-			s.mu.RUnlock()
+			service.mu.RLock()
+			maxMessages := service.maxMessages
+			service.mu.RUnlock()
 			if maxMessages <= 0 {
 				continue
 			}
-			count, err := s.queries.CountMessages(ctx)
-			if err != nil {
-				log.Printf("message cleanup: count error: %v", err)
+			count, countError := service.queries.CountMessages(ctx)
+			if countError != nil {
+				log.Printf("message cleanup: count error: %v", countError)
 				continue
 			}
 			if count > maxMessages {
 				toDelete := int32(count-maxMessages) + batchSize/2
 				if toDelete > 0 {
-					_ = s.queries.DeleteOldestMessages(ctx, toDelete)
+					_ = service.queries.DeleteOldestMessages(ctx, toDelete)
 					log.Printf("message cleanup: deleted %d oldest unpinned messages", toDelete)
 				}
 			}
@@ -220,22 +270,22 @@ type PaginatedMedia struct {
 	PageSize   int               `json:"page_size"`
 }
 
-func (s *AdminService) ListMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
+func (service *AdminService) ListMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
 	offset := int32((page - 1) * pageSize)
-	rows, err := s.queries.ListActiveMediaUploads(ctx, db.ListActiveMediaUploadsParams{
+	rows, fetchError := service.queries.ListActiveMediaUploads(ctx, db.ListActiveMediaUploadsParams{
 		Limit:  int32(pageSize),
 		Offset: offset,
 	})
-	if err != nil {
-		return PaginatedMedia{}, err
+	if fetchError != nil {
+		return PaginatedMedia{}, fetchError
 	}
-	total, err := s.queries.CountActiveMediaUploads(ctx)
-	if err != nil {
-		return PaginatedMedia{}, err
+	total, countError := service.queries.CountActiveMediaUploads(ctx)
+	if countError != nil {
+		return PaginatedMedia{}, countError
 	}
 	items := make([]MediaUploadInfo, len(rows))
-	for i, row := range rows {
-		items[i] = MediaUploadInfo{
+	for index, row := range rows {
+		items[index] = MediaUploadInfo{
 			ID:               row.ID,
 			UploaderID:       row.UploaderID,
 			UploaderUsername: row.UploaderUsername,
@@ -249,26 +299,26 @@ func (s *AdminService) ListMedia(ctx context.Context, page, pageSize int) (Pagin
 	return PaginatedMedia{Items: items, TotalCount: total, Page: page, PageSize: pageSize}, nil
 }
 
-func (s *AdminService) ListDeletedMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
+func (service *AdminService) ListDeletedMedia(ctx context.Context, page, pageSize int) (PaginatedMedia, error) {
 	offset := int32((page - 1) * pageSize)
-	rows, err := s.queries.ListDeletedMediaUploads(ctx, db.ListDeletedMediaUploadsParams{
+	rows, fetchError := service.queries.ListDeletedMediaUploads(ctx, db.ListDeletedMediaUploadsParams{
 		Limit:  int32(pageSize),
 		Offset: offset,
 	})
-	if err != nil {
-		return PaginatedMedia{}, err
+	if fetchError != nil {
+		return PaginatedMedia{}, fetchError
 	}
-	total, err := s.queries.CountDeletedMediaUploads(ctx)
-	if err != nil {
-		return PaginatedMedia{}, err
+	total, countError := service.queries.CountDeletedMediaUploads(ctx)
+	if countError != nil {
+		return PaginatedMedia{}, countError
 	}
 	items := make([]MediaUploadInfo, len(rows))
-	for i, row := range rows {
+	for index, row := range rows {
 		var deletedAt *time.Time
 		if row.DeletedAt.Valid {
 			deletedAt = &row.DeletedAt.Time
 		}
-		items[i] = MediaUploadInfo{
+		items[index] = MediaUploadInfo{
 			ID:               row.ID,
 			UploaderID:       row.UploaderID,
 			UploaderUsername: row.UploaderUsername,
@@ -283,21 +333,21 @@ func (s *AdminService) ListDeletedMedia(ctx context.Context, page, pageSize int)
 	return PaginatedMedia{Items: items, TotalCount: total, Page: page, PageSize: pageSize}, nil
 }
 
-func (s *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
-	totals, err := s.queries.GetMediaStats(ctx)
-	if err != nil {
-		return MediaStats{}, err
+func (service *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
+	totals, fetchError := service.queries.GetMediaStats(ctx)
+	if fetchError != nil {
+		return MediaStats{}, fetchError
 	}
-	byType, err := s.queries.GetMediaStatsByType(ctx)
-	if err != nil {
-		return MediaStats{}, err
+	byType, typeError := service.queries.GetMediaStatsByType(ctx)
+	if typeError != nil {
+		return MediaStats{}, typeError
 	}
 	typeStats := make([]MediaTypeStats, len(byType))
-	for i, t := range byType {
-		typeStats[i] = MediaTypeStats{
-			MediaType: t.MediaType,
-			Count:     t.Count,
-			TotalSize: t.TotalSize,
+	for index, typeStat := range byType {
+		typeStats[index] = MediaTypeStats{
+			MediaType: typeStat.MediaType,
+			Count:     typeStat.Count,
+			TotalSize: typeStat.TotalSize,
 		}
 	}
 	return MediaStats{
@@ -307,72 +357,58 @@ func (s *AdminService) GetMediaStats(ctx context.Context) (MediaStats, error) {
 	}, nil
 }
 
+// InviteCodeInfo is the JSON-serializable representation of an invite code.
 type InviteCodeInfo struct {
-	ID               uuid.UUID  `json:"id"`
-	Code             string     `json:"code"`
-	MaxUses          *int32     `json:"max_uses"`
-	UseCount         int32      `json:"use_count"`
-	ExpiresAt        *time.Time `json:"expires_at"`
-	CreatedBy        uuid.UUID  `json:"created_by"`
-	CreatedByUsername string    `json:"created_by_username"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID                uuid.UUID  `json:"id"`
+	Code              string     `json:"code"`
+	MaxUses           *int32     `json:"max_uses"`
+	UseCount          int32      `json:"use_count"`
+	ExpiresAt         *time.Time `json:"expires_at"`
+	CreatedBy         uuid.UUID  `json:"created_by"`
+	CreatedByUsername string     `json:"created_by_username"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
-func (s *AdminService) CreateInviteCode(ctx context.Context, createdBy uuid.UUID, maxUses *int32, expiresAt *time.Time) (InviteCodeInfo, error) {
-	raw := make([]byte, 4)
-	if _, err := rand.Read(raw); err != nil {
-		return InviteCodeInfo{}, err
-	}
-	code := hex.EncodeToString(raw)
-
-	params := db.CreateInviteCodeParams{
+func (service *AdminService) CreateInviteCode(ctx context.Context, code string, maxUses sql.NullInt32, expiresAt sql.NullTime, createdBy uuid.UUID) (InviteCodeInfo, error) {
+	inviteCode, createError := service.queries.CreateInviteCode(ctx, db.CreateInviteCodeParams{
 		Code:      code,
+		MaxUses:   maxUses,
+		ExpiresAt: expiresAt,
 		CreatedBy: createdBy,
+	})
+	if createError != nil {
+		return InviteCodeInfo{}, createError
 	}
-	if maxUses != nil {
-		params.MaxUses.Int32 = *maxUses
-		params.MaxUses.Valid = true
-	}
-	if expiresAt != nil {
-		params.ExpiresAt.Time = *expiresAt
-		params.ExpiresAt.Valid = true
-	}
-
-	row, err := s.queries.CreateInviteCode(ctx, params)
-	if err != nil {
-		return InviteCodeInfo{}, err
-	}
-
 	info := InviteCodeInfo{
-		ID:        row.ID,
-		Code:      row.Code,
-		UseCount:  row.UseCount,
-		CreatedBy: row.CreatedBy,
-		CreatedAt: row.CreatedAt,
+		ID:        inviteCode.ID,
+		Code:      inviteCode.Code,
+		UseCount:  inviteCode.UseCount,
+		CreatedBy: inviteCode.CreatedBy,
+		CreatedAt: inviteCode.CreatedAt,
 	}
-	if row.MaxUses.Valid {
-		info.MaxUses = &row.MaxUses.Int32
+	if inviteCode.MaxUses.Valid {
+		info.MaxUses = &inviteCode.MaxUses.Int32
 	}
-	if row.ExpiresAt.Valid {
-		info.ExpiresAt = &row.ExpiresAt.Time
+	if inviteCode.ExpiresAt.Valid {
+		info.ExpiresAt = &inviteCode.ExpiresAt.Time
 	}
 	return info, nil
 }
 
-func (s *AdminService) ListInviteCodes(ctx context.Context) ([]InviteCodeInfo, error) {
-	rows, err := s.queries.ListInviteCodes(ctx)
-	if err != nil {
-		return nil, err
+func (service *AdminService) ListInviteCodes(ctx context.Context) ([]InviteCodeInfo, error) {
+	rows, fetchError := service.queries.ListInviteCodes(ctx)
+	if fetchError != nil {
+		return nil, fetchError
 	}
-	result := make([]InviteCodeInfo, len(rows))
-	for i, row := range rows {
+	codes := make([]InviteCodeInfo, len(rows))
+	for index, row := range rows {
 		info := InviteCodeInfo{
-			ID:               row.ID,
-			Code:             row.Code,
-			UseCount:         row.UseCount,
-			CreatedBy:        row.CreatedBy,
+			ID:                row.ID,
+			Code:              row.Code,
+			UseCount:          row.UseCount,
+			CreatedBy:         row.CreatedBy,
 			CreatedByUsername: row.CreatedByUsername,
-			CreatedAt:        row.CreatedAt,
+			CreatedAt:         row.CreatedAt,
 		}
 		if row.MaxUses.Valid {
 			info.MaxUses = &row.MaxUses.Int32
@@ -380,65 +416,50 @@ func (s *AdminService) ListInviteCodes(ctx context.Context) ([]InviteCodeInfo, e
 		if row.ExpiresAt.Valid {
 			info.ExpiresAt = &row.ExpiresAt.Time
 		}
-		result[i] = info
+		codes[index] = info
 	}
-	return result, nil
+	return codes, nil
 }
 
-func (s *AdminService) DeleteInviteCode(ctx context.Context, id uuid.UUID) error {
-	return s.queries.DeleteInviteCode(ctx, id)
+func (service *AdminService) DeleteInviteCode(ctx context.Context, codeID uuid.UUID) error {
+	return service.queries.DeleteInviteCode(ctx, codeID)
 }
 
-func (s *AdminService) ValidateAndUseInviteCode(ctx context.Context, code string) error {
-	ic, err := s.queries.GetInviteCodeByCode(ctx, code)
-	if err != nil {
-		return ErrInvalidInviteCode
-	}
-	if ic.ExpiresAt.Valid && time.Now().After(ic.ExpiresAt.Time) {
-		return ErrInvalidInviteCode
-	}
-	if ic.MaxUses.Valid && ic.UseCount >= ic.MaxUses.Int32 {
-		return ErrInvalidInviteCode
-	}
-	return s.queries.IncrementInviteCodeUseCount(ctx, ic.ID)
-}
-
-func (s *AdminService) UpdateSettings(ctx context.Context, openRegistration *bool, instanceName *string, maxMessages *int64, maxMessageChars *int) error {
-	// Read current values
-	current := s.GetSettings()
-	or := current["open_registration"].(bool)
-	in := current["instance_name"].(string)
-	mm := current["max_messages"].(int64)
-	mc := current["max_message_chars"].(int)
+func (service *AdminService) UpdateSettings(ctx context.Context, openRegistration *bool, instanceName *string, maxMessages *int64, maxMessageChars *int) error {
+	current := service.GetSettings()
+	openReg := current["open_registration"].(bool)
+	instName := current["instance_name"].(string)
+	maxMsg := current["max_messages"].(int64)
+	maxChars := current["max_message_chars"].(int)
 
 	if openRegistration != nil {
-		or = *openRegistration
+		openReg = *openRegistration
 	}
 	if instanceName != nil {
-		in = *instanceName
+		instName = *instanceName
 	}
 	if maxMessages != nil {
-		mm = *maxMessages
+		maxMsg = *maxMessages
 	}
 	if maxMessageChars != nil {
-		mc = *maxMessageChars
+		maxChars = *maxMessageChars
 	}
 
-	err := s.queries.UpdateAdminSettings(ctx, db.UpdateAdminSettingsParams{
-		OpenRegistration: or,
-		InstanceName:     in,
-		MaxMessages:      int32(mm),
-		MaxMessageChars:  int32(mc),
+	updateError := service.queries.UpdateAdminSettings(ctx, db.UpdateAdminSettingsParams{
+		OpenRegistration: openReg,
+		InstanceName:     instName,
+		MaxMessages:      int32(maxMsg),
+		MaxMessageChars:  int32(maxChars),
 	})
-	if err != nil {
-		return err
+	if updateError != nil {
+		return updateError
 	}
 
-	s.mu.Lock()
-	s.maxMessages = mm
-	s.maxMessageChars = mc
-	s.mu.Unlock()
-	s.authSvc.SetOpenRegistration(or)
-	s.authSvc.SetInstanceName(in)
+	service.mu.Lock()
+	service.maxMessages = maxMsg
+	service.maxMessageChars = maxChars
+	service.mu.Unlock()
+	service.authSvc.SetOpenRegistration(openReg)
+	service.authSvc.SetInstanceName(instName)
 	return nil
 }

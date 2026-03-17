@@ -14,146 +14,144 @@ import (
 )
 
 func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, unfurlSvc *service.UnfurlService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool) chi.Router {
-	authH := handler.NewAuthHandler(authSvc, hub)
-	channelH := handler.NewChannelHandler(channelSvc)
-	messageH := handler.NewMessageHandler(messageSvc, hub)
-	userH := handler.NewUserHandler(userSvc, mediaSvc, hub)
-	adminH := handler.NewAdminHandler(adminSvc, mediaSvc)
-	emoteH := handler.NewEmoteHandler(emoteSvc, hub)
-	configH := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration)
-	dmH := handler.NewDMHandler(dmSvc)
-	var mediaH *handler.MediaHandler
+	authHandler := handler.NewAuthHandler(authSvc)
+	channelHandler := handler.NewChannelHandler(channelSvc)
+	messageHandler := handler.NewMessageHandler(messageSvc, hub)
+	userHandler := handler.NewUserHandler(userSvc, mediaSvc, hub)
+	adminHandler := handler.NewAdminHandler(adminSvc, mediaSvc)
+	emoteHandler := handler.NewEmoteHandler(emoteSvc, hub)
+	configHandler := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration)
+	dmHandler := handler.NewDMHandler(dmSvc)
+	var mediaHandler *handler.MediaHandler
 	if mediaSvc != nil {
-		mediaH = handler.NewMediaHandler(mediaSvc)
+		mediaHandler = handler.NewMediaHandler(mediaSvc)
 	}
-	exportH := handler.NewExportHandler(channelSvc, userSvc, emoteSvc, dmSvc, userSvc.Queries(), authSvc.GetInstanceName)
-	unfurlH := handler.NewUnfurlHandler(unfurlSvc)
-	var voiceH *handler.VoiceHandler
+	exportHandler := handler.NewExportHandler(channelSvc, userSvc, emoteSvc, dmSvc, userSvc.Queries(), authSvc.GetInstanceName)
+	unfurlHandler := handler.NewUnfurlHandler(unfurlSvc)
+	var voiceHandler *handler.VoiceHandler
 	if voiceSvc != nil {
-		voiceH = handler.NewVoiceHandler(voiceSvc, channelSvc)
+		voiceHandler = handler.NewVoiceHandler(voiceSvc, channelSvc)
 	}
 
-	r := chi.NewRouter()
+	router := chi.NewRouter()
 
-	r.Use(cloudflareRealIP)
-	r.Use(chimw.RealIP)
-	r.Use(chimw.RequestID)
-	r.Use(chimw.Logger)
-	r.Use(chimw.Recoverer)
-	r.Use(chimw.Compress(5))
-	r.Use(chimw.Heartbeat("/healthz"))
+	router.Use(cloudflareRealIP)
+	router.Use(chimw.RealIP)
+	router.Use(chimw.RequestID)
+	router.Use(chimw.Logger)
+	router.Use(chimw.Recoverer)
+	router.Use(chimw.Compress(5))
+	router.Use(chimw.Heartbeat("/healthz"))
 
-	r.Route("/api", func(r chi.Router) {
+	router.Route("/api", func(router chi.Router) {
 		// Public
-		r.Post("/register", authH.Register)
-		r.Post("/login", authH.Login)
-		r.Post("/refresh", authH.Refresh)
-		r.Post("/logout", authH.Logout)
-		r.Get("/config", configH.GetConfig)
-		r.Get("/emotes/{id}/image", emoteH.ServeImage)
-		r.Get("/users/{id}/avatar", userH.GetAvatar)
+		router.Get("/config", configHandler.GetConfig)
+		router.Get("/emotes/{id}/image", emoteHandler.ServeImage)
+		router.Get("/users/{id}/avatar", userHandler.GetAvatar)
+		router.Post("/invite/validate", authHandler.ValidateInviteCode)
 
 		// Authenticated
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(authSvc))
-			r.Get("/me", authH.Me)
-			r.Post("/change-password", authH.ChangePassword)
-			r.Get("/channels", channelH.List)
-			r.Get("/channels/voice", channelH.ListVoice)
-			r.Get("/channels/unread", channelH.GetUnreadCounts)
-			r.Get("/channels/{id}", channelH.Get)
-			r.Put("/channels/{id}/read", channelH.MarkRead)
-			r.Get("/search", messageH.Search)
-			r.Get("/channels/{id}/messages", messageH.GetHistory)
-			r.Get("/channels/{id}/messages/around", messageH.GetMessagesAround)
-			r.Get("/channels/{id}/messages/newer", messageH.GetNewer)
-			r.Get("/channels/{id}/pins", messageH.GetPinnedMessages)
-			r.Put("/messages/{id}/pin", messageH.PinMessage)
-			r.Delete("/messages/{id}/pin", messageH.UnpinMessage)
-			r.Post("/dms", dmH.CreateOrGet)
-			r.Get("/dms", dmH.List)
-			r.Get("/dms/{id}/messages", dmH.GetHistory)
-			r.Get("/dms/{id}/pins", dmH.GetPins)
-			r.Get("/users", userH.List)
-			r.Put("/users/me/display-name", userH.UpdateDisplayName)
-			r.Put("/users/me/color", userH.UpdateColor)
-			r.Post("/users/me/avatar", userH.UploadAvatar)
-			r.Get("/emotes", emoteH.List)
-			r.Get("/unfurl", unfurlH.Unfurl)
-			r.Get("/export", exportH.Export)
-			if mediaH != nil {
-				r.Post("/upload/image", mediaH.UploadImage)
-				r.Post("/upload/video", mediaH.UploadVideo)
+		router.Group(func(router chi.Router) {
+			router.Use(middleware.RequireAuth(authSvc))
+			router.Get("/me", authHandler.Me)
+			router.Get("/channels", channelHandler.List)
+			router.Get("/channels/voice", channelHandler.ListVoice)
+			router.Get("/channels/unread", channelHandler.GetUnreadCounts)
+			router.Get("/channels/{id}", channelHandler.Get)
+			router.Put("/channels/{id}/read", channelHandler.MarkRead)
+			router.Get("/search", messageHandler.Search)
+			router.Get("/channels/{id}/messages", messageHandler.GetHistory)
+			router.Get("/channels/{id}/messages/around", messageHandler.GetMessagesAround)
+			router.Get("/channels/{id}/messages/newer", messageHandler.GetNewer)
+			router.Get("/channels/{id}/pins", messageHandler.GetPinnedMessages)
+			router.Put("/messages/{id}/pin", messageHandler.PinMessage)
+			router.Delete("/messages/{id}/pin", messageHandler.UnpinMessage)
+			router.Post("/dms", dmHandler.CreateOrGet)
+			router.Get("/dms", dmHandler.List)
+			router.Get("/dms/{id}/messages", dmHandler.GetHistory)
+			router.Get("/dms/{id}/pins", dmHandler.GetPins)
+			router.Get("/users", userHandler.List)
+			router.Put("/users/me/username", authHandler.SetUsername)
+			router.Put("/users/me/display-name", userHandler.UpdateDisplayName)
+			router.Put("/users/me/color", userHandler.UpdateColor)
+			router.Post("/users/me/avatar", userHandler.UploadAvatar)
+			router.Get("/emotes", emoteHandler.List)
+			router.Get("/unfurl", unfurlHandler.Unfurl)
+			router.Get("/export", exportHandler.Export)
+			if mediaHandler != nil {
+				router.Post("/upload/image", mediaHandler.UploadImage)
+				router.Post("/upload/video", mediaHandler.UploadVideo)
 			}
-			if voiceH != nil {
-				r.Post("/voice/{channelId}/join", voiceH.Join)
+			if voiceHandler != nil {
+				router.Post("/voice/{channelId}/join", voiceHandler.Join)
 			}
 
 			// Admin only
-			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireAdmin)
-				r.Post("/channels", channelH.Create)
-				r.Put("/channels/{id}", channelH.Update)
-				r.Delete("/channels/{id}", channelH.Delete)
-				r.Post("/emotes", emoteH.Create)
-				r.Delete("/emotes/{id}", emoteH.Delete)
+			router.Group(func(router chi.Router) {
+				router.Use(middleware.RequireAdmin)
+				router.Post("/channels", channelHandler.Create)
+				router.Put("/channels/{id}", channelHandler.Update)
+				router.Delete("/channels/{id}", channelHandler.Delete)
+				router.Post("/emotes", emoteHandler.Create)
+				router.Delete("/emotes/{id}", emoteHandler.Delete)
 
-				r.Get("/admin/channels", channelH.ListAll)
-				r.Route("/admin", func(r chi.Router) {
-					r.Get("/users", adminH.ListUsers)
-					r.Put("/users/{id}/admin", adminH.SetAdmin)
-					r.Post("/users/{id}/reset-password", adminH.ResetPassword)
-					r.Delete("/users/{id}", adminH.DeleteUser)
-					r.Get("/stats", adminH.GetStats)
-					r.Post("/messages/cleanup", adminH.CleanupMessages)
-					r.Get("/settings", adminH.GetSettings)
-					r.Put("/settings", adminH.UpdateSettings)
-					r.Get("/media", adminH.ListMedia)
-					r.Get("/media/deleted", adminH.ListDeletedMedia)
-					r.Get("/media/stats", adminH.GetMediaStats)
-					r.Delete("/media/{id}", adminH.DeleteMedia)
-					r.Post("/media/bulk-delete", adminH.BulkDeleteMedia)
-					r.Get("/invite-codes", adminH.ListInviteCodes)
-					r.Post("/invite-codes", adminH.CreateInviteCode)
-					r.Delete("/invite-codes/{id}", adminH.DeleteInviteCode)
+				router.Get("/admin/channels", channelHandler.ListAll)
+				router.Route("/admin", func(router chi.Router) {
+					router.Get("/users", adminHandler.ListUsers)
+					router.Put("/users/{id}/admin", adminHandler.SetAdmin)
+					router.Put("/users/{id}/ban", adminHandler.BanUser)
+					router.Delete("/users/{id}/messages", adminHandler.DeleteUserMessages)
+					router.Delete("/users/{id}", adminHandler.DeleteUser)
+					router.Get("/stats", adminHandler.GetStats)
+					router.Post("/messages/cleanup", adminHandler.CleanupMessages)
+					router.Get("/settings", adminHandler.GetSettings)
+					router.Put("/settings", adminHandler.UpdateSettings)
+					router.Get("/media", adminHandler.ListMedia)
+					router.Get("/media/deleted", adminHandler.ListDeletedMedia)
+					router.Get("/media/stats", adminHandler.GetMediaStats)
+					router.Delete("/media/{id}", adminHandler.DeleteMedia)
+					router.Post("/media/bulk-delete", adminHandler.BulkDeleteMedia)
+					router.Post("/invite-codes", adminHandler.CreateInviteCode)
+					router.Get("/invite-codes", adminHandler.ListInviteCodes)
+					router.Delete("/invite-codes/{id}", adminHandler.DeleteInviteCode)
 				})
 			})
 		})
 
 		// WebSocket (auth via first message)
-		r.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc))
+		router.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc))
 	})
 
 	// SPA static files — serve real files directly, fall back to index.html
-	r.Handle("/*", spaHandler(staticFS))
+	router.Handle("/*", spaHandler(staticFS))
 
-	return r
+	return router
 }
 
 // spaHandler serves static files from the given FS, falling back to
 // index.html for paths that don't match a real file (SPA client routing).
 func spaHandler(staticFS fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(staticFS))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		path := request.URL.Path
 		if path != "/" {
 			// Strip leading slash for fs.Open
 			if _, err := fs.Stat(staticFS, path[1:]); err != nil {
 				// File doesn't exist — serve index.html for client-side routing
-				r.URL.Path = "/"
+				request.URL.Path = "/"
 			}
 		}
-		fileServer.ServeHTTP(w, r)
+		fileServer.ServeHTTP(writer, request)
 	})
 }
 
 // cloudflareRealIP copies CF-Connecting-IP into X-Real-IP so Chi's
 // RealIP middleware picks up the actual client address.
 func cloudflareRealIP(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
-			r.Header.Set("X-Real-IP", cfIP)
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if cfIP := request.Header.Get("CF-Connecting-IP"); cfIP != "" {
+			request.Header.Set("X-Real-IP", cfIP)
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(writer, request)
 	})
 }

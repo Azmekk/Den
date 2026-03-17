@@ -1,173 +1,83 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/Azmekk/den/internal/httputil"
 	"github.com/Azmekk/den/internal/middleware"
 	"github.com/Azmekk/den/internal/service"
-	"github.com/Azmekk/den/internal/ws"
 )
 
 type AuthHandler struct {
-	svc *service.AuthService
-	hub *ws.Hub
+	authService *service.AuthService
 }
 
-func NewAuthHandler(svc *service.AuthService, hub *ws.Hub) *AuthHandler {
-	return &AuthHandler{svc: svc, hub: hub}
+func NewAuthHandler(authService *service.AuthService) *AuthHandler {
+	return &AuthHandler{authService: authService}
 }
 
-type registerRequest struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	DisplayName string `json:"display_name"`
-	InviteCode  string `json:"invite_code"`
+// Me returns the current user's profile from the Den database.
+func (handler *AuthHandler) Me(writer http.ResponseWriter, request *http.Request) {
+	userID := middleware.UserIDFromContext(request.Context())
+	user, lookupError := handler.authService.Queries.GetUserByID(request.Context(), userID)
+	if lookupError != nil {
+		httputil.WriteInternalError(writer, "internal error", lookupError)
+		return
+	}
+	httputil.WriteJSON(writer, http.StatusOK, service.UserInfoFromDB(user))
 }
 
-type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type changePasswordRequest struct {
-	OldPassword string `json:"old_password"`
-	NewPassword string `json:"new_password"`
-}
-
-type authResponse struct {
-	AccessToken string           `json:"access_token"`
-	User        service.UserInfo `json:"user"`
-}
-
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	var req registerRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+// ValidateInviteCode checks if an invite code is valid (public, no auth required).
+func (handler *AuthHandler) ValidateInviteCode(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Code string `json:"code"`
+	}
+	if decodeError := httputil.DecodeJSON(request, &body); decodeError != nil {
+		httputil.WriteError(writer, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	user, tokens, err := h.svc.Register(r.Context(), req.Username, req.Password, req.DisplayName, req.InviteCode)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidInput):
-			httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, service.ErrUsernameTaken):
-			httputil.WriteError(w, http.StatusConflict, "username already taken")
-		case errors.Is(err, service.ErrRegistrationClosed):
-			httputil.WriteError(w, http.StatusForbidden, "registration is closed")
-		case errors.Is(err, service.ErrInvalidInviteCode):
-			httputil.WriteError(w, http.StatusBadRequest, "invalid or expired invite code")
-		default:
-			httputil.WriteInternalError(w, "internal error", err)
+	valid := handler.authService.ValidateInviteCode(request.Context(), body.Code)
+	httputil.WriteJSON(writer, http.StatusOK, map[string]bool{"valid": valid})
+}
+
+// SetUsername allows a user to set their username (typically after OAuth registration).
+func (handler *AuthHandler) SetUsername(writer http.ResponseWriter, request *http.Request) {
+	userID := middleware.UserIDFromContext(request.Context())
+
+	var body struct {
+		Username string `json:"username"`
+	}
+	if decodeError := httputil.DecodeJSON(request, &body); decodeError != nil {
+		httputil.WriteError(writer, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Verify user actually needs a username
+	currentUser, lookupError := handler.authService.Queries.GetUserByID(request.Context(), userID)
+	if lookupError != nil {
+		httputil.WriteInternalError(writer, "internal error", lookupError)
+		return
+	}
+	if !currentUser.NeedsUsername {
+		httputil.WriteError(writer, http.StatusForbidden, "username already set")
+		return
+	}
+
+	user, setError := handler.authService.SetUsername(request.Context(), userID, body.Username)
+	if setError != nil {
+		if errors.Is(setError, service.ErrUsernameTaken) {
+			httputil.WriteError(writer, http.StatusConflict, "username already taken")
+			return
 		}
-		return
-	}
-
-	// Broadcast new user to all connected clients
-	envelope, _ := json.Marshal(map[string]any{
-		"type":         "user_registered",
-		"id":           user.ID,
-		"username":     user.Username,
-		"display_name": user.DisplayName,
-		"is_admin":     user.IsAdmin,
-	})
-	h.hub.BroadcastGlobal(envelope)
-
-	httputil.SetRefreshTokenCookie(w, tokens.RefreshToken)
-	httputil.WriteJSON(w, http.StatusOK, authResponse{
-		AccessToken: tokens.AccessToken,
-		User:        user,
-	})
-}
-
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	user, tokens, err := h.svc.Login(r.Context(), req.Username, req.Password)
-	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			httputil.WriteError(w, http.StatusUnauthorized, "invalid username or password")
-		} else {
-			httputil.WriteInternalError(w, "internal error", err)
+		if errors.Is(setError, service.ErrInvalidInput) {
+			httputil.WriteError(writer, http.StatusBadRequest, "invalid username: must be 1-32 characters, alphanumeric with hyphens and underscores only")
+			return
 		}
+		httputil.WriteInternalError(writer, "internal error", setError)
 		return
 	}
 
-	httputil.SetRefreshTokenCookie(w, tokens.RefreshToken)
-	httputil.WriteJSON(w, http.StatusOK, authResponse{
-		AccessToken: tokens.AccessToken,
-		User:        user,
-	})
-}
-
-func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("refresh_token")
-	if err != nil {
-		httputil.WriteError(w, http.StatusUnauthorized, "missing refresh token")
-		return
-	}
-
-	user, tokens, err := h.svc.RefreshTokens(r.Context(), cookie.Value)
-	if err != nil {
-		httputil.ClearRefreshTokenCookie(w)
-		httputil.WriteError(w, http.StatusUnauthorized, "invalid or expired refresh token")
-		return
-	}
-
-	httputil.SetRefreshTokenCookie(w, tokens.RefreshToken)
-	httputil.WriteJSON(w, http.StatusOK, authResponse{
-		AccessToken: tokens.AccessToken,
-		User:        user,
-	})
-}
-
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("refresh_token")
-	if err == nil {
-		h.svc.Logout(r.Context(), cookie.Value)
-	}
-
-	httputil.ClearRefreshTokenCookie(w)
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
-}
-
-func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.UserIDFromContext(r.Context())
-	user, err := h.svc.Queries.GetUserByID(r.Context(), userID)
-	if err != nil {
-		httputil.WriteInternalError(w, "internal error", err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, service.UserInfoFromDB(user))
-}
-
-func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	var req changePasswordRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	userID := middleware.UserIDFromContext(r.Context())
-	err := h.svc.ChangePassword(r.Context(), userID, req.OldPassword, req.NewPassword)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidInput):
-			httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, service.ErrInvalidCredentials):
-			httputil.WriteError(w, http.StatusUnauthorized, "incorrect old password")
-		default:
-			httputil.WriteInternalError(w, "internal error", err)
-		}
-		return
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"message": "password changed"})
+	httputil.WriteJSON(writer, http.StatusOK, service.UserInfoFromDB(user))
 }

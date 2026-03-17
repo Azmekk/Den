@@ -15,8 +15,7 @@ import (
 
 const createInviteCode = `-- name: CreateInviteCode :one
 INSERT INTO invite_codes (code, max_uses, expires_at, created_by)
-VALUES ($1, $2, $3, $4)
-RETURNING id, code, max_uses, use_count, expires_at, created_by, created_at
+VALUES ($1, $2, $3, $4) RETURNING id, code, max_uses, use_count, expires_at, created_by, created_at
 `
 
 type CreateInviteCodeParams struct {

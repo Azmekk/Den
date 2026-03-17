@@ -88,7 +88,7 @@ docker compose down             # Stop everything
 - Go entrypoint: `src/main.go`
 - Go packages: `src/internal/` (service, handler, middleware, router, httputil, ws, db)
 - SvelteKit frontend: `src/web/`
-- DB migrations: `src/db/migrations/` (through 000007)
+- DB migrations: `src/db/migrations/` (through 000015)
 - sqlc queries: `src/db/queries/`
 - Infrastructure configs at project root
 
@@ -98,13 +98,25 @@ docker compose down             # Stop everything
 **Frontend stores:** auth, channels, config, emotes, messages, presence, typing, unread, users, websocket
 **Frontend routes:** `/` (main chat), `/login`, `/register`, `/admin`
 
+## Authentication
+
+- **Supabase Auth** handles all authentication (email/password, OAuth, 2FA, password resets)
+- Backend validates Supabase JWTs via JWKS endpoint (`{SUPABASE_URL}/auth/v1/jwks`), supporting RS256 and other algorithms
+- On first authenticated request, a local Den user is auto-created from Supabase claims (`supabase_id` → `users` table)
+- Frontend uses `@supabase/supabase-js` SDK for login/register/OAuth flows
+- Supabase tokens are sent in `Authorization: Bearer <token>` header to Den backend
+- User cache (sync.Map with 2-min TTL) avoids DB lookup on every request
+- No refresh tokens or invite codes — Supabase handles session management
+- **Banning**: Admin sets local `banned` flag + calls Supabase admin API to ban. Banned users are kicked from WebSocket immediately and rejected at middleware (403) on subsequent requests.
+- Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+
 ## Architecture Caveats
 
 - Chi router: use `chi.URLParam(r, "id")` not `r.PathValue("id")`
-- WebSocket auth via query param: `GET /api/ws?token=<JWT>`
+- WebSocket auth via first message containing Supabase JWT
 - Message pagination: cursor-based with `before_time` + `before_id`
 - Hub uses channel-based select loop (no mutexes)
-- User colors generated client-side from username hash (no DB column)
+- User colors stored in DB `color` column, fallback to client-side hash
 - Admin settings (open_registration, instance_name) are in-memory only
 - Emote tokens in messages: `<emote:uuid>`, mention tokens: `<mention:uuid>`
 - S3 bucket storage is optional — upload features hidden when BUCKET\_\* env vars not set

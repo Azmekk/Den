@@ -187,5 +187,8 @@ FROM messages m
 WHERE m.dm_pair_id = $1
 ORDER BY m.created_at ASC, m.id ASC;
 
+-- name: DeleteMessagesByUserID :execrows
+DELETE FROM messages WHERE user_id = $1;
+
 -- name: CountChannels :one
 SELECT count(*) FROM channels;

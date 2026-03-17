@@ -99,22 +99,17 @@ type PinnedMessage struct {
 	CreatedAt time.Time
 }
 
-type RefreshToken struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	TokenHash string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-}
-
 type User struct {
-	ID           uuid.UUID
-	Username     string
-	PasswordHash string
-	DisplayName  sql.NullString
-	AvatarUrl    sql.NullString
-	IsAdmin      bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Color        sql.NullString
+	ID            uuid.UUID
+	Username      string
+	PasswordHash  sql.NullString
+	DisplayName   sql.NullString
+	AvatarUrl     sql.NullString
+	IsAdmin       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Color         sql.NullString
+	SupabaseID    sql.NullString
+	Banned        bool
+	NeedsUsername bool
 }

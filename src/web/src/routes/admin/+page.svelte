@@ -10,6 +10,7 @@ import type {
 	AdminStats,
 	ChannelInfo,
 	EmoteInfo,
+	InviteCodeInfo,
 	MediaStats,
 	MediaUploadInfo,
 	PaginatedMedia,
@@ -74,24 +75,11 @@ let deletedMediaPage = $state(1);
 let deletedMediaTotalCount = $state(0);
 let deletedMediaLoading = $state(false);
 
-// Invites
-interface InviteCode {
-	id: string;
-	code: string;
-	max_uses: number | null;
-	use_count: number;
-	expires_at: string | null;
-	created_by: string;
-	created_by_username: string;
-	created_at: string;
-}
-let inviteCodes = $state<InviteCode[]>([]);
-let invitesLoading = $state(false);
-let showInviteForm = $state(false);
-let inviteMaxUses = $state<number | undefined>(undefined);
-let inviteExpiresHours = $state<number | undefined>(undefined);
-let createdInviteCode = $state<string | null>(null);
-let inviteCopied = $state(false);
+// Invite Codes
+let inviteCodes = $state<InviteCodeInfo[]>([]);
+let inviteCodesLoading = $state(false);
+let inviteForm = $state({ code: '', max_uses: '', expires_at: '' });
+let inviteCreating = $state(false);
 
 let filteredMedia = $derived.by(() => {
 	let list = mediaFilter === 'all' ? mediaUploads : mediaUploads.filter(m => m.media_type === mediaFilter);
@@ -122,12 +110,12 @@ function toggleMediaSort(key: typeof mediaSortKey) {
 }
 
 // Modals
-let tempPassword = $state<string | null>(null);
 let confirmDelete = $state<{
 	type: 'user' | 'channel' | 'emote' | 'media' | 'invite';
 	id: string;
 	name: string;
 } | null>(null);
+let confirmDeleteMessages = $state<{ id: string; name: string } | null>(null);
 let error = $state('');
 
 
@@ -182,21 +170,32 @@ async function toggleAdmin(user: UserInfo) {
 	await fetchUsers();
 }
 
-async function resetPassword(userId: string) {
-	error = '';
-	try {
-		const data = await api.post<{ temp_password: string }>(`/admin/users/${userId}/reset-password`);
-		tempPassword = data.temp_password;
-	} catch {
-		error = 'Failed to reset password';
-	}
-}
-
 async function deleteUser(userId: string) {
 	error = '';
 	try {
 		await api.del(`/admin/users/${userId}`);
 		confirmDelete = null;
+		await fetchUsers();
+	} catch (e: any) {
+		error = e.message || 'failed';
+	}
+}
+
+async function banUser(user: UserInfo) {
+	error = '';
+	try {
+		await api.put(`/admin/users/${user.id}/ban`, { banned: !user.banned });
+		await fetchUsers();
+	} catch (e: any) {
+		error = e.message || 'failed';
+	}
+}
+
+async function deleteUserMessages(userId: string) {
+	error = '';
+	try {
+		await api.del(`/admin/users/${userId}/messages`);
+		confirmDeleteMessages = null;
 		await fetchUsers();
 	} catch (e: any) {
 		error = e.message || 'failed';
@@ -377,31 +376,34 @@ async function deleteEmote(id: string) {
 }
 
 async function fetchInviteCodes() {
-	invitesLoading = true;
+	inviteCodesLoading = true;
 	try {
-		inviteCodes = await api.get<any[]>('/admin/invite-codes');
+		inviteCodes = await api.get<InviteCodeInfo[]>('/admin/invite-codes');
 	} finally {
-		invitesLoading = false;
+		inviteCodesLoading = false;
 	}
 }
 
 async function createInviteCode() {
+	if (!inviteForm.code) return;
 	error = '';
-	const body: Record<string, number> = {};
-	if (inviteMaxUses !== undefined && inviteMaxUses > 0) body.max_uses = inviteMaxUses;
-	if (inviteExpiresHours !== undefined && inviteExpiresHours > 0) body.expires_in_hours = inviteExpiresHours;
+	inviteCreating = true;
 	try {
-		const data = await api.post<{ code: string }>('/admin/invite-codes', body);
-		createdInviteCode = data.code;
-	} catch {
-		error = 'Failed to create invite code';
-		return;
+		const body: Record<string, unknown> = { code: inviteForm.code };
+		if (inviteForm.max_uses) {
+			body.max_uses = parseInt(inviteForm.max_uses, 10);
+		}
+		if (inviteForm.expires_at) {
+			body.expires_at = new Date(inviteForm.expires_at).toISOString();
+		}
+		await api.post('/admin/invite-codes', body);
+		inviteForm = { code: '', max_uses: '', expires_at: '' };
+		await fetchInviteCodes();
+	} catch (createError: any) {
+		error = createError.message || 'failed to create invite code';
+	} finally {
+		inviteCreating = false;
 	}
-	inviteCopied = false;
-	showInviteForm = false;
-	inviteMaxUses = undefined;
-	inviteExpiresHours = undefined;
-	await fetchInviteCodes();
 }
 
 async function deleteInviteCode(id: string) {
@@ -469,7 +471,7 @@ function switchTab(tab: typeof activeTab) {
 						<thead>
 							<tr class="border-b border-border bg-secondary/50">
 								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Username</th>
-								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
+								<th class="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
 								<th class="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
 							</tr>
 						</thead>
@@ -483,11 +485,16 @@ function switchTab(tab: typeof activeTab) {
 										{/if}
 									</td>
 									<td class="px-4 py-3">
-										{#if user.is_admin}
-											<span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Admin</span>
-										{:else}
-											<span class="text-muted-foreground">Member</span>
-										{/if}
+										<div class="flex items-center gap-1.5">
+											{#if user.is_admin}
+												<span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Admin</span>
+											{:else}
+												<span class="text-muted-foreground">Member</span>
+											{/if}
+											{#if user.banned}
+												<span class="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">Banned</span>
+											{/if}
+										</div>
 									</td>
 									<td class="px-4 py-3 text-right">
 										{#if user.id !== auth.user?.id}
@@ -498,10 +505,16 @@ function switchTab(tab: typeof activeTab) {
 												{user.is_admin ? 'Remove Admin' : 'Make Admin'}
 											</button>
 											<button
-												onclick={() => resetPassword(user.id)}
-												class="mr-2 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+												onclick={() => banUser(user)}
+												class="mr-2 rounded px-2 py-1 text-xs {user.banned ? 'text-green-500 hover:bg-green-500/10' : 'text-orange-500 hover:bg-orange-500/10'}"
 											>
-												Reset Password
+												{user.banned ? 'Unban' : 'Ban'}
+											</button>
+											<button
+												onclick={() => (confirmDeleteMessages = { id: user.id, name: user.username })}
+												class="mr-2 rounded px-2 py-1 text-xs text-orange-500 hover:bg-orange-500/10"
+											>
+												Delete Messages
 											</button>
 											<button
 												onclick={() => (confirmDelete = { type: 'user', id: user.id, name: user.username })}
@@ -1028,83 +1041,55 @@ function switchTab(tab: typeof activeTab) {
 				</div>
 			{/if}
 		{:else if activeTab === 'invites'}
-			<!-- Invites Tab -->
+			<!-- Invite Codes Tab -->
 			<div class="max-w-3xl space-y-6">
-				<div class="flex items-center gap-3">
-					<button
-						onclick={() => { showInviteForm = !showInviteForm; }}
-						class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-					>
-						Create Invite Code
-					</button>
+				<div class="rounded-lg border border-border p-4">
+					<h3 class="mb-3 text-sm font-medium text-foreground">Create Invite Code</h3>
+					<div class="flex items-end gap-3">
+						<div class="flex-1">
+							<label for="invite-code" class="mb-1 block text-xs text-muted-foreground">Code</label>
+							<input
+								id="invite-code"
+								bind:value={inviteForm.code}
+								placeholder="e.g. welcome-2024"
+								class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+							/>
+						</div>
+						<div class="w-28">
+							<label for="invite-max-uses" class="mb-1 block text-xs text-muted-foreground">Max uses</label>
+							<input
+								id="invite-max-uses"
+								type="number"
+								bind:value={inviteForm.max_uses}
+								placeholder="Unlimited"
+								min="1"
+								class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+							/>
+						</div>
+						<div class="w-48">
+							<label for="invite-expires" class="mb-1 block text-xs text-muted-foreground">Expires at</label>
+							<input
+								id="invite-expires"
+								type="datetime-local"
+								bind:value={inviteForm.expires_at}
+								class="w-full rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+							/>
+						</div>
+						<button
+							onclick={createInviteCode}
+							disabled={inviteCreating || !inviteForm.code}
+							class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+						>
+							{inviteCreating ? 'Creating...' : 'Create'}
+						</button>
+					</div>
 				</div>
 
-				{#if showInviteForm}
-					<div class="rounded-lg border border-border p-4">
-						<h3 class="mb-3 text-sm font-medium text-foreground">New Invite Code</h3>
-						<div class="flex items-end gap-3">
-							<div>
-								<label for="invite-max-uses" class="mb-1 block text-xs text-muted-foreground">Max Uses (leave empty for unlimited)</label>
-								<input
-									id="invite-max-uses"
-									type="number"
-									min="1"
-									bind:value={inviteMaxUses}
-									placeholder="Unlimited"
-									class="w-40 rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-								/>
-							</div>
-							<div>
-								<label for="invite-expires" class="mb-1 block text-xs text-muted-foreground">Expires In (hours, leave empty for never)</label>
-								<input
-									id="invite-expires"
-									type="number"
-									min="1"
-									bind:value={inviteExpiresHours}
-									placeholder="Never"
-									class="w-40 rounded-md border border-input bg-secondary px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-								/>
-							</div>
-							<button
-								onclick={createInviteCode}
-								class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-							>
-								Create
-							</button>
-							<button
-								onclick={() => { showInviteForm = false; }}
-								class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary"
-							>
-								Cancel
-							</button>
-						</div>
-					</div>
-				{/if}
-
-				{#if createdInviteCode}
-					<div class="rounded-lg border border-primary/30 bg-primary/5 p-4">
-						<h3 class="mb-2 text-sm font-medium text-foreground">Invite Code Created</h3>
-						<div class="flex items-center gap-3">
-							<code class="rounded-md bg-secondary px-3 py-2 font-mono text-lg text-foreground select-all">{createdInviteCode}</code>
-							<button
-								onclick={() => { navigator.clipboard.writeText(createdInviteCode!); inviteCopied = true; setTimeout(() => inviteCopied = false, 2000); }}
-								class="rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground hover:bg-secondary/80"
-							>
-								{inviteCopied ? 'Copied!' : 'Copy'}
-							</button>
-							<button
-								onclick={() => { createdInviteCode = null; }}
-								class="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary"
-							>
-								Dismiss
-							</button>
-						</div>
-					</div>
-				{/if}
-
-				{#if invitesLoading}
+				{#if inviteCodesLoading}
 					<p class="text-muted-foreground">Loading invite codes...</p>
-				{:else if inviteCodes.length > 0}
+				{:else if inviteCodes.length === 0}
+					<p class="text-muted-foreground">No invite codes created yet.</p>
+				{:else}
 					<div class="overflow-hidden rounded-lg border border-border">
 						<table class="w-full text-sm">
 							<thead>
@@ -1119,20 +1104,14 @@ function switchTab(tab: typeof activeTab) {
 							</thead>
 							<tbody>
 								{#each inviteCodes as code (code.id)}
-									{@const expired = code.expires_at && new Date(code.expires_at) < new Date()}
-									{@const exhausted = code.max_uses !== null && code.use_count >= code.max_uses}
-									<tr class="border-b border-border last:border-0 {expired || exhausted ? 'opacity-50' : ''}">
+									<tr class="border-b border-border last:border-0">
 										<td class="px-4 py-3 font-mono text-foreground">{code.code}</td>
 										<td class="px-4 py-3 text-muted-foreground">
-											{code.use_count}{code.max_uses !== null ? ` / ${code.max_uses}` : ' / \u221E'}
+											{code.use_count}{code.max_uses != null ? ` / ${code.max_uses}` : ''}
 										</td>
 										<td class="px-4 py-3 text-muted-foreground">
 											{#if code.expires_at}
-												{#if expired}
-													<span class="text-destructive">Expired</span>
-												{:else}
-													{new Date(code.expires_at).toLocaleString()}
-												{/if}
+												{new Date(code.expires_at).toLocaleString()}
 											{:else}
 												Never
 											{/if}
@@ -1152,29 +1131,34 @@ function switchTab(tab: typeof activeTab) {
 							</tbody>
 						</table>
 					</div>
-				{:else}
-					<p class="text-muted-foreground">No invite codes yet.</p>
 				{/if}
 			</div>
 		{/if}
 	</div>
 </div>
 
-<!-- Temp Password Modal -->
-{#if tempPassword}
+<!-- Confirm Delete Messages Modal -->
+{#if confirmDeleteMessages}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog">
 		<div class="w-full max-w-sm rounded-lg border border-border bg-card p-6">
-			<h3 class="mb-2 text-sm font-semibold text-foreground">Temporary Password</h3>
-			<p class="mb-3 text-sm text-muted-foreground">Give this password to the user. They should change it after logging in.</p>
-			<div class="mb-4 rounded-md bg-secondary px-3 py-2 font-mono text-sm text-foreground select-all">
-				{tempPassword}
+			<h3 class="mb-2 text-sm font-semibold text-foreground">Delete All Messages</h3>
+			<p class="mb-4 text-sm text-muted-foreground">
+				Are you sure you want to delete all messages from <strong>{confirmDeleteMessages.name}</strong>? This cannot be undone.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (confirmDeleteMessages = null)}
+					class="flex-1 rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-secondary"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={() => { if (confirmDeleteMessages) deleteUserMessages(confirmDeleteMessages.id); }}
+					class="flex-1 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+				>
+					Delete All Messages
+				</button>
 			</div>
-			<button
-				onclick={() => (tempPassword = null)}
-				class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-			>
-				Done
-			</button>
 		</div>
 	</div>
 {/if}

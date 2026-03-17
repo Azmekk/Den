@@ -36,6 +36,7 @@ export interface UserInfo {
 	avatar_url?: string;
 	color?: string;
 	is_admin: boolean;
+	banned: boolean;
 }
 
 export interface AdminStats {
@@ -55,6 +56,17 @@ export interface EmoteInfo {
 	id: string;
 	name: string;
 	url: string;
+}
+
+export interface InviteCodeInfo {
+	id: string;
+	code: string;
+	max_uses?: number | null;
+	use_count: number;
+	expires_at?: string | null;
+	created_by: string;
+	created_by_username: string;
+	created_at: string;
 }
 
 export interface AppConfig {

@@ -101,6 +101,18 @@ func (q *Queries) DeleteMessage(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteMessagesByUserID = `-- name: DeleteMessagesByUserID :execrows
+DELETE FROM messages WHERE user_id = $1
+`
+
+func (q *Queries) DeleteMessagesByUserID(ctx context.Context, userID uuid.UUID) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteMessagesByUserID, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteOldestMessages = `-- name: DeleteOldestMessages :exec
 DELETE FROM messages
 WHERE id IN (
