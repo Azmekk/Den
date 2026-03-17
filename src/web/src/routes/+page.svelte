@@ -34,7 +34,7 @@ let notificationsMuted = $state(
 function playMentionSound() {
 	if (notificationsMuted) return;
 	try {
-		new Audio('/audio/den_notification.mp3').play();
+		new Audio('/audio/den_notification.mp3').play().catch(() => {});
 	} catch {
 		// Audio not available
 	}
@@ -96,14 +96,19 @@ onMount(() => {
 		messageStore.handleNewMessage(data);
 
 		const currentChannelId = channelStore.selectedChannelId;
-		if (data.channel_id !== currentChannelId) {
-			unreadStore.increment(data.channel_id);
+		const isOtherChannel = data.channel_id !== currentChannelId;
+		const isOwnMessage = auth.user && data.user_id === auth.user.id;
 
-			const mentionedIds: string[] = data.mentioned_user_ids ?? [];
-			const isMentioned = auth.user && mentionedIds.includes(auth.user.id);
-			const isEveryoneMentioned = !!data.mentioned_everyone;
-			if (isMentioned || isEveryoneMentioned) {
-				unreadStore.incrementMention(data.channel_id);
+		if (isOtherChannel) {
+			unreadStore.increment(data.channel_id);
+		}
+
+		const mentionedIds: string[] = data.mentioned_user_ids ?? [];
+		const isMentioned = auth.user && mentionedIds.includes(auth.user.id);
+		const isEveryoneMentioned = !!data.mentioned_everyone;
+		if ((isMentioned || isEveryoneMentioned) && !isOwnMessage) {
+			unreadStore.incrementMention(data.channel_id);
+			if (isOtherChannel || !document.hasFocus()) {
 				playMentionSound();
 				sendDesktopNotification(data, 'mention');
 			}
@@ -223,6 +228,12 @@ onMount(() => {
 	}
 	document.addEventListener('keydown', handleKeydown);
 
+	function handleWindowFocus() {
+		const id = channelStore.selectedChannelId;
+		if (id) unreadStore.markRead(id);
+	}
+	window.addEventListener('focus', handleWindowFocus);
+
 	// Track mobile virtual keyboard — set explicit viewport height for iOS Safari
 	function updateViewportHeight() {
 		if (window.visualViewport) {
@@ -254,6 +265,7 @@ onMount(() => {
 
 	return () => {
 		document.removeEventListener('keydown', handleKeydown);
+		window.removeEventListener('focus', handleWindowFocus);
 		if (window.visualViewport) {
 			window.visualViewport.removeEventListener('resize', updateViewportHeight);
 			window.visualViewport.removeEventListener('scroll', updateViewportHeight);

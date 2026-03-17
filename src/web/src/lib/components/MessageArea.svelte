@@ -270,6 +270,12 @@ function handleKeydown(e: KeyboardEvent) {
 	if (e.key === 'Enter' && !e.shiftKey) {
 		e.preventDefault();
 		sendMsg();
+	} else if (e.key === 'ArrowUp' && !messageInput.trim()) {
+		const myLastMsg = [...messages].reverse().find((m) => m.user_id === auth.user?.id);
+		if (myLastMsg) {
+			e.preventDefault();
+			startEdit(myLastMsg);
+		}
 	}
 }
 
