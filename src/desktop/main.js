@@ -314,7 +314,20 @@ ipcMain.on('send-notification', (_event, { title, body }) => {
   }
 });
 
-// App lifecycle
+// App lifecycle — enforce single instance
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 app.whenReady().then(() => {
   // Allow screen sharing via getDisplayMedia — Electron requires this handler

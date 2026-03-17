@@ -111,6 +111,7 @@ function createAuth() {
 			password,
 			options: {
 				data: metadata,
+				emailRedirectTo: window.location.origin,
 			},
 		});
 		if (error) throw new Error(error.message);

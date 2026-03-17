@@ -46,6 +46,22 @@ let customColorInput = $state('');
 let avatarCropOpen = $state(false);
 let avatarFile: File | null = $state(null);
 let avatarInputEl: HTMLInputElement | undefined = $state();
+let pendingUserRefetch = false;
+
+$effect(() => {
+	const allParticipantIds = channelStore.sortedVoiceChannels.flatMap(
+		(channel) => voiceStore.getParticipants(channel.id),
+	);
+	const hasMissing = allParticipantIds.some(
+		(uid) => !usersStore.users.find((user) => user.id === uid),
+	);
+	if (hasMissing && !pendingUserRefetch) {
+		pendingUserRefetch = true;
+		usersStore.fetch().finally(() => {
+			pendingUserRefetch = false;
+		});
+	}
+});
 
 const currentAvatarUrl = $derived(currentUser?.avatar_url);
 
@@ -187,17 +203,38 @@ const tab = $derived(layoutStore.sidebarTab);
 						<div class="ml-6 mb-1">
 							{#each participants as uid}
 								{@const user = usersStore.users.find((u) => u.id === uid)}
-								{#if user}
+								{#if !user}
+									<div class="flex items-center gap-1.5 py-0.5 px-1">
+										<div class="h-6 w-6 rounded-full bg-muted shrink-0 animate-pulse"></div>
+										<span class="text-xs text-muted-foreground/50">Loading…</span>
+									</div>
+								{:else}
 									{@const color = getUserColor(user)}
 									{@const isRemoteScreenSharer = voiceStore.isUserScreenSharing(uid) && uid !== auth.user?.id && voiceStore.screenShareTrack}
 									{#snippet participantRow()}
 										<div class="flex items-center gap-1.5 py-0.5 px-1">
-											<div
-												class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow"
-												style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
-											>
-												{user.username.charAt(0).toUpperCase()}
-											</div>
+											{#if user.avatar_url}
+												<img
+													src={user.avatar_url}
+													alt={user.username}
+													class="h-6 w-6 rounded-full object-cover shrink-0 transition-shadow"
+													style="{voiceStore.isSpeaking(uid) ? 'box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
+													onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+												/>
+												<div
+													class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow hidden"
+													style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
+												>
+													{user.username.charAt(0).toUpperCase()}
+												</div>
+											{:else}
+												<div
+													class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium text-white shrink-0 transition-shadow"
+													style="background-color: {color}{voiceStore.isSpeaking(uid) ? '; box-shadow: 0 0 0 2px rgb(34 197 94)' : ''}"
+												>
+													{user.username.charAt(0).toUpperCase()}
+												</div>
+											{/if}
 											<span class="text-xs text-muted-foreground truncate">{user.display_name || user.username}</span>
 										{#if voiceStore.isUserMuted(uid)}
 											<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><line x1="1" x2="23" y1="1" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/><line x1="12" x2="12" y1="19" y2="24"/><line x1="8" x2="16" y1="24" y2="24"/></svg>
