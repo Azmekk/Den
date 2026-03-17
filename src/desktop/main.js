@@ -34,7 +34,7 @@ let wasAuthenticated = false;
 
 // Set app identity for Windows notifications
 if (process.platform === 'win32') {
-  app.setAppUserModelId('Den');
+  app.setAppUserModelId('com.den.desktop');
 }
 
 // Hide default menu bar
