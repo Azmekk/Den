@@ -2,8 +2,6 @@
 import { auth } from '$lib/stores/auth.svelte';
 import { emoteStore } from '$lib/stores/emotes.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
-import { api } from '$lib/api';
-
 interface Props {
 	content: string;
 }
@@ -18,16 +16,6 @@ const urlRegex = /https?:\/\/[^\s<>]+/g;
 interface ContentPart {
 	type: 'text' | 'emote' | 'mention' | 'url';
 	value: string;
-}
-
-interface UnfurlData {
-	url: string;
-	title?: string;
-	description?: string;
-	image?: string;
-	video?: string;
-	site_name?: string;
-	type?: string;
 }
 
 function splitTextWithUrls(text: string): ContentPart[] {
@@ -129,74 +117,11 @@ const youtubeEmbeds = $derived.by(() => {
 		.filter((e) => e.embedUrl !== null) as { url: string; embedUrl: string }[];
 });
 
-// URLs that need server-side unfurling (everything except direct media and YouTube)
-const unfurlUrls = $derived.by(() => {
-	return parts
-		.filter((p) => p.type === 'url' && !isDirectMediaUrl(p.value) && !isYouTubeUrl(p.value))
-		.map((p) => p.value);
-});
-
 // Hide URL text for direct image embeds (not videos — those show URL + embed)
 const embedUrls = $derived(new Set(
 	directEmbeds.filter((e) => !isVideoUrl(e.value)).map((e) => e.value)
 ));
 
-// Global unfurl cache shared across all message instances
-const unfurlCache = new Map<string, UnfurlData | null>();
-const unfurlPending = new Set<string>();
-
-let unfurlResults = $state<Map<string, UnfurlData>>(new Map());
-
-$effect(() => {
-	const urls = unfurlUrls;
-	if (urls.length === 0) return;
-
-	for (const url of urls) {
-		if (unfurlResults.has(url)) continue;
-
-		if (unfurlCache.has(url)) {
-			const cached = unfurlCache.get(url);
-			if (cached) {
-				unfurlResults = new Map(unfurlResults).set(url, cached);
-			}
-			continue;
-		}
-
-		if (unfurlPending.has(url)) continue;
-		unfurlPending.add(url);
-
-		api.get<UnfurlData>(`/unfurl?url=${encodeURIComponent(url)}`).then((data) => {
-			unfurlCache.set(url, data);
-			unfurlResults = new Map(unfurlResults).set(url, data);
-		}).catch(() => {
-			unfurlCache.set(url, null);
-		}).finally(() => {
-			unfurlPending.delete(url);
-		});
-	}
-});
-
-function isVideoEmbed(data: UnfurlData): boolean {
-	return !!data.video && /\.(mp4|webm)(\?.*)?$/i.test(data.video);
-}
-
-function isYouTubeEmbed(data: UnfurlData): boolean {
-	return !!data.site_name && /youtube/i.test(data.site_name);
-}
-
-function getYouTubeEmbedUrl(data: UnfurlData): string | null {
-	// Try to extract video ID from the original URL or og:video
-	const urlsToCheck = [data.url, data.video ?? ''];
-	for (const u of urlsToCheck) {
-		const m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/);
-		if (m) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
-	}
-	return null;
-}
-
-function hasRichEmbed(data: UnfurlData): boolean {
-	return !!(data.title || data.description);
-}
 </script>
 
 <div class="text-sm text-foreground min-w-0 overflow-hidden">
@@ -237,7 +162,7 @@ function hasRichEmbed(data: UnfurlData): boolean {
 		{/each}
 	</p>
 
-	{#if directEmbeds.length > 0 || youtubeEmbeds.length > 0 || unfurlResults.size > 0}
+	{#if directEmbeds.length > 0 || youtubeEmbeds.length > 0}
 		<div class="mt-1 flex flex-col items-start gap-1">
 			{#each youtubeEmbeds as yt}
 				<iframe
@@ -287,79 +212,6 @@ function hasRichEmbed(data: UnfurlData): boolean {
 					>
 						<source src={embed.value} />
 					</video>
-				{/if}
-			{/each}
-
-			{#each unfurlUrls as url}
-				{@const data = unfurlResults.get(url)}
-				{#if data}
-					{#if isYouTubeEmbed(data)}
-						{@const embedUrl = getYouTubeEmbedUrl(data)}
-						{#if embedUrl}
-							<iframe
-								width="400"
-								height="225"
-								src={embedUrl}
-								title={data.title ?? 'YouTube video'}
-								frameborder="0"
-								allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-								allowfullscreen
-								class="w-[400px] max-w-full rounded"
-							></iframe>
-						{/if}
-					{:else if isVideoEmbed(data)}
-						{#if hasRichEmbed(data)}
-							<div class="flex max-w-[400px] overflow-hidden rounded border border-border bg-secondary/50">
-								<div class="flex-1 min-w-0 p-3">
-									{#if data.site_name}
-										<p class="text-xs text-muted-foreground truncate">{data.site_name}</p>
-									{/if}
-									{#if data.title}
-										<a href={url} target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-primary hover:underline line-clamp-2">{data.title}</a>
-									{/if}
-									{#if data.description}
-										<p class="mt-1 text-xs text-muted-foreground line-clamp-3">{data.description}</p>
-									{/if}
-								</div>
-							</div>
-						{/if}
-						<!-- svelte-ignore a11y_media_has_caption -->
-						<video
-							controls
-							preload="metadata"
-							poster={data.image}
-							class="max-h-[400px] max-w-[400px] rounded"
-						>
-							<source src={data.video} />
-						</video>
-					{:else if data.image && !hasRichEmbed(data)}
-						<a href={url} target="_blank" rel="noopener noreferrer">
-							<img
-								src={data.image}
-								alt={data.title ?? 'embedded media'}
-								class="max-h-[400px] max-w-full rounded object-contain cursor-pointer hover:opacity-90 transition-opacity"
-							/>
-						</a>
-					{:else if hasRichEmbed(data)}
-						<div class="flex max-w-[400px] overflow-hidden rounded border border-border bg-secondary/50">
-							<div class="flex-1 min-w-0 p-3">
-								{#if data.site_name}
-									<p class="text-xs text-muted-foreground truncate">{data.site_name}</p>
-								{/if}
-								{#if data.title}
-									<a href={url} target="_blank" rel="noopener noreferrer" class="text-sm font-medium text-primary hover:underline line-clamp-2">{data.title}</a>
-								{/if}
-								{#if data.description}
-									<p class="mt-1 text-xs text-muted-foreground line-clamp-3">{data.description}</p>
-								{/if}
-							</div>
-							{#if data.image}
-								<a href={url} target="_blank" rel="noopener noreferrer" class="flex-shrink-0">
-									<img src={data.image} alt="" class="h-full w-20 object-cover" />
-								</a>
-							{/if}
-						</div>
-					{/if}
 				{/if}
 			{/each}
 		</div>

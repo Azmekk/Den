@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -117,20 +118,39 @@ func main() {
 		log.Println("message cleanup loop started (hourly check, limit from DB)")
 	}
 
-	unfurlSvc := service.NewUnfurlService(os.Getenv("UNFURL_USER_AGENT"))
+	allowedOrigins := parseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	if len(allowedOrigins) > 0 {
+		log.Printf("WebSocket allowed origins: %v", allowedOrigins)
+	} else {
+		log.Println("ALLOWED_ORIGINS not set, WebSocket will use same-origin check")
+	}
 
 	staticFS, fsError := fs.Sub(StaticFiles, "web/build")
 	if fsError != nil {
 		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, unfurlSvc, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey)
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey, allowedOrigins)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, appRouter); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var origins []string
+	for _, origin := range strings.Split(raw, ",") {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+	return origins
 }
 
 func runMigrations(conn *sql.DB) error {

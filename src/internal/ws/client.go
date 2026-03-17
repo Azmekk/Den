@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ type Client struct {
 	IsAdmin    bool
 	msgHandler MessageHandler
 	dmHandler  DMMessageHandler
+	subsMu     sync.RWMutex
 	subs       map[uuid.UUID]bool
 }
 
@@ -41,6 +43,14 @@ func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string
 		dmHandler:  dmHandler,
 		subs:       make(map[uuid.UUID]bool),
 	}
+}
+
+// IsSubscribed checks whether the client is subscribed to the given channel.
+// Safe for concurrent use from the client's read goroutine while the hub goroutine writes subs.
+func (client *Client) IsSubscribed(channelID uuid.UUID) bool {
+	client.subsMu.RLock()
+	defer client.subsMu.RUnlock()
+	return client.subs[channelID]
 }
 
 type incomingMessage struct {
@@ -119,6 +129,10 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		c.hub.Unsubscribe(c, msg.ChannelID)
 
 	case "send_message":
+		if !c.IsSubscribed(msg.ChannelID) {
+			c.sendError("not subscribed to channel")
+			return
+		}
 		data, _, err := c.msgHandler.SendMessage(ctx, msg.ChannelID, c.UserID, c.Username, msg.Content)
 		if err != nil {
 			c.sendError(err.Error())
@@ -157,8 +171,10 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		}
 		if dmPairID != uuid.Nil {
 			// DM message: send to both users
-			otherUserID, err := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
-			if err == nil {
+			otherUserID, validateError := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
+			if validateError != nil {
+				log.Printf("ws: edit_message DM broadcast failed: ValidateUserInPair(%s, %s) returned error after mutation: %v", dmPairID, c.UserID, validateError)
+			} else {
 				c.hub.SendToUser(c.UserID, data)
 				c.hub.SendToUser(otherUserID, data)
 			}
@@ -180,8 +196,10 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		if dmPairID != uuid.Nil {
 			deleteEnvelope["dm_pair_id"] = dmPairID
 			data, _ := json.Marshal(deleteEnvelope)
-			otherUserID, err := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
-			if err == nil {
+			otherUserID, validateError := c.dmHandler.ValidateUserInPair(ctx, dmPairID, c.UserID)
+			if validateError != nil {
+				log.Printf("ws: delete_message DM broadcast failed: ValidateUserInPair(%s, %s) returned error after mutation: %v", dmPairID, c.UserID, validateError)
+			} else {
 				c.hub.SendToUser(c.UserID, data)
 				c.hub.SendToUser(otherUserID, data)
 			}

@@ -13,7 +13,7 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, unfurlSvc *service.UnfurlService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string, allowedOrigins []string) chi.Router {
 	authHandler := handler.NewAuthHandler(authSvc)
 	channelHandler := handler.NewChannelHandler(channelSvc)
 	messageHandler := handler.NewMessageHandler(messageSvc, hub)
@@ -27,7 +27,6 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		mediaHandler = handler.NewMediaHandler(mediaSvc)
 	}
 	exportHandler := handler.NewExportHandler(channelSvc, userSvc, emoteSvc, dmSvc, userSvc.Queries(), authSvc.GetInstanceName)
-	unfurlHandler := handler.NewUnfurlHandler(unfurlSvc)
 	var voiceHandler *handler.VoiceHandler
 	if voiceSvc != nil {
 		voiceHandler = handler.NewVoiceHandler(voiceSvc, channelSvc)
@@ -76,7 +75,6 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			router.Put("/users/me/color", userHandler.UpdateColor)
 			router.Post("/users/me/avatar", userHandler.UploadAvatar)
 			router.Get("/emotes", emoteHandler.List)
-			router.Get("/unfurl", unfurlHandler.Unfurl)
 			router.Get("/export", exportHandler.Export)
 			if mediaHandler != nil {
 				router.Post("/upload/image", mediaHandler.UploadImage)
@@ -119,7 +117,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		})
 
 		// WebSocket (auth via first message)
-		router.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc))
+		router.Get("/ws", ws.ServeWS(hub, authSvc, messageSvc, dmSvc, allowedOrigins))
 	})
 
 	// SPA static files — serve real files directly, fall back to index.html

@@ -118,6 +118,8 @@ func (h *Hub) broadcastAll(data []byte) {
 func (h *Hub) removeClient(client *Client) bool {
 	delete(h.clients, client)
 	close(client.send)
+	client.subsMu.Lock()
+	defer client.subsMu.Unlock()
 	for chID := range client.subs {
 		if m, ok := h.channels[chID]; ok {
 			delete(m, client)
@@ -253,7 +255,9 @@ func (h *Hub) Run() {
 				h.channels[req.channelID] = make(map[*Client]bool)
 			}
 			h.channels[req.channelID][req.client] = true
+			req.client.subsMu.Lock()
 			req.client.subs[req.channelID] = true
+			req.client.subsMu.Unlock()
 
 		case req := <-h.unsub:
 			if members, ok := h.channels[req.channelID]; ok {
@@ -262,7 +266,9 @@ func (h *Hub) Run() {
 					delete(h.channels, req.channelID)
 				}
 			}
+			req.client.subsMu.Lock()
 			delete(req.client.subs, req.channelID)
+			req.client.subsMu.Unlock()
 
 		case msg := <-h.broadcast:
 			if members, ok := h.channels[msg.channelID]; ok {
