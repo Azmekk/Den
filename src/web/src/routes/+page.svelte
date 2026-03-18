@@ -10,7 +10,6 @@ import { emoteStore } from '$lib/stores/emotes.svelte';
 import { layoutStore } from '$lib/stores/layout.svelte';
 import { messageStore } from '$lib/stores/messages.svelte';
 import { pinStore } from '$lib/stores/pins.svelte';
-import { presence } from '$lib/stores/presence.svelte';
 import { typing } from '$lib/stores/typing.svelte';
 import { unreadStore } from '$lib/stores/unread.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
@@ -191,8 +190,6 @@ onMount(() => {
 	websocket.on('unpin_message', handleUnpinMessage);
 	websocket.on('user_registered', handleUserRegistered);
 	websocket.on('user_updated', handleUserUpdated);
-	websocket.on('presence_initial', presence.handlePresenceInitial);
-	websocket.on('presence_update', presence.handlePresenceUpdate);
 	websocket.on('typing_start', typing.handleTypingStart);
 	websocket.on('typing_stop', typing.handleTypingStop);
 	websocket.on('emote_list_update', emoteStore.refresh);
@@ -283,8 +280,6 @@ onMount(() => {
 		websocket.off('unpin_message', handleUnpinMessage);
 		websocket.off('user_registered', handleUserRegistered);
 		websocket.off('user_updated', handleUserUpdated);
-		websocket.off('presence_initial', presence.handlePresenceInitial);
-		websocket.off('presence_update', presence.handlePresenceUpdate);
 		websocket.off('typing_start', typing.handleTypingStart);
 		websocket.off('typing_stop', typing.handleTypingStop);
 		websocket.off('emote_list_update', emoteStore.refresh);

@@ -3,6 +3,7 @@
   import { onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { auth } from "$lib/stores/auth.svelte";
+  import { presence } from "$lib/stores/presence.svelte";
   import { voiceStore } from "$lib/stores/voice.svelte";
   import { websocket } from "$lib/stores/websocket.svelte";
 
@@ -11,6 +12,15 @@
   let ready = $state(false);
 
   onMount(() => {
+    // Register global listeners FIRST, before any connection can happen.
+    // This prevents a race where the $effect safety net connects the WebSocket
+    // during auth.init() before listeners are registered, causing presence_initial
+    // and voice_state_initial messages to be silently dropped.
+    websocket.on("voice_state_initial", voiceStore.handleVoiceStateInitial);
+    websocket.on("voice_state_update", voiceStore.handleVoiceStateUpdate);
+    websocket.on("presence_initial", presence.handlePresenceInitial);
+    websocket.on("presence_update", presence.handlePresenceUpdate);
+
     auth.init().then(() => {
       ready = true;
 
@@ -21,10 +31,6 @@
         goto("/setup-username");
         return;
       }
-
-      // Voice state listeners — must persist across page navigations
-      websocket.on("voice_state_initial", voiceStore.handleVoiceStateInitial);
-      websocket.on("voice_state_update", voiceStore.handleVoiceStateUpdate);
 
       // Connect WebSocket
       auth.getToken().then((token) => {
@@ -53,6 +59,8 @@
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       websocket.off("voice_state_initial", voiceStore.handleVoiceStateInitial);
       websocket.off("voice_state_update", voiceStore.handleVoiceStateUpdate);
+      websocket.off("presence_initial", presence.handlePresenceInitial);
+      websocket.off("presence_update", presence.handlePresenceUpdate);
       voiceStore.leave(true);
       websocket.disconnect();
     };
@@ -60,6 +68,7 @@
 
   // Safety net: reconnect WS if logged in but not connected
   $effect(() => {
+    if (!ready) return;
     const currentToken = auth.accessToken; // reactive trigger
     const isConnected = websocket.connected;
     const isReconnecting = websocket.reconnecting;
