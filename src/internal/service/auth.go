@@ -129,10 +129,10 @@ func (service *AuthService) ValidateSupabaseToken(tokenString string) (jwt.MapCl
 // SyncUser looks up or creates a Den user from Supabase JWT claims.
 // On first request from a new Supabase user, a local Den user is created.
 // The first user to register becomes admin.
-func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) (db.User, error) {
+func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) (db.User, bool, error) {
 	supabaseID, _ := claims["sub"].(string)
 	if supabaseID == "" {
-		return db.User{}, ErrInvalidToken
+		return db.User{}, false, ErrInvalidToken
 	}
 
 	// Check in-memory cache first
@@ -140,9 +140,9 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 		entry := cached.(cachedUser)
 		if time.Since(entry.fetchedAt) < userCacheTTL {
 			if entry.user.Banned {
-				return db.User{}, ErrUserBanned
+				return db.User{}, false, ErrUserBanned
 			}
-			return entry.user, nil
+			return entry.user, false, nil
 		}
 		service.userCache.Delete(supabaseID)
 	}
@@ -151,10 +151,10 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 	user, lookupError := service.Queries.GetUserBySupabaseID(ctx, sql.NullString{String: supabaseID, Valid: true})
 	if lookupError == nil {
 		if user.Banned {
-			return db.User{}, ErrUserBanned
+			return db.User{}, false, ErrUserBanned
 		}
 		service.userCache.Store(supabaseID, cachedUser{user: user, fetchedAt: time.Now()})
-		return user, nil
+		return user, false, nil
 	}
 
 	// User doesn't exist — create from Supabase claims
@@ -190,7 +190,7 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 	// Enforce invite code when registration is closed (skip for first user)
 	userCount, countError := service.Queries.CountUsers(ctx)
 	if countError != nil {
-		return db.User{}, countError
+		return db.User{}, false, countError
 	}
 	isFirstUser := userCount == 0
 
@@ -201,28 +201,28 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 			if deleteError := service.SupabaseDeleteUser(supabaseID); deleteError != nil {
 				log.Printf("warning: failed to delete supabase user after invite rejection: %v", deleteError)
 			}
-			return db.User{}, ErrInviteRequired
+			return db.User{}, false, ErrInviteRequired
 		}
 		code, lookupError := service.Queries.GetInviteCodeByCode(ctx, inviteCode)
 		if lookupError != nil {
 			if deleteError := service.SupabaseDeleteUser(supabaseID); deleteError != nil {
 				log.Printf("warning: failed to delete supabase user after invite rejection: %v", deleteError)
 			}
-			return db.User{}, ErrInviteRequired
+			return db.User{}, false, ErrInviteRequired
 		}
 		// Validate expiry
 		if code.ExpiresAt.Valid && code.ExpiresAt.Time.Before(time.Now()) {
 			if deleteError := service.SupabaseDeleteUser(supabaseID); deleteError != nil {
 				log.Printf("warning: failed to delete supabase user after invite rejection: %v", deleteError)
 			}
-			return db.User{}, ErrInviteRequired
+			return db.User{}, false, ErrInviteRequired
 		}
 		// Validate use count
 		if code.MaxUses.Valid && code.UseCount >= code.MaxUses.Int32 {
 			if deleteError := service.SupabaseDeleteUser(supabaseID); deleteError != nil {
 				log.Printf("warning: failed to delete supabase user after invite rejection: %v", deleteError)
 			}
-			return db.User{}, ErrInviteRequired
+			return db.User{}, false, ErrInviteRequired
 		}
 		validatedInviteCode = &code
 	}
@@ -252,10 +252,10 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 				NeedsUsername: needsUsername,
 			})
 			if createError != nil {
-				return db.User{}, createError
+				return db.User{}, false, createError
 			}
 		} else {
-			return db.User{}, createError
+			return db.User{}, false, createError
 		}
 	}
 
@@ -267,7 +267,7 @@ func (service *AuthService) SyncUser(ctx context.Context, claims jwt.MapClaims) 
 	}
 
 	service.userCache.Store(supabaseID, cachedUser{user: user, fetchedAt: time.Now()})
-	return user, nil
+	return user, true, nil
 }
 
 // SetUsername sets the username for a user who needs one (e.g. OAuth users).

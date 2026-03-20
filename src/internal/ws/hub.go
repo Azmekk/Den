@@ -222,6 +222,18 @@ func (h *Hub) Run() {
 			default:
 			}
 
+			// Broadcast user_registered if this is a brand new user
+			if client.IsNewUser {
+				registeredMsg, _ := json.Marshal(map[string]any{
+					"type":         "user_registered",
+					"id":           client.UserID,
+					"username":     client.Username,
+					"display_name": client.DisplayName,
+					"is_admin":     client.IsAdmin,
+				})
+				h.broadcastAll(registeredMsg)
+			}
+
 			// Broadcast online status if first connection
 			if isFirstConnection {
 				update, _ := json.Marshal(map[string]any{

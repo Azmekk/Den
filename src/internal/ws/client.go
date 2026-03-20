@@ -19,29 +19,33 @@ const (
 )
 
 type Client struct {
-	hub        *Hub
-	conn       *websocket.Conn
-	send       chan []byte
-	UserID     uuid.UUID
-	Username   string
-	IsAdmin    bool
-	msgHandler MessageHandler
-	dmHandler  DMMessageHandler
-	subsMu     sync.RWMutex
-	subs       map[uuid.UUID]bool
+	hub         *Hub
+	conn        *websocket.Conn
+	send        chan []byte
+	UserID      uuid.UUID
+	Username    string
+	DisplayName string
+	IsAdmin     bool
+	IsNewUser   bool
+	msgHandler  MessageHandler
+	dmHandler   DMMessageHandler
+	subsMu      sync.RWMutex
+	subs        map[uuid.UUID]bool
 }
 
-func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, isAdmin bool, msgHandler MessageHandler, dmHandler DMMessageHandler) *Client {
+func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, displayName string, isAdmin bool, isNewUser bool, msgHandler MessageHandler, dmHandler DMMessageHandler) *Client {
 	return &Client{
-		hub:        hub,
-		conn:       conn,
-		send:       make(chan []byte, 256),
-		UserID:     userID,
-		Username:   username,
-		IsAdmin:    isAdmin,
-		msgHandler: msgHandler,
-		dmHandler:  dmHandler,
-		subs:       make(map[uuid.UUID]bool),
+		hub:         hub,
+		conn:        conn,
+		send:        make(chan []byte, 256),
+		UserID:      userID,
+		Username:    username,
+		DisplayName: displayName,
+		IsAdmin:     isAdmin,
+		IsNewUser:   isNewUser,
+		msgHandler:  msgHandler,
+		dmHandler:   dmHandler,
+		subs:        make(map[uuid.UUID]bool),
 	}
 }
 

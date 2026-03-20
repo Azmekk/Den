@@ -43,7 +43,7 @@ func RequireAuth(authSvc *service.AuthService) func(http.Handler) http.Handler {
 			}
 
 			// Look up or create the Den user from Supabase claims
-			user, syncError := authSvc.SyncUser(request.Context(), claims)
+			user, _, syncError := authSvc.SyncUser(request.Context(), claims)
 			if syncError != nil {
 				if errors.Is(syncError, service.ErrUserBanned) {
 					httputil.WriteError(writer, http.StatusForbidden, "account is banned")

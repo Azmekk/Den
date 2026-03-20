@@ -531,7 +531,7 @@ async function uploadDroppedFile(file: File) {
 		{/if}
 
 		<!-- Typing indicator -->
-		<div class="h-6 px-4">
+		<div class="h-5 px-4">
 			{#if !isDM && typingUsers.length > 0}
 				<p class="text-xs text-muted-foreground italic">{typingText(typingUsers)}</p>
 			{/if}

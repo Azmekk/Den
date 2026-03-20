@@ -136,7 +136,7 @@ const embedUrls = $derived(new Set(
 						src={emote.url}
 						alt=":{emote.name}:"
 						title=":{emote.name}:"
-						class="inline-block align-middle {isEmoteOnly ? 'h-10 w-10' : 'h-6 w-6'}"
+						class="inline-block align-middle max-w-full object-contain {isEmoteOnly ? 'h-10' : 'h-6'}"
 					/>
 				{:else}
 					<span class="text-muted-foreground">:unknown:</span>

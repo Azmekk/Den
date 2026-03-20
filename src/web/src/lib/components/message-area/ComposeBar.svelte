@@ -125,7 +125,7 @@ function removeAttachment(attachmentIndex: number) {
 function autoResize(event: Event) {
 	const element = event.target as HTMLTextAreaElement;
 	element.style.height = 'auto';
-	element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
+	element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
 }
 
 function handlePickerSelect(text: string) {
@@ -198,25 +198,8 @@ function handlePaste(event: ClipboardEvent) {
 }
 </script>
 
-<!-- Reply compose bar -->
-{#if replyingTo}
-	<div class="flex items-center gap-2 border-t border-border bg-secondary/50 px-4 py-2">
-		<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-		<span class="text-xs text-muted-foreground">Replying to</span>
-		<span class="text-xs font-medium text-foreground">@{replyingTo.display_name || replyingTo.username}</span>
-		<span class="flex-1 truncate text-xs text-muted-foreground">{replyingTo.content.slice(0, 100)}</span>
-		<button
-			onclick={onCancelReply}
-			class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-			title="Cancel reply"
-		>
-			<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-		</button>
-	</div>
-{/if}
-
-<!-- Input -->
-<div class="relative border-t border-border p-2 md:p-4">
+<!-- Compose bar wrapper -->
+<div class="relative px-3 pb-3 pt-1 md:px-4 md:pb-4 md:pt-2">
 	<MentionAutocomplete
 		inputValue={messageInput}
 		{cursorPosition}
@@ -231,32 +214,6 @@ function handlePaste(event: ClipboardEvent) {
 		onSelect={handleEmoteSelect}
 		onKeydown={(handler) => emoteAutocompleteHandler = handler}
 	/>
-	{#if attachments.length > 0}
-		<div class="mb-2 flex flex-wrap gap-2">
-			{#each attachments as attachment, attachmentIndex}
-				<div class="relative group">
-					{#if attachment.type === 'image'}
-						<img
-							src={attachment.url}
-							alt="attachment"
-							class="h-20 w-20 rounded-lg object-cover border border-border"
-						/>
-					{:else}
-						<div class="h-20 w-20 rounded-lg border border-border bg-secondary flex items-center justify-center">
-							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
-						</div>
-					{/if}
-					<button
-						onclick={() => removeAttachment(attachmentIndex)}
-						class="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow"
-						title="Remove"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-					</button>
-				</div>
-			{/each}
-		</div>
-	{/if}
 	<input
 		bind:this={fileInputEl}
 		type="file"
@@ -264,7 +221,10 @@ function handlePaste(event: ClipboardEvent) {
 		class="hidden"
 		onchange={handleFileSelect}
 	/>
+
+	<!-- Input row: plus button | container | emoji + send -->
 	<div class="flex items-end gap-1.5 md:gap-2 min-w-0">
+		<!-- Plus button (outside container, left) -->
 		<div class="relative shrink-0">
 			<button
 				onclick={() => plusMenuOpen = !plusMenuOpen}
@@ -298,18 +258,79 @@ function handlePaste(event: ClipboardEvent) {
 				</div>
 			{/if}
 		</div>
-		<textarea
-			bind:this={textareaEl}
-			bind:value={messageInput}
-			onkeydown={handleKeydown}
-			oninput={handleInput}
-			onpaste={handlePaste}
-			onclick={updateCursorPosition}
-			onkeyup={updateCursorPosition}
-			placeholder={placeholderText}
-			rows="1"
-			class="flex-1 min-w-0 min-h-[38px] max-h-[120px] resize-none rounded-lg border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none"
-		></textarea>
+
+		<!-- Unified input container -->
+		<div class="flex-1 min-w-0 rounded-xl bg-secondary border border-border">
+			<!-- Reply bar -->
+			{#if replyingTo}
+				<div class="flex items-center gap-2 rounded-t-xl bg-secondary/50 px-3 py-2 border-b border-border/50">
+					<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+					<span class="text-xs text-muted-foreground">Replying to</span>
+					<span class="text-xs font-medium text-foreground">@{replyingTo.display_name || replyingTo.username}</span>
+					<span class="flex-1 truncate text-xs text-muted-foreground">{replyingTo.content.slice(0, 100)}</span>
+					<button
+						onclick={onCancelReply}
+						class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+						title="Cancel reply"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+					</button>
+				</div>
+			{/if}
+
+			<!-- Attachments -->
+			{#if attachments.length > 0}
+				<div class="flex flex-wrap gap-2 px-3 pt-2">
+					{#each attachments as attachment, attachmentIndex}
+						<div class="relative group">
+							{#if attachment.type === 'image'}
+								<img
+									src={attachment.url}
+									alt="attachment"
+									class="h-20 w-20 rounded-lg object-cover border border-border"
+								/>
+							{:else}
+								<div class="h-20 w-20 rounded-lg border border-border bg-muted flex items-center justify-center">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+								</div>
+							{/if}
+							<button
+								onclick={() => removeAttachment(attachmentIndex)}
+								class="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow"
+								title="Remove"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<!-- Textarea -->
+			<textarea
+				bind:this={textareaEl}
+				bind:value={messageInput}
+				onkeydown={handleKeydown}
+				oninput={handleInput}
+				onpaste={handlePaste}
+				onclick={updateCursorPosition}
+				onkeyup={updateCursorPosition}
+				placeholder={placeholderText}
+				rows="1"
+				class="w-full min-h-[38px] max-h-[160px] resize-none bg-transparent px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none transition-[height] duration-100 ease-out"
+			></textarea>
+
+			<!-- Character counter (only near limit) -->
+			{#if messageInput.length > configStore.maxMessageChars * 0.8}
+				<div class="flex justify-end px-3 pb-1.5">
+					<span class="text-xs {messageInput.length > configStore.maxMessageChars ? 'text-destructive font-medium' : 'text-muted-foreground'}">
+						{messageInput.length}/{configStore.maxMessageChars}
+					</span>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Emoji + Send buttons (outside container, right) -->
 		<EmotePicker
 			onSelect={handlePickerSelect}
 			open={emojiPickerOpen}
@@ -324,11 +345,4 @@ function handlePaste(event: ClipboardEvent) {
 			<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
 		</button>
 	</div>
-	{#if messageInput.length > 0}
-		<div class="flex justify-end px-1 pt-1">
-			<span class="text-xs {messageInput.length > configStore.maxMessageChars ? 'text-destructive font-medium' : 'text-muted-foreground'}">
-				{messageInput.length}/{configStore.maxMessageChars}
-			</span>
-		</div>
-	{/if}
 </div>

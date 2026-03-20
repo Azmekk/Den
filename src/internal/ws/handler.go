@@ -96,7 +96,7 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 		}
 
 		// Look up or create Den user from Supabase claims
-		user, syncError := authService.SyncUser(request.Context(), claims)
+		user, isNewUser, syncError := authService.SyncUser(request.Context(), claims)
 		if syncError != nil {
 			if errors.Is(syncError, service.ErrUserBanned) {
 				writeError(conn, "account is banned")
@@ -114,7 +114,12 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 
 		conn.SetReadDeadline(time.Time{})
 
-		client := newClient(hub, conn, user.ID, user.Username, user.IsAdmin, msgHandler, dmHandler)
+		displayName := ""
+		if user.DisplayName.Valid {
+			displayName = user.DisplayName.String
+		}
+
+		client := newClient(hub, conn, user.ID, user.Username, displayName, user.IsAdmin, isNewUser, msgHandler, dmHandler)
 		hub.register <- client
 
 		go client.WritePump()
