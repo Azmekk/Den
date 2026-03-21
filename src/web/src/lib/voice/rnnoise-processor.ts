@@ -1,5 +1,3 @@
-import type { AudioProcessorOptions } from 'livekit-client';
-
 // Vite ?url imports resolve to the correct asset paths at build time
 import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
 import rnnoiseSimdWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
@@ -18,10 +16,14 @@ async function loadWasmBinary(): Promise<ArrayBuffer> {
 	return cachedWasmBinary;
 }
 
+export interface RnnoiseOptions {
+	track: MediaStreamTrack;
+	audioContext: AudioContext;
+}
+
 /**
- * LiveKit-compatible audio processor that runs RNNoise WASM noise suppression
- * via an AudioWorklet. Lazily loads the WASM binary on first use and caches
- * it for subsequent restarts.
+ * Audio processor that runs RNNoise WASM noise suppression via an AudioWorklet.
+ * Lazily loads the WASM binary on first use and caches it for subsequent restarts.
  */
 export class RnnoiseProcessor {
 	readonly name = 'rnnoise-suppressor';
@@ -31,11 +33,11 @@ export class RnnoiseProcessor {
 	private rnnoiseNode: AudioWorkletNode | null = null;
 	private destinationNode: MediaStreamAudioDestinationNode | null = null;
 
-	async init(options: AudioProcessorOptions): Promise<void> {
+	async init(options: RnnoiseOptions): Promise<void> {
 		await this.buildPipeline(options);
 	}
 
-	async restart(options: AudioProcessorOptions): Promise<void> {
+	async restart(options: RnnoiseOptions): Promise<void> {
 		this.disconnectNodes();
 		await this.buildPipeline(options);
 	}
@@ -44,7 +46,7 @@ export class RnnoiseProcessor {
 		this.disconnectNodes();
 	}
 
-	private async buildPipeline(options: AudioProcessorOptions): Promise<void> {
+	private async buildPipeline(options: RnnoiseOptions): Promise<void> {
 		const { track, audioContext } = options;
 
 		const wasmBinary = await loadWasmBinary();

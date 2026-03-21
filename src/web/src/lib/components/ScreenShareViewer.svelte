@@ -46,9 +46,10 @@
 		const track = voiceStore.screenShareTrack;
 		const el = videoEl;
 		if (!track || !el || !isWatching) return;
-		track.attach(el);
+		el.srcObject = new MediaStream([track]);
+		el.play().catch(() => {});
 		return () => {
-			track.detach(el);
+			el.srcObject = null;
 		};
 	});
 

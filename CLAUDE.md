@@ -86,7 +86,7 @@ docker compose down             # Stop everything
 
 - All source code lives under `src/` (Go module root: `github.com/Azmekk/den`)
 - Go entrypoint: `src/main.go`
-- Go packages: `src/internal/` (service, handler, middleware, router, httputil, ws, db)
+- Go packages: `src/internal/` (service, handler, middleware, router, httputil, ws, db, voice)
 - SvelteKit frontend: `src/web/`
 - DB migrations: `src/db/migrations/` (through 000015)
 - sqlc queries: `src/db/queries/`

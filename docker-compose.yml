@@ -16,15 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  livekit:
-    image: livekit/livekit-server:latest
-    ports:
-      - "7880:7880"
-      - "50500-50700:50500-50700/udp"
-    volumes:
-      - ./livekit.yaml:/livekit.yaml
-    command: --config /livekit.yaml
-
   app:
     image: ghcr.io/azmekk/den:latest
     build: .
@@ -36,10 +27,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       MAX_MESSAGES: ${MAX_MESSAGES:-50}
       OPEN_REGISTRATION: ${OPEN_REGISTRATION:-true}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
-      LIVEKIT_URL: http://livekit:7880
-      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
+      STUN_SERVERS: ${STUN_SERVERS:-stun:stun.l.google.com:19302}
       BUCKET_ENDPOINT: ${BUCKET_ENDPOINT:-}
       BUCKET_NAME: ${BUCKET_NAME:-}
       BUCKET_REGION: ${BUCKET_REGION:-}

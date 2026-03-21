@@ -3,6 +3,7 @@ import type { AppConfig } from '$lib/types';
 function createConfig() {
 	let uploadsEnabled = $state(false);
 	let voiceEnabled = $state(false);
+	let iceServers = $state<RTCIceServer[]>([]);
 	let maxMessageChars = $state(2000);
 	let openRegistration = $state(true);
 
@@ -12,6 +13,7 @@ function createConfig() {
 			const data: AppConfig = await res.json();
 			uploadsEnabled = data.uploads_enabled;
 			voiceEnabled = data.voice_enabled ?? false;
+			iceServers = data.ice_servers ?? [];
 			maxMessageChars = data.max_message_chars ?? 2000;
 			openRegistration = data.open_registration ?? true;
 		}
@@ -23,6 +25,9 @@ function createConfig() {
 		},
 		get voiceEnabled() {
 			return voiceEnabled;
+		},
+		get iceServers() {
+			return iceServers;
 		},
 		get maxMessageChars() {
 			return maxMessageChars;

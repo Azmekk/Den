@@ -119,7 +119,7 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 			displayName = user.DisplayName.String
 		}
 
-		client := newClient(hub, conn, user.ID, user.Username, displayName, user.IsAdmin, isNewUser, msgHandler, dmHandler)
+		client := newClient(hub, conn, user.ID, user.Username, displayName, user.IsAdmin, isNewUser, msgHandler, dmHandler, hub.VoiceManager)
 		hub.register <- client
 
 		go client.WritePump()

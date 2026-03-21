@@ -18,9 +18,12 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 
+	"github.com/pion/webrtc/v4"
+
 	"github.com/Azmekk/den/internal/db"
 	"github.com/Azmekk/den/internal/router"
 	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/voice"
 	"github.com/Azmekk/den/internal/ws"
 )
 
@@ -99,16 +102,33 @@ func main() {
 		log.Println("media upload enabled, cleanup loop started")
 	}
 
-	voiceSvc := service.NewVoiceService(
-		os.Getenv("LIVEKIT_API_KEY"),
-		os.Getenv("LIVEKIT_API_SECRET"),
-		os.Getenv("LIVEKIT_PUBLIC_URL"),
-		os.Getenv("LIVEKIT_URL"),
-	)
-	if voiceSvc != nil {
-		log.Println("voice channels enabled (LiveKit configured)")
-	} else {
-		log.Println("voice channels disabled (LIVEKIT_* env vars not set)")
+	// Voice (Pion WebRTC SFU)
+	var voiceManager *voice.Manager
+	{
+		stunServers := os.Getenv("STUN_SERVERS")
+		if stunServers == "" {
+			stunServers = "stun:stun.l.google.com:19302"
+		}
+
+		var iceServers []webrtc.ICEServer
+		iceServers = append(iceServers, webrtc.ICEServer{
+			URLs: strings.Split(stunServers, ","),
+		})
+
+		turnURL := os.Getenv("TURN_URL")
+		turnUsername := os.Getenv("TURN_USERNAME")
+		turnCredential := os.Getenv("TURN_CREDENTIAL")
+		if turnURL != "" {
+			iceServers = append(iceServers, webrtc.ICEServer{
+				URLs:       []string{turnURL},
+				Username:   turnUsername,
+				Credential: turnCredential,
+			})
+		}
+
+		voiceManager = voice.NewManager(iceServers)
+		hub.VoiceManager = voiceManager
+		log.Println("voice channels enabled (Pion WebRTC SFU)")
 	}
 
 	{
@@ -130,7 +150,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceSvc, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey, allowedOrigins)
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceManager, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey, allowedOrigins)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

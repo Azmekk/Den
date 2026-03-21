@@ -59,7 +59,7 @@
 		const context = canvas.getContext('2d');
 		if (!context) return;
 
-		const mediaStream = new MediaStream([track.mediaStreamTrack]);
+		const mediaStream = new MediaStream([track]);
 		video.srcObject = mediaStream;
 		video.muted = true;
 		video.playsInline = true;

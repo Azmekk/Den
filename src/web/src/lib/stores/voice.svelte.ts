@@ -1,23 +1,13 @@
-import {
-	Room,
-	RoomEvent,
-	Track,
-	type Participant,
-	type RemoteTrack,
-	type RemoteTrackPublication,
-	type RemoteParticipant,
-	type LocalTrackPublication,
-	type TrackPublication,
-} from 'livekit-client';
 import { auth } from './auth.svelte';
 import { websocket } from './websocket.svelte';
+import { configStore } from './config.svelte';
 import { playJoinSound, playLeaveSound } from '$lib/voice/sounds';
-import { loadVoiceSettings, saveVoiceSettings, type VoiceSettings } from '$lib/voice/settings';
+import { loadVoiceSettings, saveVoiceSettings } from '$lib/voice/settings';
 import { SCREEN_SHARE_PRESETS } from '$lib/voice/types';
-import type { DenAudioProcessor } from '$lib/voice/types';
+import type { AudioProcessorResult } from '$lib/voice/types';
 import { createAudioProcessor } from '$lib/voice/audio-processor-factory';
 import { attachRemoteAudioTrack, detachRemoteAudioTrack } from '$lib/voice/remote-audio';
-import { startBrowserScreenShare, startDesktopScreenShare, stopScreenShare } from '$lib/voice/screen-share';
+import { startBrowserScreenShare, startDesktopScreenShare } from '$lib/voice/screen-share';
 
 export { SCREEN_SHARE_PRESETS } from '$lib/voice/types';
 
@@ -39,8 +29,7 @@ function createVoiceStore() {
 	let screenPickerSources = $state<{ id: string; name: string; thumbnailDataUrl: string; isScreen: boolean }[]>([]);
 	let mutedUserIds = $state<Set<string>>(new Set());
 	let screenSharerIdentity = $state<string | null>(null);
-	let screenShareTrack = $state<RemoteTrack | null>(null);
-	let screenShareParticipant = $state<RemoteParticipant | null>(null);
+	let screenShareTrack = $state<MediaStreamTrack | null>(null);
 
 	let noiseGateEnabled = $state(initialSettings.noiseGateEnabled);
 	let noiseGateThreshold = $state(initialSettings.noiseGateThreshold);
@@ -54,13 +43,22 @@ function createVoiceStore() {
 	let availableOutputDevices = $state<MediaDeviceInfo[]>([]);
 
 	// ── Non-reactive internal state ──────────────────────────────────────
-	let room: Room | null = null;
-	let audioProcessor: DenAudioProcessor | null = null;
+	let peerConnection: RTCPeerConnection | null = null;
+	let localStream: MediaStream | null = null;
+	let audioProcessorResult: AudioProcessorResult | null = null;
 	let audioContainer: HTMLDivElement | null = null;
 	let sharedAudioContext: AudioContext | null = null;
 	let connectionAbortController: AbortController | null = null;
-	// The channel we're trying to connect to (persists across retries)
 	let pendingChannelId: string | null = null;
+
+	// Map remote track mid → audio element (for cleanup)
+	let remoteAudioElements: Map<string, HTMLAudioElement> = new Map();
+	// Map remote track mid → stream info
+	let screenShareSenders: RTCRtpSender[] = [];
+
+	// Track pending ICE candidates that arrive before remote description is set
+	let pendingIceCandidates: RTCIceCandidateInit[] = [];
+	let remoteDescriptionSet = false;
 
 	// ── Audio container ──────────────────────────────────────────────────
 
@@ -121,6 +119,112 @@ function createVoiceStore() {
 		voiceStates = newStates;
 	}
 
+	// ── WebSocket signaling handlers ─────────────────────────────────────
+
+	function handleVoiceAnswer(data: any) {
+		if (!peerConnection) return;
+		const sdp = data.sdp;
+		if (!sdp) return;
+
+		const answer = new RTCSessionDescription({
+			type: sdp.type,
+			sdp: sdp.sdp,
+		});
+
+		peerConnection.setRemoteDescription(answer).then(() => {
+			remoteDescriptionSet = true;
+			// Flush any pending ICE candidates
+			for (const candidate of pendingIceCandidates) {
+				peerConnection?.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+			}
+			pendingIceCandidates = [];
+		}).catch((error) => {
+			console.error('Failed to set remote description (answer):', error);
+		});
+	}
+
+	function handleVoiceOffer(data: any) {
+		if (!peerConnection) return;
+		const sdp = data.sdp;
+		if (!sdp) return;
+
+		// Server-initiated renegotiation (new tracks added/removed)
+		const offer = new RTCSessionDescription({
+			type: sdp.type,
+			sdp: sdp.sdp,
+		});
+
+		peerConnection.setRemoteDescription(offer)
+			.then(() => peerConnection!.createAnswer())
+			.then((answer) => peerConnection!.setLocalDescription(answer))
+			.then(() => {
+				websocket.send({
+					type: 'voice_answer',
+					channel_id: currentChannelId ?? pendingChannelId,
+					sdp: {
+						type: peerConnection!.localDescription!.type,
+						sdp: peerConnection!.localDescription!.sdp,
+					},
+				});
+			})
+			.catch((error) => {
+				console.error('Failed to handle server renegotiation:', error);
+			});
+	}
+
+	function handleVoiceIceCandidate(data: any) {
+		if (!peerConnection) return;
+		const candidate = data.candidate;
+		if (!candidate) return;
+
+		if (!remoteDescriptionSet) {
+			pendingIceCandidates.push(candidate);
+			return;
+		}
+
+		peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch((error) => {
+			console.warn('Failed to add ICE candidate:', error);
+		});
+	}
+
+	function handleVoiceMuteState(data: any) {
+		const userId = data.user_id;
+		const muted = data.muted;
+		if (!userId || muted === undefined) return;
+
+		if (muted) {
+			mutedUserIds = new Set([...mutedUserIds, userId]);
+		} else {
+			const next = new Set(mutedUserIds);
+			next.delete(userId);
+			mutedUserIds = next;
+		}
+	}
+
+	function handleVoiceSpeaking(data: any) {
+		const userId = data.user_id;
+		const speaking = data.speaking;
+		if (!userId || speaking === undefined) return;
+
+		// Don't override local user's speaking state (driven by noise gate)
+		if (userId === auth.user?.id) return;
+
+		const next = new Set(speakingUserIds);
+		if (speaking) {
+			next.add(userId);
+		} else {
+			next.delete(userId);
+		}
+		speakingUserIds = next;
+	}
+
+	// Register WS listeners
+	websocket.on('voice_answer', handleVoiceAnswer);
+	websocket.on('voice_offer', handleVoiceOffer);
+	websocket.on('voice_ice_candidate', handleVoiceIceCandidate);
+	websocket.on('voice_mute_state', handleVoiceMuteState);
+	websocket.on('voice_speaking', handleVoiceSpeaking);
+
 	// ── Settings persistence ─────────────────────────────────────────────
 
 	function persistSettings(): void {
@@ -140,15 +244,15 @@ function createVoiceStore() {
 	async function refreshDevices(): Promise<void> {
 		try {
 			const devices = await navigator.mediaDevices.enumerateDevices();
-			availableInputDevices = devices.filter((d) => d.kind === 'audioinput');
-			availableOutputDevices = devices.filter((d) => d.kind === 'audiooutput');
+			availableInputDevices = devices.filter((device) => device.kind === 'audioinput');
+			availableOutputDevices = devices.filter((device) => device.kind === 'audiooutput');
 
 			// Reset to default if selected device disappeared
-			if (inputDeviceId && !availableInputDevices.some((d) => d.deviceId === inputDeviceId)) {
+			if (inputDeviceId && !availableInputDevices.some((device) => device.deviceId === inputDeviceId)) {
 				inputDeviceId = null;
 				persistSettings();
 			}
-			if (outputDeviceId && !availableOutputDevices.some((d) => d.deviceId === outputDeviceId)) {
+			if (outputDeviceId && !availableOutputDevices.some((device) => device.deviceId === outputDeviceId)) {
 				outputDeviceId = null;
 				persistSettings();
 			}
@@ -160,17 +264,23 @@ function createVoiceStore() {
 	async function setInputDevice(deviceId: string | null): Promise<void> {
 		inputDeviceId = deviceId;
 		persistSettings();
-		if (room && !isMuted) {
-			await room.switchActiveDevice('audioinput', deviceId ?? '');
-			await setupAudioProcessing();
+		if (peerConnection && !isMuted) {
+			await republishMicrophone();
 		}
 	}
 
 	async function setOutputDevice(deviceId: string | null): Promise<void> {
 		outputDeviceId = deviceId;
 		persistSettings();
-		if (room) {
-			await room.switchActiveDevice('audiooutput', deviceId ?? '');
+		// Apply output device to all audio elements
+		if (outputDeviceId) {
+			for (const audioElement of remoteAudioElements.values()) {
+				try {
+					await (audioElement as any).setSinkId(outputDeviceId);
+				} catch (error) {
+					console.warn('Failed to set output device:', error);
+				}
+			}
 		}
 	}
 
@@ -179,12 +289,19 @@ function createVoiceStore() {
 	// ── Audio processing setup ───────────────────────────────────────────
 
 	function handleSpeakingChange(isOpen: boolean): void {
-		if (!room || isMuted) return;
+		if (!peerConnection || isMuted) return;
 		const localUserId = auth.user?.id;
 		if (localUserId) {
 			const next = new Set(speakingUserIds);
 			if (isOpen) next.add(localUserId); else next.delete(localUserId);
 			speakingUserIds = next;
+
+			// Broadcast speaking state to other participants
+			websocket.send({
+				type: 'voice_speaking',
+				channel_id: currentChannelId,
+				speaking: isOpen,
+			});
 		}
 	}
 
@@ -193,19 +310,21 @@ function createVoiceStore() {
 	}
 
 	async function setupAudioProcessing(): Promise<void> {
-		if (!room) return;
+		if (!peerConnection || !localStream) return;
 
-		const micPublication = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-		if (!micPublication?.track) return;
+		const rawTrack = localStream.getAudioTracks()[0];
+		if (!rawTrack) return;
 
 		// Clean up existing processor
-		if (audioProcessor) {
-			await micPublication.track.stopProcessor();
-			audioProcessor = null;
+		if (audioProcessorResult) {
+			audioProcessorResult.cleanup();
+			audioProcessorResult = null;
 			rnnoiseActive = false;
 		}
 
-		audioProcessor = createAudioProcessor({
+		const audioContext = getSharedAudioContext();
+
+		audioProcessorResult = await createAudioProcessor(rawTrack, audioContext, {
 			rnnoiseEnabled,
 			noiseGateEnabled,
 			noiseGateThreshold,
@@ -213,40 +332,54 @@ function createVoiceStore() {
 			onMicLevelChange: handleMicLevelChange,
 		});
 
-		if (audioProcessor) {
-			try {
-				await micPublication.track.setProcessor(audioProcessor as Parameters<typeof micPublication.track.setProcessor>[0]);
-				rnnoiseActive = rnnoiseEnabled;
-			} catch (error) {
-				console.warn('Failed to set audio processor:', error);
-				audioProcessor = null;
-				rnnoiseActive = false;
-			}
+		if (audioProcessorResult) {
+			rnnoiseActive = rnnoiseEnabled;
+			// Replace the track in the PeerConnection with the processed one
+			replaceAudioTrack(audioProcessorResult.processedTrack);
+		} else {
+			// No processing — use raw track
+			replaceAudioTrack(rawTrack);
+		}
+	}
+
+	function replaceAudioTrack(newTrack: MediaStreamTrack): void {
+		if (!peerConnection) return;
+
+		const senders = peerConnection.getSenders();
+		const audioSender = senders.find((sender) => sender.track?.kind === 'audio' || sender.track === null);
+		if (audioSender) {
+			audioSender.replaceTrack(newTrack).catch((error) => {
+				console.warn('Failed to replace audio track:', error);
+			});
 		}
 	}
 
 	function cleanupProcessors(): void {
-		if (room) {
-			const micPublication = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-			if (micPublication?.track && audioProcessor) {
-				micPublication.track.stopProcessor();
-			}
+		if (audioProcessorResult) {
+			audioProcessorResult.cleanup();
+			audioProcessorResult = null;
 		}
-		audioProcessor = null;
 		rnnoiseActive = false;
 	}
 
 	async function republishMicrophone(): Promise<void> {
-		if (!room || isMuted) return;
+		if (!peerConnection || isMuted) return;
 
 		cleanupProcessors();
 
+		// Stop old local stream
+		if (localStream) {
+			localStream.getTracks().forEach((track) => track.stop());
+			localStream = null;
+		}
+
 		try {
-			await room.localParticipant.setMicrophoneEnabled(false);
-			await room.localParticipant.setMicrophoneEnabled(true, {
-				echoCancellation: echoCancellationEnabled,
-				noiseSuppression: false, // RNNoise handles suppression when enabled
-				deviceId: inputDeviceId ?? undefined,
+			localStream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: echoCancellationEnabled,
+					noiseSuppression: false,
+					deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined,
+				},
 			});
 			microphoneError = null;
 			await setupAudioProcessing();
@@ -284,60 +417,24 @@ function createVoiceStore() {
 		await connectWithRetry(channelId, signal);
 	}
 
-	async function fetchVoiceToken(channelId: string): Promise<{ token: string; url: string }> {
-		const accessToken = await auth.getToken();
-		if (!accessToken) throw new Error('Not authenticated');
-
-		const response = await globalThis.fetch(`/api/voice/${channelId}/join`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${accessToken}` },
-		});
-
-		if (!response.ok) {
-			throw new Error(`Voice join API returned ${response.status}`);
-		}
-
-		return response.json();
-	}
-
 	async function connectWithRetry(channelId: string, signal: AbortSignal): Promise<void> {
-		// Fetch the token once — it's valid for 1 hour so no need to re-fetch on each retry
-		let token: string;
-		let url: string;
-
-		try {
-			const credentials = await fetchVoiceToken(channelId);
-			token = credentials.token;
-			url = credentials.url;
-		} catch (error) {
-			if (signal.aborted) return;
-			console.error('Failed to fetch voice token:', error);
-			// Token fetch failure is not retryable (auth issue, server down, etc.)
-			isConnecting = false;
-			pendingChannelId = null;
-			return;
-		}
-
-		// Retry the WebSocket connection with the same token
 		let attempt = 0;
 
 		while (!signal.aborted) {
 			try {
-				await connectToRoom(url, token);
+				await connectToChannel(channelId);
 
 				// Success — we're connected
 				isConnecting = false;
 				pendingChannelId = null;
 				currentChannelId = channelId;
-				websocket.send({ type: 'voice_join', channel_id: channelId });
 				playJoinSound();
 				return;
 			} catch (error) {
 				if (signal.aborted) return;
 
 				console.warn(`Voice connection attempt ${attempt + 1} failed:`, error);
-				room?.disconnect();
-				room = null;
+				teardownPeerConnection();
 
 				const delay = getRetryDelay(attempt);
 				if (delay > 0) {
@@ -355,51 +452,257 @@ function createVoiceStore() {
 		}
 	}
 
-	async function connectToRoom(url: string, token: string): Promise<void> {
-		room = new Room({
-			adaptiveStream: false,
-			dynacast: false,
-		});
+	async function connectToChannel(channelId: string): Promise<void> {
+		// Notify the server we're joining (updates voiceUsers state)
+		websocket.send({ type: 'voice_join', channel_id: channelId });
 
-		room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-		room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-		room.on(RoomEvent.Disconnected, handleDisconnect);
-		room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakers);
-		room.on(RoomEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
-		room.on(RoomEvent.TrackMuted, handleTrackMuted);
-		room.on(RoomEvent.TrackUnmuted, handleTrackUnmuted);
-		room.on(RoomEvent.Reconnecting, handleReconnecting);
-		room.on(RoomEvent.Reconnected, handleReconnected);
-
-		await room.connect(url, token);
-
-		// Publish microphone with current settings
+		// Get microphone stream
 		try {
-			await room.localParticipant.setMicrophoneEnabled(true, {
-				echoCancellation: echoCancellationEnabled,
-				noiseSuppression: false, // RNNoise handles suppression when enabled
-				deviceId: inputDeviceId ?? undefined,
+			localStream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: echoCancellationEnabled,
+					noiseSuppression: false,
+					deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined,
+				},
 			});
 			microphoneError = null;
 		} catch (error) {
 			microphoneError = error instanceof Error ? error.message : 'Failed to access microphone';
-			console.error('Microphone publish failed:', error);
+			console.error('Microphone access failed:', error);
+			// Continue without mic — user can still listen
 		}
 
-		// Apply output device preference
-		if (outputDeviceId) {
-			try {
-				await room.switchActiveDevice('audiooutput', outputDeviceId);
-			} catch (error) {
-				console.warn('Failed to set output device:', error);
+		// Reset signaling state
+		remoteDescriptionSet = false;
+		pendingIceCandidates = [];
+
+		// Create PeerConnection
+		peerConnection = new RTCPeerConnection({
+			iceServers: configStore.iceServers,
+		});
+
+		// Handle ICE candidates
+		peerConnection.onicecandidate = (event) => {
+			if (event.candidate) {
+				websocket.send({
+					type: 'voice_ice_candidate',
+					channel_id: channelId,
+					candidate: event.candidate.toJSON(),
+				});
+			}
+		};
+
+		// Handle ICE connection state
+		peerConnection.oniceconnectionstatechange = () => {
+			if (!peerConnection) return;
+			const state = peerConnection.iceConnectionState;
+			if (state === 'failed' || state === 'disconnected') {
+				handleConnectionFailure();
+			}
+			if (state === 'connected' || state === 'completed') {
+				isReconnecting = false;
+			}
+		};
+
+		// Handle remote tracks
+		peerConnection.ontrack = (event) => {
+			handleRemoteTrack(event);
+		};
+
+		// Apply audio processing and add track
+		if (localStream) {
+			const audioContext = getSharedAudioContext();
+			const rawTrack = localStream.getAudioTracks()[0];
+
+			if (rawTrack) {
+				audioProcessorResult = await createAudioProcessor(rawTrack, audioContext, {
+					rnnoiseEnabled,
+					noiseGateEnabled,
+					noiseGateThreshold,
+					onGateStateChange: handleSpeakingChange,
+					onMicLevelChange: handleMicLevelChange,
+				});
+
+				const trackToSend = audioProcessorResult?.processedTrack ?? rawTrack;
+				rnnoiseActive = rnnoiseEnabled && audioProcessorResult !== null;
+
+				// Add a stream with a "microphone" label so the server can classify it
+				const stream = new MediaStream([trackToSend]);
+				peerConnection.addTrack(trackToSend, stream);
 			}
 		}
 
-		await setupAudioProcessing();
-
-		if (isMuted) {
-			await room.localParticipant.setMicrophoneEnabled(false);
+		// If muted, disable the track right away
+		if (isMuted && localStream) {
+			const audioTrack = localStream.getAudioTracks()[0];
+			if (audioTrack) audioTrack.enabled = false;
+			// Also disable processed track
+			const sender = peerConnection.getSenders().find((sender) => sender.track?.kind === 'audio');
+			if (sender?.track) sender.track.enabled = false;
 		}
+
+		// Create and send SDP offer
+		const offer = await peerConnection.createOffer();
+		await peerConnection.setLocalDescription(offer);
+
+		websocket.send({
+			type: 'voice_offer',
+			channel_id: channelId,
+			sdp: {
+				type: offer.type,
+				sdp: offer.sdp,
+			},
+		});
+
+		// Wait for the answer (with timeout)
+		await waitForRemoteDescription(5000);
+	}
+
+	function waitForRemoteDescription(timeoutMs: number): Promise<void> {
+		return new Promise((resolve, reject) => {
+			if (remoteDescriptionSet) {
+				resolve();
+				return;
+			}
+
+			const checkInterval = setInterval(() => {
+				if (remoteDescriptionSet) {
+					clearInterval(checkInterval);
+					clearTimeout(timeout);
+					resolve();
+				}
+			}, 50);
+
+			const timeout = setTimeout(() => {
+				clearInterval(checkInterval);
+				reject(new Error('Timed out waiting for voice answer'));
+			}, timeoutMs);
+		});
+	}
+
+	function handleRemoteTrack(event: RTCTrackEvent): void {
+		const track = event.track;
+		const stream = event.streams[0];
+
+		if (!stream) return;
+
+		// Parse stream ID to identify the user and source
+		// Format: "{userID}:{source}" e.g. "uuid:microphone" or "uuid:screen"
+		const streamId = stream.id;
+		const colonIndex = streamId.indexOf(':');
+		const userId = colonIndex > 0 ? streamId.substring(0, colonIndex) : streamId;
+		const source = colonIndex > 0 ? streamId.substring(colonIndex + 1) : 'microphone';
+
+		// Skip own audio
+		if (userId === auth.user?.id && track.kind === 'audio' && source === 'microphone') {
+			return;
+		}
+
+		if (track.kind === 'video' && source === 'screen') {
+			screenSharerIdentity = userId;
+			screenShareTrack = track;
+
+			track.onended = () => {
+				screenSharerIdentity = null;
+				screenShareTrack = null;
+				isWatchingStream = false;
+			};
+			return;
+		}
+
+		if (track.kind === 'audio' && source === 'screen_audio') {
+			const audioElement = document.createElement('audio');
+			audioElement.autoplay = true;
+			audioElement.srcObject = new MediaStream([track]);
+			getAudioContainer().appendChild(audioElement);
+
+			track.onended = () => {
+				audioElement.srcObject = null;
+				audioElement.remove();
+			};
+			return;
+		}
+
+		// Regular audio (voice)
+		if (track.kind === 'audio') {
+			const audioElement = attachRemoteAudioTrack(track, stream, getAudioContainer(), getSharedAudioContext());
+
+			// Apply output device if set
+			if (outputDeviceId) {
+				(audioElement as any).setSinkId?.(outputDeviceId).catch(() => {});
+			}
+
+			const trackId = track.id;
+			remoteAudioElements.set(trackId, audioElement);
+
+			track.onended = () => {
+				const element = remoteAudioElements.get(trackId);
+				if (element) {
+					detachRemoteAudioTrack(element);
+					remoteAudioElements.delete(trackId);
+				}
+			};
+		}
+	}
+
+	function handleConnectionFailure(): void {
+		const channelToReconnect = currentChannelId;
+
+		speakingUserIds = new Set();
+		mutedUserIds = new Set();
+		isScreenSharing = false;
+		isWatchingStream = false;
+		isReconnecting = false;
+		screenSharerIdentity = null;
+		screenShareTrack = null;
+		micLevel = 0;
+		microphoneError = null;
+
+		cleanupProcessors();
+		teardownPeerConnection();
+
+		if (sharedAudioContext) {
+			sharedAudioContext.close();
+			sharedAudioContext = null;
+		}
+
+		// Automatic reconnect
+		if (channelToReconnect && !connectionAbortController?.signal.aborted) {
+			currentChannelId = null;
+			websocket.send({ type: 'voice_leave', channel_id: channelToReconnect });
+
+			isConnecting = true;
+			pendingChannelId = channelToReconnect;
+			connectionAbortController?.abort();
+			connectionAbortController = new AbortController();
+			connectWithRetry(channelToReconnect, connectionAbortController.signal);
+		} else if (currentChannelId) {
+			websocket.send({ type: 'voice_leave', channel_id: currentChannelId });
+			currentChannelId = null;
+		}
+	}
+
+	function teardownPeerConnection(): void {
+		if (peerConnection) {
+			peerConnection.onicecandidate = null;
+			peerConnection.oniceconnectionstatechange = null;
+			peerConnection.ontrack = null;
+			peerConnection.close();
+			peerConnection = null;
+		}
+
+		if (localStream) {
+			localStream.getTracks().forEach((track) => track.stop());
+			localStream = null;
+		}
+
+		for (const element of remoteAudioElements.values()) {
+			detachRemoteAudioTrack(element);
+		}
+		remoteAudioElements.clear();
+		screenShareSenders = [];
+		remoteDescriptionSet = false;
+		pendingIceCandidates = [];
 	}
 
 	async function leave(silent = false): Promise<void> {
@@ -417,15 +720,10 @@ function createVoiceStore() {
 		isReconnecting = false;
 		screenSharerIdentity = null;
 		screenShareTrack = null;
-		screenShareParticipant = null;
 		microphoneError = null;
 
 		cleanupProcessors();
-
-		if (room) {
-			room.disconnect();
-			room = null;
-		}
+		teardownPeerConnection();
 
 		if (audioContainer) {
 			audioContainer.innerHTML = '';
@@ -457,19 +755,36 @@ function createVoiceStore() {
 			next.delete(localUserId);
 			speakingUserIds = next;
 		}
-		if (room) {
-			await room.localParticipant.setMicrophoneEnabled(!isMuted);
+
+		// Enable/disable the audio track on the PeerConnection
+		if (peerConnection) {
+			const sender = peerConnection.getSenders().find((sender) => sender.track?.kind === 'audio');
+			if (sender?.track) {
+				sender.track.enabled = !isMuted;
+			}
 		}
+
+		// Also disable raw local stream track
+		if (localStream) {
+			const audioTrack = localStream.getAudioTracks()[0];
+			if (audioTrack) audioTrack.enabled = !isMuted;
+		}
+
+		// Broadcast mute state to other participants
+		websocket.send({
+			type: 'voice_mute_state',
+			channel_id: currentChannelId,
+			muted: isMuted,
+		});
 	}
 
 	// ── Screen sharing ───────────────────────────────────────────────────
 
 	async function toggleScreenShare(): Promise<void> {
-		if (!room) return;
+		if (!peerConnection) return;
 
 		if (isScreenSharing) {
-			await stopScreenShare(room.localParticipant);
-			isScreenSharing = false;
+			stopScreenSharing();
 			return;
 		}
 
@@ -490,18 +805,16 @@ function createVoiceStore() {
 
 		// Web browser: native picker
 		const preset = SCREEN_SHARE_PRESETS[screenSharePresetIndex] ?? SCREEN_SHARE_PRESETS[2];
-		const success = await startBrowserScreenShare(room.localParticipant, preset);
-		isScreenSharing = success;
-
-		if (success) {
-			listenForScreenShareTrackEnded();
+		const stream = await startBrowserScreenShare(preset);
+		if (stream) {
+			addScreenShareTracks(stream);
 		}
 	}
 
 	async function selectScreenSource(sourceId: string): Promise<void> {
 		screenPickerOpen = false;
 		screenPickerSources = [];
-		if (!room) return;
+		if (!peerConnection) return;
 
 		const desktop = (window as any).denDesktop;
 		if (desktop?.selectScreenSource) {
@@ -509,29 +822,52 @@ function createVoiceStore() {
 		}
 
 		const preset = SCREEN_SHARE_PRESETS[screenSharePresetIndex] ?? SCREEN_SHARE_PRESETS[2];
-		const success = await startDesktopScreenShare(room.localParticipant, preset);
-		isScreenSharing = success;
-
-		if (success) {
-			listenForScreenShareTrackEnded();
+		const stream = await startDesktopScreenShare(preset);
+		if (stream) {
+			addScreenShareTracks(stream);
 		}
 	}
 
-	/**
-	 * Listens for the browser's native "ended" event on the screen share track.
-	 * This fires when the user clicks "Stop sharing" in the browser chrome or
-	 * closes the shared window — events that LiveKit doesn't always surface.
-	 */
-	function listenForScreenShareTrackEnded(): void {
-		if (!room) return;
-		const screenTrackPublication = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-		const mediaTrack = screenTrackPublication?.track?.mediaStreamTrack;
-		if (mediaTrack) {
-			mediaTrack.addEventListener('ended', () => {
-				isScreenSharing = false;
-				room?.localParticipant.setScreenShareEnabled(false).catch(() => {});
-			}, { once: true });
+	function addScreenShareTracks(stream: MediaStream): void {
+		if (!peerConnection) return;
+
+		isScreenSharing = true;
+
+		// Add video track
+		const videoTrack = stream.getVideoTracks()[0];
+		if (videoTrack) {
+			// Use a stream with "screen" in the ID so server classifies it correctly
+			const screenStream = new MediaStream([videoTrack]);
+			const sender = peerConnection.addTrack(videoTrack, screenStream);
+			screenShareSenders.push(sender);
+
+			videoTrack.onended = () => {
+				stopScreenSharing();
+			};
 		}
+
+		// Add audio track if present
+		const audioTrack = stream.getAudioTracks()[0];
+		if (audioTrack) {
+			const audioStream = new MediaStream([audioTrack]);
+			const sender = peerConnection.addTrack(audioTrack, audioStream);
+			screenShareSenders.push(sender);
+		}
+	}
+
+	function stopScreenSharing(): void {
+		if (!peerConnection) return;
+
+		for (const sender of screenShareSenders) {
+			try {
+				sender.track?.stop();
+				peerConnection.removeTrack(sender);
+			} catch (error) {
+				console.warn('Failed to remove screen share track:', error);
+			}
+		}
+		screenShareSenders = [];
+		isScreenSharing = false;
 	}
 
 	function cancelScreenPicker(): void {
@@ -553,151 +889,6 @@ function createVoiceStore() {
 		isWatchingStream = false;
 	}
 
-	// ── LiveKit event handlers ───────────────────────────────────────────
-
-	function handleTrackSubscribed(
-		track: RemoteTrack,
-		publication: RemoteTrackPublication,
-		participant: RemoteParticipant,
-	): void {
-		// Screen share video track
-		if (publication.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
-			screenSharerIdentity = participant.identity;
-			screenShareTrack = track;
-			screenShareParticipant = participant;
-			return;
-		}
-
-		// Screen share audio track
-		if (track.kind === Track.Kind.Audio && publication.source === Track.Source.ScreenShareAudio) {
-			const audioElement = track.attach();
-			getAudioContainer().appendChild(audioElement);
-			return;
-		}
-
-		// Regular audio track (voice)
-		if (track.kind === Track.Kind.Audio) {
-			// Bug #7 fix: skip local participant's own audio to prevent self-playback
-			if (participant.identity === auth.user?.id) return;
-
-			attachRemoteAudioTrack(track, getAudioContainer(), getSharedAudioContext());
-		}
-	}
-
-	function handleTrackUnsubscribed(
-		track: RemoteTrack,
-		publication: RemoteTrackPublication,
-		participant: RemoteParticipant,
-	): void {
-		if (publication.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
-			track.detach().forEach((element) => element.remove());
-			screenSharerIdentity = null;
-			screenShareTrack = null;
-			screenShareParticipant = null;
-			isWatchingStream = false;
-			return;
-		}
-
-		detachRemoteAudioTrack(track);
-	}
-
-	function handleTrackMuted(publication: TrackPublication, participant: Participant): void {
-		if (publication.source === Track.Source.Microphone && participant.identity) {
-			mutedUserIds = new Set([...mutedUserIds, participant.identity]);
-		}
-	}
-
-	function handleTrackUnmuted(publication: TrackPublication, participant: Participant): void {
-		if (publication.source === Track.Source.Microphone && participant.identity) {
-			const next = new Set(mutedUserIds);
-			next.delete(participant.identity);
-			mutedUserIds = next;
-		}
-	}
-
-	function handleLocalTrackUnpublished(publication: LocalTrackPublication): void {
-		if (publication.source === Track.Source.ScreenShare) {
-			isScreenSharing = false;
-		}
-	}
-
-	function handleDisconnect(): void {
-		const channelToReconnect = currentChannelId;
-
-		speakingUserIds = new Set();
-		mutedUserIds = new Set();
-		isScreenSharing = false;
-		isWatchingStream = false;
-		isReconnecting = false;
-		screenSharerIdentity = null;
-		screenShareTrack = null;
-		screenShareParticipant = null;
-		micLevel = 0;
-		microphoneError = null;
-		audioProcessor = null;
-		rnnoiseActive = false;
-		room = null;
-
-		if (sharedAudioContext) {
-			sharedAudioContext.close();
-			sharedAudioContext = null;
-		}
-
-		// If we were connected to a channel and leave() wasn't called (unexpected
-		// disconnect), automatically retry the connection instead of kicking the user out.
-		if (channelToReconnect && !connectionAbortController?.signal.aborted) {
-			currentChannelId = null;
-			websocket.send({ type: 'voice_leave', channel_id: channelToReconnect });
-
-			isConnecting = true;
-			pendingChannelId = channelToReconnect;
-			connectionAbortController?.abort();
-			connectionAbortController = new AbortController();
-			connectWithRetry(channelToReconnect, connectionAbortController.signal);
-		} else if (currentChannelId) {
-			websocket.send({ type: 'voice_leave', channel_id: currentChannelId });
-			currentChannelId = null;
-		}
-	}
-
-	function handleReconnecting(): void {
-		isReconnecting = true;
-	}
-
-	async function handleReconnected(): Promise<void> {
-		isReconnecting = false;
-		// Re-setup audio processing since tracks may have been recreated
-		await setupAudioProcessing();
-	}
-
-	function handleActiveSpeakers(speakers: Participant[]): void {
-		const localUserId = auth.user?.id;
-		const hasLocalProcessor = audioProcessor != null;
-		const next = new Set<string>();
-
-		for (const speaker of speakers) {
-			if (!speaker.identity) continue;
-
-			if (speaker.identity === localUserId) {
-				// When a local processor is active, local speaking is driven by the gate callback
-				if (hasLocalProcessor) {
-					if (speakingUserIds.has(localUserId)) next.add(localUserId);
-				} else {
-					next.add(localUserId);
-				}
-			} else {
-				next.add(speaker.identity);
-			}
-		}
-
-		// Preserve local speaking state if gate says speaking but LiveKit doesn't list us
-		if (localUserId && hasLocalProcessor && speakingUserIds.has(localUserId)) {
-			next.add(localUserId);
-		}
-
-		speakingUserIds = next;
-	}
-
 	// ── Settings mutation methods ────────────────────────────────────────
 
 	async function setNoiseGateEnabled(enabled: boolean): Promise<void> {
@@ -710,8 +901,8 @@ function createVoiceStore() {
 	function setNoiseGateThreshold(value: number): void {
 		noiseGateThreshold = value;
 		persistSettings();
-		if (audioProcessor) {
-			audioProcessor.setThreshold(value);
+		if (audioProcessorResult) {
+			audioProcessorResult.setThreshold(value);
 		}
 	}
 
@@ -724,7 +915,7 @@ function createVoiceStore() {
 	async function setRnnoiseEnabled(enabled: boolean): Promise<void> {
 		rnnoiseEnabled = enabled;
 		persistSettings();
-		if (room && !isMuted) {
+		if (peerConnection && !isMuted) {
 			await republishMicrophone();
 		}
 	}

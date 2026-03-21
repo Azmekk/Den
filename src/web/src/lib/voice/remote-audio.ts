@@ -1,5 +1,3 @@
-import type { RemoteTrack } from 'livekit-client';
-
 // Use Symbol keys to avoid polluting the HTMLMediaElement with string properties
 const SOURCE_NODE_KEY = Symbol('voiceSourceNode');
 const DESTINATION_NODE_KEY = Symbol('voiceDestinationNode');
@@ -14,14 +12,16 @@ interface AudioElementWithNodes extends HTMLMediaElement {
  * Web Audio so the browser's echo canceller has a proper reference signal.
  */
 export function attachRemoteAudioTrack(
-	track: RemoteTrack,
+	track: MediaStreamTrack,
+	stream: MediaStream,
 	audioContainer: HTMLDivElement,
 	audioContext: AudioContext,
-): void {
-	const audioElement = track.attach() as AudioElementWithNodes;
+): HTMLAudioElement {
+	const audioElement = document.createElement('audio') as AudioElementWithNodes;
+	audioElement.autoplay = true;
 	audioContainer.appendChild(audioElement);
 
-	const source = audioContext.createMediaStreamSource(track.mediaStream!);
+	const source = audioContext.createMediaStreamSource(stream);
 	const splitter = audioContext.createChannelSplitter(1);
 	const merger = audioContext.createChannelMerger(2);
 	const streamDestination = audioContext.createMediaStreamDestination();
@@ -38,17 +38,18 @@ export function attachRemoteAudioTrack(
 	// Store Web Audio nodes on the element for cleanup
 	audioElement[SOURCE_NODE_KEY] = source;
 	audioElement[DESTINATION_NODE_KEY] = streamDestination;
+
+	return audioElement as HTMLAudioElement;
 }
 
 /**
  * Detaches a remote audio track, disconnecting its Web Audio nodes and
  * removing the <audio> element from the DOM.
  */
-export function detachRemoteAudioTrack(track: RemoteTrack): void {
-	track.detach().forEach((element) => {
-		const audioElement = element as AudioElementWithNodes;
-		audioElement[SOURCE_NODE_KEY]?.disconnect();
-		audioElement[DESTINATION_NODE_KEY]?.disconnect();
-		audioElement.remove();
-	});
+export function detachRemoteAudioTrack(element: HTMLAudioElement): void {
+	const audioElement = element as AudioElementWithNodes;
+	audioElement[SOURCE_NODE_KEY]?.disconnect();
+	audioElement[DESTINATION_NODE_KEY]?.disconnect();
+	audioElement.srcObject = null;
+	audioElement.remove();
 }

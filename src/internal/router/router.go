@@ -10,27 +10,24 @@ import (
 	"github.com/Azmekk/den/internal/handler"
 	"github.com/Azmekk/den/internal/middleware"
 	"github.com/Azmekk/den/internal/service"
+	"github.com/Azmekk/den/internal/voice"
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceSvc *service.VoiceService, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string, allowedOrigins []string) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceManager *voice.Manager, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string, allowedOrigins []string) chi.Router {
 	authHandler := handler.NewAuthHandler(authSvc)
 	channelHandler := handler.NewChannelHandler(channelSvc)
 	messageHandler := handler.NewMessageHandler(messageSvc, hub)
 	userHandler := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminHandler := handler.NewAdminHandler(adminSvc, mediaSvc)
 	emoteHandler := handler.NewEmoteHandler(emoteSvc, hub)
-	configHandler := handler.NewConfigHandler(bucketConfigured, voiceSvc != nil, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration, supabaseURL, supabaseAnonKey)
+	configHandler := handler.NewConfigHandler(bucketConfigured, voiceManager != nil, voiceManager, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration, supabaseURL, supabaseAnonKey)
 	dmHandler := handler.NewDMHandler(dmSvc)
 	var mediaHandler *handler.MediaHandler
 	if mediaSvc != nil {
 		mediaHandler = handler.NewMediaHandler(mediaSvc)
 	}
 	exportHandler := handler.NewExportHandler(channelSvc, userSvc, emoteSvc, dmSvc, userSvc.Queries(), authSvc.GetInstanceName)
-	var voiceHandler *handler.VoiceHandler
-	if voiceSvc != nil {
-		voiceHandler = handler.NewVoiceHandler(voiceSvc, channelSvc)
-	}
 
 	router := chi.NewRouter()
 
@@ -79,9 +76,6 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			if mediaHandler != nil {
 				router.Post("/upload/image", mediaHandler.UploadImage)
 				router.Post("/upload/video", mediaHandler.UploadVideo)
-			}
-			if voiceHandler != nil {
-				router.Post("/voice/{channelId}/join", voiceHandler.Join)
 			}
 
 			// Admin only

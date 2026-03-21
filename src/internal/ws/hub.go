@@ -3,8 +3,11 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"log"
 
 	"github.com/google/uuid"
+
+	"github.com/Azmekk/den/internal/voice"
 )
 
 type MessageHandler interface {
@@ -61,6 +64,7 @@ type Hub struct {
 	voiceJoin       chan voiceAction
 	voiceLeave      chan voiceAction
 	kickUser        chan uuid.UUID
+	VoiceManager    *voice.Manager
 }
 
 type broadcastMsg struct {
@@ -142,6 +146,9 @@ func (h *Hub) removeClient(client *Client) bool {
 func (h *Hub) removeUserFromVoice(userID uuid.UUID) {
 	for chID, users := range h.voiceUsers {
 		if users[userID] {
+			if h.VoiceManager != nil {
+				h.VoiceManager.LeaveRoom(chID, userID)
+			}
 			delete(users, userID)
 			if len(users) == 0 {
 				delete(h.voiceUsers, chID)
@@ -374,13 +381,32 @@ func (h *Hub) Run() {
 
 		case action := <-h.voiceJoin:
 			userID := action.client.UserID
-			// Remove from any existing voice channel first
+			// Remove from any existing voice channel first (both state and WebRTC)
+			for channelID := range h.voiceUsers {
+				if h.voiceUsers[channelID][userID] {
+					if h.VoiceManager != nil {
+						h.VoiceManager.LeaveRoom(channelID, userID)
+					}
+					break
+				}
+			}
 			h.removeUserFromVoiceNoNotify(userID)
 			// Add to new channel
 			if _, ok := h.voiceUsers[action.channelID]; !ok {
 				h.voiceUsers[action.channelID] = make(map[uuid.UUID]bool)
 			}
 			h.voiceUsers[action.channelID][userID] = true
+
+			// Create WebRTC PeerConnection via the voice manager
+			if h.VoiceManager != nil {
+				sendFunc := func(data []byte) {
+					h.SendToUser(userID, data)
+				}
+				if _, err := h.VoiceManager.JoinRoom(action.channelID, userID, action.client.Username, sendFunc); err != nil {
+					log.Printf("voice: failed to join room for user %s: %v", userID, err)
+				}
+			}
+
 			h.broadcastVoiceState()
 
 		case action := <-h.voiceLeave:

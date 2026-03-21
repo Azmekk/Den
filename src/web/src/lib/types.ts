@@ -77,6 +77,7 @@ export interface InviteCodeInfo {
 export interface AppConfig {
 	uploads_enabled: boolean;
 	voice_enabled?: boolean;
+	ice_servers?: RTCIceServer[];
 	max_message_chars: number;
 	open_registration?: boolean;
 	supabase_url: string;

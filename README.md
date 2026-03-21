@@ -16,7 +16,7 @@
 ## Features
 
 - **Text channels** — real-time messaging with mentions, emotes, message pinning, and replies
-- **Voice channels** — powered by LiveKit with screen sharing support
+- **Voice channels** — built-in WebRTC SFU with screen sharing support
 - **Custom emotes** — upload and use custom emotes across channels
 - **Admin panel** — manage users, channels, and instance settings
 - **Desktop app** — native Electron client with auto-updates, tray support, and notifications
@@ -31,10 +31,9 @@
 ```sh
 mkdir den && cd den
 curl -LO https://raw.githubusercontent.com/Azmekk/den/master/docker-compose.yml \
-     -LO https://raw.githubusercontent.com/Azmekk/den/master/livekit.yaml \
      -LO https://raw.githubusercontent.com/Azmekk/den/master/.env.example
 cp .env.example .env
-# Edit .env — set strong random values for JWT_SECRET, LIVEKIT keys, and Postgres password
+# Edit .env — set Supabase credentials and Postgres password
 docker compose up -d
 ```
 
@@ -49,9 +48,10 @@ Open `http://localhost:8080` — the first registered user becomes admin.
 | `JWT_SECRET` | Yes | — | Secret for signing auth tokens |
 | `MAX_MESSAGES` | No | `50` | Messages returned per page |
 | `OPEN_REGISTRATION` | No | `true` | Allow public registration |
-| `LIVEKIT_API_KEY` | No | — | LiveKit API key (enables voice) |
-| `LIVEKIT_API_SECRET` | No | — | LiveKit API secret |
-| `LIVEKIT_URL` | No | — | LiveKit server WebSocket URL |
+| `STUN_SERVERS` | No | `stun:stun.l.google.com:19302` | STUN server URLs (comma-separated) |
+| `TURN_URL` | No | — | TURN server URL (for NAT traversal) |
+| `TURN_USERNAME` | No | — | TURN server username |
+| `TURN_CREDENTIAL` | No | — | TURN server credential |
 | `BUCKET_ENDPOINT` | No | — | S3-compatible endpoint (enables uploads) |
 | `BUCKET_NAME` | No | — | Bucket name |
 | `BUCKET_REGION` | No | — | Bucket region |
@@ -59,9 +59,9 @@ Open `http://localhost:8080` — the first registered user becomes admin.
 | `BUCKET_SECRET_KEY` | No | — | Bucket secret key |
 | `BUCKET_PUBLIC_URL` | No | — | Public URL for serving uploaded files |
 
-### Voice (LiveKit)
+### Voice
 
-To enable voice channels, add a [LiveKit](https://livekit.io/) server and set the `LIVEKIT_*` environment variables. See the development `docker-compose.yml` for a working example with a self-hosted LiveKit instance.
+Voice channels use a built-in WebRTC SFU (Selective Forwarding Unit) powered by Pion. Voice is enabled by default with Google's public STUN server. For production deployments behind NAT, configure a TURN server via the `TURN_*` environment variables.
 
 ### File Uploads (S3)
 

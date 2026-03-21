@@ -1,31 +1,29 @@
-import type { LocalParticipant } from 'livekit-client';
 import type { ScreenSharePreset } from './types';
 
 /**
  * Starts a browser-based screen share using the native getDisplayMedia picker.
  * Excludes self-browser surface and system audio to prevent echo/feedback loops.
  *
- * Returns true if the screen share started successfully.
+ * Returns the MediaStream if successful, or null if the user cancelled.
  */
 export async function startBrowserScreenShare(
-	localParticipant: LocalParticipant,
 	preset: ScreenSharePreset,
-): Promise<boolean> {
+): Promise<MediaStream | null> {
 	try {
-		await localParticipant.setScreenShareEnabled(true, {
+		const stream = await navigator.mediaDevices.getDisplayMedia({
+			video: {
+				width: { ideal: preset.width },
+				height: { ideal: preset.height },
+				frameRate: { ideal: preset.frameRate },
+			},
 			audio: true,
 			selfBrowserSurface: 'exclude',
 			systemAudio: 'exclude',
-			resolution: {
-				width: preset.width,
-				height: preset.height,
-				frameRate: preset.frameRate,
-			},
-		});
-		return true;
+		} as DisplayMediaStreamOptions);
+		return stream;
 	} catch (error) {
 		console.warn('Browser screen share failed:', error);
-		return false;
+		return null;
 	}
 }
 
@@ -34,39 +32,25 @@ export async function startBrowserScreenShare(
  * The Electron preload script must have already called selectScreenSource
  * before this function is invoked.
  *
- * Returns true if the screen share started successfully.
+ * Returns the MediaStream if successful, or null on failure.
  */
 export async function startDesktopScreenShare(
-	localParticipant: LocalParticipant,
 	preset: ScreenSharePreset,
-): Promise<boolean> {
+): Promise<MediaStream | null> {
 	try {
-		await localParticipant.setScreenShareEnabled(true, {
+		const stream = await navigator.mediaDevices.getDisplayMedia({
+			video: {
+				width: { ideal: preset.width },
+				height: { ideal: preset.height },
+				frameRate: { ideal: preset.frameRate },
+			},
 			audio: true,
 			selfBrowserSurface: 'exclude',
 			systemAudio: 'exclude',
-			resolution: {
-				width: preset.width,
-				height: preset.height,
-				frameRate: preset.frameRate,
-			},
-		});
-		return true;
+		} as DisplayMediaStreamOptions);
+		return stream;
 	} catch (error) {
 		console.warn('Desktop screen share failed:', error);
-		return false;
-	}
-}
-
-/**
- * Stops any active screen share.
- */
-export async function stopScreenShare(
-	localParticipant: LocalParticipant,
-): Promise<void> {
-	try {
-		await localParticipant.setScreenShareEnabled(false);
-	} catch (error) {
-		console.warn('Stop screen share failed:', error);
+		return null;
 	}
 }

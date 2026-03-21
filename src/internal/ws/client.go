@@ -9,13 +9,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
+	"github.com/Azmekk/den/internal/voice"
 )
 
 const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 4096
+	maxMessageSize = 65536
 )
 
 type Client struct {
@@ -27,25 +29,27 @@ type Client struct {
 	DisplayName string
 	IsAdmin     bool
 	IsNewUser   bool
-	msgHandler  MessageHandler
-	dmHandler   DMMessageHandler
-	subsMu      sync.RWMutex
-	subs        map[uuid.UUID]bool
+	msgHandler    MessageHandler
+	dmHandler     DMMessageHandler
+	voiceManager  *voice.Manager
+	subsMu        sync.RWMutex
+	subs          map[uuid.UUID]bool
 }
 
-func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, displayName string, isAdmin bool, isNewUser bool, msgHandler MessageHandler, dmHandler DMMessageHandler) *Client {
+func newClient(hub *Hub, conn *websocket.Conn, userID uuid.UUID, username string, displayName string, isAdmin bool, isNewUser bool, msgHandler MessageHandler, dmHandler DMMessageHandler, voiceManager *voice.Manager) *Client {
 	return &Client{
-		hub:         hub,
-		conn:        conn,
-		send:        make(chan []byte, 256),
-		UserID:      userID,
-		Username:    username,
-		DisplayName: displayName,
-		IsAdmin:     isAdmin,
-		IsNewUser:   isNewUser,
-		msgHandler:  msgHandler,
-		dmHandler:   dmHandler,
-		subs:        make(map[uuid.UUID]bool),
+		hub:          hub,
+		conn:         conn,
+		send:         make(chan []byte, 256),
+		UserID:       userID,
+		Username:     username,
+		DisplayName:  displayName,
+		IsAdmin:      isAdmin,
+		IsNewUser:    isNewUser,
+		msgHandler:   msgHandler,
+		dmHandler:    dmHandler,
+		voiceManager: voiceManager,
+		subs:         make(map[uuid.UUID]bool),
 	}
 }
 
@@ -58,12 +62,16 @@ func (client *Client) IsSubscribed(channelID uuid.UUID) bool {
 }
 
 type incomingMessage struct {
-	Type      string    `json:"type"`
-	ChannelID uuid.UUID `json:"channel_id"`
-	DMPairID  uuid.UUID `json:"dm_pair_id"`
-	MessageID uuid.UUID `json:"message_id"`
-	Content   string    `json:"content"`
-	ReplyToID string    `json:"reply_to_id"`
+	Type      string          `json:"type"`
+	ChannelID uuid.UUID       `json:"channel_id"`
+	DMPairID  uuid.UUID       `json:"dm_pair_id"`
+	MessageID uuid.UUID       `json:"message_id"`
+	Content   string          `json:"content"`
+	ReplyToID string          `json:"reply_to_id"`
+	SDP       json.RawMessage `json:"sdp,omitempty"`
+	Candidate json.RawMessage `json:"candidate,omitempty"`
+	Muted     *bool           `json:"muted,omitempty"`
+	Speaking  *bool           `json:"speaking,omitempty"`
 }
 
 func (c *Client) ReadPump() {
@@ -233,6 +241,62 @@ func (c *Client) handleMessage(msg incomingMessage) {
 
 	case "voice_leave":
 		c.hub.VoiceLeave(c)
+
+	case "voice_offer":
+		if c.voiceManager == nil {
+			c.sendError("voice not enabled")
+			return
+		}
+		answerData, err := c.voiceManager.HandleOffer(msg.ChannelID, c.UserID, msg.SDP)
+		if err != nil {
+			log.Printf("ws: voice_offer error for user %s: %v", c.UserID, err)
+			c.sendError("voice offer failed")
+			return
+		}
+		select {
+		case c.send <- answerData:
+		default:
+		}
+
+	case "voice_answer":
+		if c.voiceManager == nil {
+			return
+		}
+		if err := c.voiceManager.HandleAnswer(msg.ChannelID, c.UserID, msg.SDP); err != nil {
+			log.Printf("ws: voice_answer error for user %s: %v", c.UserID, err)
+		}
+
+	case "voice_ice_candidate":
+		if c.voiceManager == nil {
+			return
+		}
+		if err := c.voiceManager.HandleICECandidate(msg.ChannelID, c.UserID, msg.Candidate); err != nil {
+			log.Printf("ws: voice_ice_candidate error for user %s: %v", c.UserID, err)
+		}
+
+	case "voice_mute_state":
+		if msg.Muted == nil {
+			return
+		}
+		envelope, _ := json.Marshal(map[string]any{
+			"type":       "voice_mute_state",
+			"channel_id": msg.ChannelID,
+			"user_id":    c.UserID,
+			"muted":      *msg.Muted,
+		})
+		c.hub.Broadcast(msg.ChannelID, envelope)
+
+	case "voice_speaking":
+		if msg.Speaking == nil {
+			return
+		}
+		envelope, _ := json.Marshal(map[string]any{
+			"type":       "voice_speaking",
+			"channel_id": msg.ChannelID,
+			"user_id":    c.UserID,
+			"speaking":   *msg.Speaking,
+		})
+		c.hub.Broadcast(msg.ChannelID, envelope)
 
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{

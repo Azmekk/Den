@@ -1,5 +1,4 @@
-import type { AudioProcessorOptions } from 'livekit-client';
-import type { DenAudioProcessor } from './types';
+import type { AudioProcessorResult } from './types';
 import { NoiseGatePipeline } from './noise-gate';
 import { RnnoiseProcessor } from './rnnoise-processor';
 
@@ -12,7 +11,7 @@ interface CreateProcessorOptions {
 }
 
 /**
- * Creates a composite audio processor based on the user's settings.
+ * Creates an audio processing pipeline for a raw microphone track.
  * Returns null if no processing is enabled.
  *
  * Modes:
@@ -21,88 +20,70 @@ interface CreateProcessorOptions {
  * - Noise Gate only: just threshold-based gating
  * - Neither: returns null
  */
-export function createAudioProcessor(
+export async function createAudioProcessor(
+	rawTrack: MediaStreamTrack,
+	audioContext: AudioContext,
 	options: CreateProcessorOptions,
-): DenAudioProcessor | null {
+): Promise<AudioProcessorResult | null> {
 	const { rnnoiseEnabled, noiseGateEnabled, noiseGateThreshold, onGateStateChange, onMicLevelChange } = options;
 
 	if (rnnoiseEnabled && noiseGateEnabled) {
-		return createCompositeProcessor(noiseGateThreshold, onGateStateChange, onMicLevelChange);
+		return createCompositeProcessor(rawTrack, audioContext, noiseGateThreshold, onGateStateChange, onMicLevelChange);
 	}
 
 	if (rnnoiseEnabled) {
-		return createRnnoiseOnlyProcessor();
+		return createRnnoiseOnlyProcessor(rawTrack, audioContext);
 	}
 
 	if (noiseGateEnabled) {
-		return createNoiseGateOnlyProcessor(noiseGateThreshold, onGateStateChange, onMicLevelChange);
+		return createNoiseGateOnlyProcessor(rawTrack, audioContext, noiseGateThreshold, onGateStateChange, onMicLevelChange);
 	}
 
 	return null;
 }
 
-function createCompositeProcessor(
+async function createCompositeProcessor(
+	rawTrack: MediaStreamTrack,
+	audioContext: AudioContext,
 	threshold: number,
 	onGateStateChange: (isOpen: boolean) => void,
 	onMicLevelChange?: (normalizedLevel: number) => void,
-): DenAudioProcessor {
+): Promise<AudioProcessorResult> {
 	const rnnoiseProcessor = new RnnoiseProcessor();
 	const noiseGate = new NoiseGatePipeline(threshold, onGateStateChange, onMicLevelChange);
 
+	await rnnoiseProcessor.init({ track: rawTrack, audioContext });
+
+	if (rnnoiseProcessor.processedTrack) {
+		noiseGate.build(rnnoiseProcessor.processedTrack, audioContext);
+	}
+
+	const processedTrack = noiseGate.processedTrack ?? rnnoiseProcessor.processedTrack ?? rawTrack;
+
 	return {
-		name: 'composite-rnnoise-gate',
-		processedTrack: undefined,
-
-		async init(opts: AudioProcessorOptions) {
-			await rnnoiseProcessor.init(opts);
-
-			if (rnnoiseProcessor.processedTrack) {
-				noiseGate.build(rnnoiseProcessor.processedTrack, opts.audioContext);
-				this.processedTrack = noiseGate.processedTrack;
-			}
-		},
-
-		async restart(opts: AudioProcessorOptions) {
-			await rnnoiseProcessor.restart(opts);
-
-			if (rnnoiseProcessor.processedTrack) {
-				noiseGate.build(rnnoiseProcessor.processedTrack, opts.audioContext);
-				this.processedTrack = noiseGate.processedTrack;
-			}
-		},
-
-		async destroy() {
+		processedTrack,
+		cleanup() {
 			noiseGate.teardown();
-			await rnnoiseProcessor.destroy();
+			rnnoiseProcessor.destroy();
 		},
-
 		setThreshold(value: number) {
 			noiseGate.setThreshold(value);
 		},
 	};
 }
 
-function createRnnoiseOnlyProcessor(): DenAudioProcessor {
+async function createRnnoiseOnlyProcessor(
+	rawTrack: MediaStreamTrack,
+	audioContext: AudioContext,
+): Promise<AudioProcessorResult> {
 	const rnnoiseProcessor = new RnnoiseProcessor();
+	await rnnoiseProcessor.init({ track: rawTrack, audioContext });
 
 	return {
-		name: 'rnnoise-only',
-		processedTrack: undefined,
-
-		async init(opts: AudioProcessorOptions) {
-			await rnnoiseProcessor.init(opts);
-			this.processedTrack = rnnoiseProcessor.processedTrack;
+		processedTrack: rnnoiseProcessor.processedTrack ?? rawTrack,
+		cleanup() {
+			rnnoiseProcessor.destroy();
 		},
-
-		async restart(opts: AudioProcessorOptions) {
-			await rnnoiseProcessor.restart(opts);
-			this.processedTrack = rnnoiseProcessor.processedTrack;
-		},
-
-		async destroy() {
-			await rnnoiseProcessor.destroy();
-		},
-
 		setThreshold() {
 			// No-op: no noise gate in this mode
 		},
@@ -110,30 +91,20 @@ function createRnnoiseOnlyProcessor(): DenAudioProcessor {
 }
 
 function createNoiseGateOnlyProcessor(
+	rawTrack: MediaStreamTrack,
+	audioContext: AudioContext,
 	threshold: number,
 	onGateStateChange: (isOpen: boolean) => void,
 	onMicLevelChange?: (normalizedLevel: number) => void,
-): DenAudioProcessor {
+): AudioProcessorResult {
 	const noiseGate = new NoiseGatePipeline(threshold, onGateStateChange, onMicLevelChange);
+	noiseGate.build(rawTrack, audioContext);
 
 	return {
-		name: 'noise-gate-only',
-		processedTrack: undefined,
-
-		async init(opts: AudioProcessorOptions) {
-			noiseGate.build(opts.track, opts.audioContext);
-			this.processedTrack = noiseGate.processedTrack;
-		},
-
-		async restart(opts: AudioProcessorOptions) {
-			noiseGate.build(opts.track, opts.audioContext);
-			this.processedTrack = noiseGate.processedTrack;
-		},
-
-		async destroy() {
+		processedTrack: noiseGate.processedTrack ?? rawTrack,
+		cleanup() {
 			noiseGate.teardown();
 		},
-
 		setThreshold(value: number) {
 			noiseGate.setThreshold(value);
 		},
