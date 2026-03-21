@@ -34,7 +34,7 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 	router.Use(cloudflareRealIP)
 	router.Use(chimw.RealIP)
 	router.Use(chimw.RequestID)
-	router.Use(chimw.Logger)
+	// router.Use(chimw.Logger)
 	router.Use(chimw.Recoverer)
 	router.Use(chimw.Compress(5))
 	router.Use(chimw.Heartbeat("/healthz"))
