@@ -354,13 +354,13 @@ app.whenReady().then(() => {
   createTray();
 
   // Auto-updater
-  autoUpdater.autoDownload = false;
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('update-available', (info) => {
     pendingUpdate = { version: info.version, downloaded: false, downloadPercent: 0 };
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadFile('update.html');
+      mainWindow.webContents.send('update-available', info.version);
     }
   });
 

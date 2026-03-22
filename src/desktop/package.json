@@ -25,6 +25,7 @@
       "main.js",
       "preload.js",
       "connect.html",
+      "update.html",
       "icons/**/*",
       "node_modules/**/*"
     ],
