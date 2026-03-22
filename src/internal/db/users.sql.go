@@ -13,6 +13,24 @@ import (
 	"github.com/lib/pq"
 )
 
+const clearPasswordResetToken = `-- name: ClearPasswordResetToken :exec
+UPDATE users SET password_reset_token = NULL, password_reset_expires_at = NULL, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) ClearPasswordResetToken(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, clearPasswordResetToken, id)
+	return err
+}
+
+const clearUserTOTP = `-- name: ClearUserTOTP :exec
+UPDATE users SET totp_secret = NULL, totp_enabled = false, recovery_codes = NULL, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) ClearUserTOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, clearUserTOTP, id)
+	return err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT count(*) FROM users
 `
@@ -25,26 +43,26 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, password_hash, display_name, is_admin, supabase_id, needs_username)
-VALUES ($1, '', $2, $3, $4, $5)
-RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+INSERT INTO users (username, email, password_hash, display_name, is_admin)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at
 `
 
 type CreateUserParams struct {
-	Username      string
-	DisplayName   sql.NullString
-	IsAdmin       bool
-	SupabaseID    sql.NullString
-	NeedsUsername bool
+	Username     string
+	Email        string
+	PasswordHash string
+	DisplayName  sql.NullString
+	IsAdmin      bool
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, createUser,
 		arg.Username,
+		arg.Email,
+		arg.PasswordHash,
 		arg.DisplayName,
 		arg.IsAdmin,
-		arg.SupabaseID,
-		arg.NeedsUsername,
 	)
 	var i User
 	err := row.Scan(
@@ -57,9 +75,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
@@ -73,19 +98,70 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const getUserBannedBySupabaseID = `-- name: GetUserBannedBySupabaseID :one
-SELECT banned FROM users WHERE supabase_id = $1
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at FROM users WHERE email = $1
 `
 
-func (q *Queries) GetUserBannedBySupabaseID(ctx context.Context, supabaseID sql.NullString) (bool, error) {
-	row := q.db.QueryRowContext(ctx, getUserBannedBySupabaseID, supabaseID)
-	var banned bool
-	err := row.Scan(&banned)
-	return banned, err
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+		&i.Banned,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
+	)
+	return i, err
+}
+
+const getUserByEmailVerifyToken = `-- name: GetUserByEmailVerifyToken :one
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at FROM users WHERE email_verify_token = $1 AND email_verify_expires_at > now()
+`
+
+func (q *Queries) GetUserByEmailVerifyToken(ctx context.Context, emailVerifyToken sql.NullString) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmailVerifyToken, emailVerifyToken)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Color,
+		&i.Banned,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
+	)
+	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE id = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -101,19 +177,26 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
 
-const getUserBySupabaseID = `-- name: GetUserBySupabaseID :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE supabase_id = $1
+const getUserByPasswordResetToken = `-- name: GetUserByPasswordResetToken :one
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at FROM users WHERE password_reset_token = $1 AND password_reset_expires_at > now()
 `
 
-func (q *Queries) GetUserBySupabaseID(ctx context.Context, supabaseID sql.NullString) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserBySupabaseID, supabaseID)
+func (q *Queries) GetUserByPasswordResetToken(ctx context.Context, passwordResetToken sql.NullString) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByPasswordResetToken, passwordResetToken)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -125,15 +208,22 @@ func (q *Queries) GetUserBySupabaseID(ctx context.Context, supabaseID sql.NullSt
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username FROM users WHERE username = $1
+SELECT id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -149,9 +239,16 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
@@ -233,6 +330,45 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const setEmailVerified = `-- name: SetEmailVerified :exec
+UPDATE users SET email_verified = true, email_verify_token = NULL, email_verify_expires_at = NULL, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) SetEmailVerified(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, setEmailVerified, id)
+	return err
+}
+
+const setEmailVerifyToken = `-- name: SetEmailVerifyToken :exec
+UPDATE users SET email_verify_token = $2, email_verify_expires_at = $3, updated_at = now() WHERE id = $1
+`
+
+type SetEmailVerifyTokenParams struct {
+	ID                   uuid.UUID
+	EmailVerifyToken     sql.NullString
+	EmailVerifyExpiresAt sql.NullTime
+}
+
+func (q *Queries) SetEmailVerifyToken(ctx context.Context, arg SetEmailVerifyTokenParams) error {
+	_, err := q.db.ExecContext(ctx, setEmailVerifyToken, arg.ID, arg.EmailVerifyToken, arg.EmailVerifyExpiresAt)
+	return err
+}
+
+const setPasswordResetToken = `-- name: SetPasswordResetToken :exec
+UPDATE users SET password_reset_token = $2, password_reset_expires_at = $3, updated_at = now() WHERE id = $1
+`
+
+type SetPasswordResetTokenParams struct {
+	ID                     uuid.UUID
+	PasswordResetToken     sql.NullString
+	PasswordResetExpiresAt sql.NullTime
+}
+
+func (q *Queries) SetPasswordResetToken(ctx context.Context, arg SetPasswordResetTokenParams) error {
+	_, err := q.db.ExecContext(ctx, setPasswordResetToken, arg.ID, arg.PasswordResetToken, arg.PasswordResetExpiresAt)
+	return err
+}
+
 const setUserAdmin = `-- name: SetUserAdmin :exec
 UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1
 `
@@ -261,37 +397,57 @@ func (q *Queries) SetUserBanned(ctx context.Context, arg SetUserBannedParams) er
 	return err
 }
 
-const setUserUsername = `-- name: SetUserUsername :one
-UPDATE users SET username = $2, needs_username = false, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+const setUserPasswordHash = `-- name: SetUserPasswordHash :exec
+UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
 `
 
-type SetUserUsernameParams struct {
-	ID       uuid.UUID
-	Username string
+type SetUserPasswordHashParams struct {
+	ID           uuid.UUID
+	PasswordHash string
 }
 
-func (q *Queries) SetUserUsername(ctx context.Context, arg SetUserUsernameParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, setUserUsername, arg.ID, arg.Username)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.AvatarUrl,
-		&i.IsAdmin,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Color,
-		&i.SupabaseID,
-		&i.Banned,
-		&i.NeedsUsername,
+func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
+	_, err := q.db.ExecContext(ctx, setUserPasswordHash, arg.ID, arg.PasswordHash)
+	return err
+}
+
+const setUserRecoveryCodes = `-- name: SetUserRecoveryCodes :exec
+UPDATE users SET recovery_codes = $2, updated_at = now() WHERE id = $1
+`
+
+type SetUserRecoveryCodesParams struct {
+	ID            uuid.UUID
+	RecoveryCodes []string
+}
+
+func (q *Queries) SetUserRecoveryCodes(ctx context.Context, arg SetUserRecoveryCodesParams) error {
+	_, err := q.db.ExecContext(ctx, setUserRecoveryCodes, arg.ID, pq.Array(arg.RecoveryCodes))
+	return err
+}
+
+const setUserTOTPSecret = `-- name: SetUserTOTPSecret :exec
+UPDATE users SET totp_secret = $2, totp_enabled = $3, recovery_codes = $4, updated_at = now() WHERE id = $1
+`
+
+type SetUserTOTPSecretParams struct {
+	ID            uuid.UUID
+	TotpSecret    sql.NullString
+	TotpEnabled   bool
+	RecoveryCodes []string
+}
+
+func (q *Queries) SetUserTOTPSecret(ctx context.Context, arg SetUserTOTPSecretParams) error {
+	_, err := q.db.ExecContext(ctx, setUserTOTPSecret,
+		arg.ID,
+		arg.TotpSecret,
+		arg.TotpEnabled,
+		pq.Array(arg.RecoveryCodes),
 	)
-	return i, err
+	return err
 }
 
 const updateUserAvatarUrl = `-- name: UpdateUserAvatarUrl :one
-UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+UPDATE users SET avatar_url = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at
 `
 
 type UpdateUserAvatarUrlParams struct {
@@ -312,15 +468,22 @@ func (q *Queries) UpdateUserAvatarUrl(ctx context.Context, arg UpdateUserAvatarU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
 
 const updateUserColor = `-- name: UpdateUserColor :one
-UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+UPDATE users SET color = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at
 `
 
 type UpdateUserColorParams struct {
@@ -341,15 +504,22 @@ func (q *Queries) UpdateUserColor(ctx context.Context, arg UpdateUserColorParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }
 
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, supabase_id, banned, needs_username
+UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, username, password_hash, display_name, avatar_url, is_admin, created_at, updated_at, color, banned, email, email_verified, email_verify_token, email_verify_expires_at, totp_secret, totp_enabled, recovery_codes, password_reset_token, password_reset_expires_at
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -370,9 +540,16 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Color,
-		&i.SupabaseID,
 		&i.Banned,
-		&i.NeedsUsername,
+		&i.Email,
+		&i.EmailVerified,
+		&i.EmailVerifyToken,
+		&i.EmailVerifyExpiresAt,
+		&i.TotpSecret,
+		&i.TotpEnabled,
+		pq.Array(&i.RecoveryCodes),
+		&i.PasswordResetToken,
+		&i.PasswordResetExpiresAt,
 	)
 	return i, err
 }

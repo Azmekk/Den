@@ -102,24 +102,12 @@ func (service *AdminService) DeleteUser(ctx context.Context, callerID, targetID 
 		return ErrSelfDeletion
 	}
 
-	// Look up the user to get their supabase_id before deleting
-	user, lookupError := service.queries.GetUserByID(ctx, targetID)
-	if lookupError != nil {
-		return lookupError
-	}
-
-	// Delete from local DB
+	// Delete from DB (CASCADE will clean up refresh_tokens)
 	if deleteError := service.queries.DeleteUser(ctx, targetID); deleteError != nil {
 		return deleteError
 	}
 
-	// Delete from Supabase if the user has a supabase_id
-	if user.SupabaseID.Valid && user.SupabaseID.String != "" {
-		if supabaseError := service.authSvc.SupabaseDeleteUser(user.SupabaseID.String); supabaseError != nil {
-			log.Printf("warning: failed to delete user from supabase: %v", supabaseError)
-		}
-		service.authSvc.InvalidateUserCache(user.SupabaseID.String)
-	}
+	service.authSvc.InvalidateUserCache(targetID)
 
 	// Kick from WebSocket
 	service.hub.KickUser(targetID)
@@ -132,12 +120,6 @@ func (service *AdminService) BanUser(ctx context.Context, callerID, targetID uui
 		return ErrSelfBan
 	}
 
-	// Look up the user to get supabase_id
-	user, lookupError := service.queries.GetUserByID(ctx, targetID)
-	if lookupError != nil {
-		return lookupError
-	}
-
 	// Set local banned flag
 	if banError := service.queries.SetUserBanned(ctx, db.SetUserBannedParams{
 		ID:     targetID,
@@ -146,22 +128,14 @@ func (service *AdminService) BanUser(ctx context.Context, callerID, targetID uui
 		return banError
 	}
 
-	// Ban/unban on Supabase
-	if user.SupabaseID.Valid && user.SupabaseID.String != "" {
-		var supabaseError error
-		if ban {
-			supabaseError = service.authSvc.SupabaseBanUser(user.SupabaseID.String)
-		} else {
-			supabaseError = service.authSvc.SupabaseUnbanUser(user.SupabaseID.String)
-		}
-		if supabaseError != nil {
-			log.Printf("warning: failed to update ban status on supabase: %v", supabaseError)
-		}
-		service.authSvc.InvalidateUserCache(user.SupabaseID.String)
-	}
+	service.authSvc.InvalidateUserCache(targetID)
 
-	// If banning, kick from WebSocket immediately
 	if ban {
+		// Revoke all refresh tokens so the banned user can't get new access tokens
+		if revokeError := service.authSvc.RevokeAllUserTokens(ctx, targetID); revokeError != nil {
+			log.Printf("warning: failed to revoke refresh tokens for banned user: %v", revokeError)
+		}
+		// Kick from WebSocket immediately
 		service.hub.KickUser(targetID)
 	}
 

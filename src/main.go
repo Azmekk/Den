@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,19 +41,36 @@ func main() {
 		port = "8080"
 	}
 
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	if supabaseURL == "" {
-		log.Fatal("SUPABASE_URL is required")
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET is required (32+ characters recommended)")
 	}
 
-	supabaseServiceRoleKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
-	if supabaseServiceRoleKey == "" {
-		log.Fatal("SUPABASE_SERVICE_ROLE_KEY is required")
+	// Optional SMTP configuration
+	var smtpConfig *service.SMTPConfig
+	smtpHost := os.Getenv("SMTP_HOST")
+	if smtpHost != "" {
+		smtpPort := 587
+		if portStr := os.Getenv("SMTP_PORT"); portStr != "" {
+			if parsed, parseError := strconv.Atoi(portStr); parseError == nil {
+				smtpPort = parsed
+			}
+		}
+		smtpConfig = &service.SMTPConfig{
+			Host:     smtpHost,
+			Port:     smtpPort,
+			Username: os.Getenv("SMTP_USERNAME"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			From:     os.Getenv("SMTP_FROM"),
+		}
+		log.Printf("SMTP configured (%s:%d)", smtpHost, smtpPort)
+	} else {
+		log.Println("SMTP not configured, email features disabled")
 	}
 
-	supabaseAnonKey := os.Getenv("SUPABASE_ANON_KEY")
-	if supabaseAnonKey == "" {
-		log.Fatal("SUPABASE_ANON_KEY is required")
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:5173"
 	}
 
 	conn, openError := sql.Open("postgres", dbURL)
@@ -82,7 +100,7 @@ func main() {
 	hub := ws.NewHub()
 	go hub.Run()
 
-	authSvc := service.NewAuthService(queries, supabaseURL, supabaseServiceRoleKey)
+	authSvc := service.NewAuthService(queries, jwtSecret, smtpConfig, frontendURL)
 	channelSvc := service.NewChannelService(queries)
 	emoteSvc := service.NewEmoteService(queries, bucketSvc)
 	adminSvc := service.NewAdminService(queries, authSvc, hub)
@@ -150,7 +168,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceManager, hub, staticFS, bucketSvc != nil, supabaseURL, supabaseAnonKey, allowedOrigins)
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceManager, hub, staticFS, bucketSvc != nil, allowedOrigins)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

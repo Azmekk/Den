@@ -2,13 +2,13 @@ package ws
 
 import (
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/Azmekk/den/internal/service"
@@ -80,14 +80,14 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 		}
 
 		var auth authMessage
-		if err := json.Unmarshal(raw, &auth); err != nil || auth.Type != "auth" || auth.Token == "" {
+		if unmarshalError := json.Unmarshal(raw, &auth); unmarshalError != nil || auth.Type != "auth" || auth.Token == "" {
 			writeError(conn, "invalid auth message")
 			return
 		}
 
-		claims, validationError := authService.ValidateSupabaseToken(auth.Token)
+		claims, validationError := authService.ValidateAccessToken(auth.Token)
 		if validationError != nil {
-			if errors.Is(validationError, service.ErrUserBanned) {
+			if validationError == service.ErrUserBanned {
 				writeError(conn, "account is banned")
 			} else {
 				writeError(conn, "invalid or expired token")
@@ -95,10 +95,17 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 			return
 		}
 
-		// Look up or create Den user from Supabase claims
-		user, isNewUser, syncError := authService.SyncUser(request.Context(), claims)
-		if syncError != nil {
-			if errors.Is(syncError, service.ErrUserBanned) {
+		// Extract user ID from JWT claims
+		userIDStr, _ := claims["sub"].(string)
+		userID, parseError := uuid.Parse(userIDStr)
+		if parseError != nil {
+			writeError(conn, "invalid token claims")
+			return
+		}
+
+		user, lookupError := authService.LookupUser(request.Context(), userID)
+		if lookupError != nil {
+			if lookupError == service.ErrUserBanned {
 				writeError(conn, "account is banned")
 			} else {
 				writeError(conn, "failed to resolve user")
@@ -107,7 +114,7 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 		}
 
 		okMsg, _ := json.Marshal(map[string]string{"type": "auth_ok"})
-		if err := conn.WriteMessage(websocket.TextMessage, okMsg); err != nil {
+		if writeErr := conn.WriteMessage(websocket.TextMessage, okMsg); writeErr != nil {
 			conn.Close()
 			return
 		}
@@ -119,7 +126,7 @@ func ServeWS(hub *Hub, authService *service.AuthService, msgHandler MessageHandl
 			displayName = user.DisplayName.String
 		}
 
-		client := newClient(hub, conn, user.ID, user.Username, displayName, user.IsAdmin, isNewUser, msgHandler, dmHandler, hub.VoiceManager)
+		client := newClient(hub, conn, user.ID, user.Username, displayName, user.IsAdmin, false, msgHandler, dmHandler, hub.VoiceManager)
 		hub.register <- client
 
 		go client.WritePump()

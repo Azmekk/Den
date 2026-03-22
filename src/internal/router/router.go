@@ -14,14 +14,14 @@ import (
 	"github.com/Azmekk/den/internal/ws"
 )
 
-func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceManager *voice.Manager, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, supabaseURL string, supabaseAnonKey string, allowedOrigins []string) chi.Router {
+func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messageSvc *service.MessageService, userSvc *service.UserService, adminSvc *service.AdminService, emoteSvc *service.EmoteService, dmSvc *service.DMService, mediaSvc *service.MediaService, voiceManager *voice.Manager, hub *ws.Hub, staticFS fs.FS, bucketConfigured bool, allowedOrigins []string) chi.Router {
 	authHandler := handler.NewAuthHandler(authSvc)
 	channelHandler := handler.NewChannelHandler(channelSvc)
 	messageHandler := handler.NewMessageHandler(messageSvc, hub)
 	userHandler := handler.NewUserHandler(userSvc, mediaSvc, hub)
 	adminHandler := handler.NewAdminHandler(adminSvc, mediaSvc)
 	emoteHandler := handler.NewEmoteHandler(emoteSvc, hub)
-	configHandler := handler.NewConfigHandler(bucketConfigured, voiceManager != nil, voiceManager, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration, supabaseURL, supabaseAnonKey)
+	configHandler := handler.NewConfigHandler(bucketConfigured, voiceManager != nil, voiceManager, adminSvc.GetMaxMessageChars, authSvc.IsOpenRegistration, authSvc.IsSMTPConfigured())
 	dmHandler := handler.NewDMHandler(dmSvc)
 	var mediaHandler *handler.MediaHandler
 	if mediaSvc != nil {
@@ -46,6 +46,16 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 		router.Get("/users/{id}/avatar", userHandler.GetAvatar)
 		router.Post("/invite/validate", authHandler.ValidateInviteCode)
 
+		// Public auth routes
+		router.Post("/auth/register", authHandler.Register)
+		router.Post("/auth/login", authHandler.Login)
+		router.Post("/auth/2fa/verify", authHandler.Verify2FA)
+		router.Post("/auth/refresh", authHandler.RefreshToken)
+		router.Post("/auth/logout", authHandler.Logout)
+		router.Post("/auth/forgot-password", authHandler.ForgotPassword)
+		router.Post("/auth/reset-password", authHandler.ResetPassword)
+		router.Get("/auth/verify-email", authHandler.VerifyEmail)
+
 		// Authenticated
 		router.Group(func(router chi.Router) {
 			router.Use(middleware.RequireAuth(authSvc))
@@ -67,7 +77,6 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 			router.Get("/dms/{id}/messages", dmHandler.GetHistory)
 			router.Get("/dms/{id}/pins", dmHandler.GetPins)
 			router.Get("/users", userHandler.List)
-			router.Put("/users/me/username", authHandler.SetUsername)
 			router.Put("/users/me/display-name", userHandler.UpdateDisplayName)
 			router.Put("/users/me/color", userHandler.UpdateColor)
 			router.Post("/users/me/avatar", userHandler.UploadAvatar)
@@ -77,6 +86,11 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				router.Post("/upload/image", mediaHandler.UploadImage)
 				router.Post("/upload/video", mediaHandler.UploadVideo)
 			}
+
+			// 2FA management (authenticated)
+			router.Post("/auth/2fa/setup", authHandler.Setup2FA)
+			router.Post("/auth/2fa/enable", authHandler.Enable2FA)
+			router.Post("/auth/2fa/disable", authHandler.Disable2FA)
 
 			// Admin only
 			router.Group(func(router chi.Router) {

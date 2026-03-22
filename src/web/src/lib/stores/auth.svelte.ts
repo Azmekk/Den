@@ -1,35 +1,66 @@
-import { getSupabase } from '$lib/supabase';
-import type { Session, SupabaseClient } from '@supabase/supabase-js';
-
 interface User {
 	id: string;
 	username: string;
+	email: string;
 	display_name?: string;
 	is_admin: boolean;
-	needs_username: boolean;
+	totp_enabled: boolean;
+	email_verified: boolean;
+}
+
+interface AuthTokens {
+	access_token: string;
+	refresh_token: string;
+	expires_in: number;
+}
+
+interface TwoFAChallenge {
+	requires_2fa: boolean;
+	two_fa_token: string;
+}
+
+type LoginResult = { tokens: AuthTokens } | { twoFA: TwoFAChallenge };
+type RegisterResult = { tokens: AuthTokens } | { emailVerificationRequired: true };
+
+const ACCESS_TOKEN_KEY = 'den_access_token';
+const REFRESH_TOKEN_KEY = 'den_refresh_token';
+
+/** Decode JWT payload without verification (for reading exp claim client-side). */
+function decodeJWTPayload(token: string): Record<string, unknown> | null {
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+		const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+		return JSON.parse(payload);
+	} catch {
+		return null;
+	}
 }
 
 function createAuth() {
-	let session = $state<Session | null>(null);
+	let accessToken = $state<string | null>(null);
+	let refreshToken = $state<string | null>(null);
 	let user = $state<User | null>(null);
 	let initialized = $state(false);
-	let supabaseClient: SupabaseClient | null = null;
+	let refreshPromise: Promise<string | null> | null = null;
 
-	async function ensureSupabase(): Promise<SupabaseClient> {
-		if (!supabaseClient) {
-			supabaseClient = await getSupabase();
-		}
-		return supabaseClient;
+	function storeTokens(tokens: AuthTokens) {
+		accessToken = tokens.access_token;
+		refreshToken = tokens.refresh_token;
+		localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+		localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
 	}
 
 	function clear() {
-		session = null;
+		accessToken = null;
+		refreshToken = null;
 		user = null;
+		localStorage.removeItem(ACCESS_TOKEN_KEY);
+		localStorage.removeItem(REFRESH_TOKEN_KEY);
 	}
 
-	/** Fetch the Den user profile from the backend using the current Supabase token. */
-	async function fetchDenUser(): Promise<void> {
-		const token = session?.access_token;
+	async function fetchUser(): Promise<void> {
+		const token = await getToken();
 		if (!token) return;
 
 		const response = await fetch('/api/me', {
@@ -37,109 +68,172 @@ function createAuth() {
 		});
 		if (response.ok) {
 			user = await response.json();
+		} else if (response.status === 401) {
+			clear();
+		}
+	}
+
+	async function refreshTokens(): Promise<string | null> {
+		if (!refreshToken) return null;
+
+		try {
+			const response = await fetch('/api/auth/refresh', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ refresh_token: refreshToken }),
+			});
+
+			if (!response.ok) {
+				clear();
+				return null;
+			}
+
+			const tokens: AuthTokens = await response.json();
+			storeTokens(tokens);
+			return tokens.access_token;
+		} catch {
+			clear();
+			return null;
 		}
 	}
 
 	/**
-	 * Returns a fresh access token, using Supabase's built-in session refresh.
-	 * Callers should use this instead of reading session.access_token directly.
+	 * Returns a valid access token, refreshing if needed.
+	 * Multiple callers will share the same refresh request.
 	 */
 	async function getToken(): Promise<string | null> {
-		if (!session) return null;
+		if (!accessToken) return null;
 
-		const supabase = await ensureSupabase();
-		// Supabase SDK auto-refreshes when we call getSession()
-		const { data } = await supabase.auth.getSession();
-		if (data.session) {
-			session = data.session;
-			return data.session.access_token;
+		// Check if token is expired or about to expire (within 60 seconds)
+		const payload = decodeJWTPayload(accessToken);
+		if (payload) {
+			const expiration = payload.exp as number;
+			const now = Math.floor(Date.now() / 1000);
+			if (expiration - now > 60) {
+				return accessToken;
+			}
 		}
 
-		// Session expired and couldn't be refreshed
-		clear();
-		return null;
+		// Token expired or about to expire — refresh
+		if (!refreshPromise) {
+			refreshPromise = refreshTokens().finally(() => {
+				refreshPromise = null;
+			});
+		}
+		return refreshPromise;
 	}
 
 	async function init() {
 		if (initialized) return;
 
-		const supabase = await ensureSupabase();
+		const storedAccess = localStorage.getItem(ACCESS_TOKEN_KEY);
+		const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
 
-		// Get existing session from Supabase (stored in localStorage by the SDK)
-		const { data: sessionData } = await supabase.auth.getSession();
-		if (sessionData.session) {
-			// Verify the user still exists in Supabase (server-side check).
-			// getSession() only reads localStorage — a deleted user's JWT remains valid until expiry.
-			const { error: userError } = await supabase.auth.getUser();
-			if (userError) {
-				await supabase.auth.signOut();
-				clear();
-			} else {
-				session = sessionData.session;
-				await fetchDenUser();
+		if (storedAccess && storedRefresh) {
+			accessToken = storedAccess;
+			refreshToken = storedRefresh;
+
+			// Validate by fetching user profile
+			await fetchUser();
+
+			// If fetchUser cleared tokens (401), try refresh
+			if (!accessToken && storedRefresh) {
+				refreshToken = storedRefresh;
+				const newToken = await refreshTokens();
+				if (newToken) {
+					await fetchUser();
+				}
 			}
 		}
+
 		initialized = true;
+	}
 
-		// Listen for auth state changes (login, logout, token refresh)
-		supabase.auth.onAuthStateChange((_event, newSession) => {
-			session = newSession;
-			if (newSession) {
-				fetchDenUser();
-			} else {
-				clear();
-			}
+	async function login(email: string, password: string): Promise<LoginResult> {
+		const response = await fetch('/api/auth/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ email, password }),
 		});
-	}
 
-	async function login(email: string, password: string): Promise<void> {
-		const supabase = await ensureSupabase();
-		const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-		if (error) throw new Error(error.message);
-		session = data.session;
-		await fetchDenUser();
-	}
-
-	async function register(email: string, password: string, username?: string, inviteCode?: string): Promise<void> {
-		const supabase = await ensureSupabase();
-		const metadata: Record<string, string | undefined> = { username };
-		if (inviteCode) {
-			metadata.invite_code = inviteCode;
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({ error: 'login failed' }));
+			throw new Error(body.error || 'login failed');
 		}
-		const { data, error } = await supabase.auth.signUp({
-			email,
-			password,
-			options: {
-				data: metadata,
-				emailRedirectTo: window.location.origin,
-			},
-		});
-		if (error) throw new Error(error.message);
-		if (data.session) {
-			session = data.session;
-			await fetchDenUser();
+
+		const data = await response.json();
+
+		if (data.requires_2fa) {
+			return { twoFA: data as TwoFAChallenge };
 		}
+
+		const tokens = data as AuthTokens;
+		storeTokens(tokens);
+		await fetchUser();
+		return { tokens };
 	}
 
-	async function loginWithOAuth(provider: 'google'): Promise<void> {
-		const supabase = await ensureSupabase();
-		const { error } = await supabase.auth.signInWithOAuth({
-			provider,
-			options: { redirectTo: window.location.origin },
+	async function verify2FA(twoFAToken: string, code: string): Promise<void> {
+		const response = await fetch('/api/auth/2fa/verify', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ token: twoFAToken, code }),
 		});
-		if (error) throw new Error(error.message);
+
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({ error: '2FA verification failed' }));
+			throw new Error(body.error || '2FA verification failed');
+		}
+
+		const tokens: AuthTokens = await response.json();
+		storeTokens(tokens);
+		await fetchUser();
+	}
+
+	async function register(
+		email: string,
+		password: string,
+		username: string,
+		inviteCode?: string,
+	): Promise<RegisterResult> {
+		const response = await fetch('/api/auth/register', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ email, username, password, invite_code: inviteCode || '' }),
+		});
+
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({ error: 'registration failed' }));
+			throw new Error(body.error || 'registration failed');
+		}
+
+		const data = await response.json();
+
+		if (data.email_verification_required) {
+			return { emailVerificationRequired: true };
+		}
+
+		const tokens = data as AuthTokens;
+		storeTokens(tokens);
+		await fetchUser();
+		return { tokens };
 	}
 
 	async function resetPassword(email: string): Promise<void> {
-		const supabase = await ensureSupabase();
-		const { error } = await supabase.auth.resetPasswordForEmail(email, {
-			redirectTo: `${window.location.origin}/login`,
+		const response = await fetch('/api/auth/forgot-password', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ email }),
 		});
-		if (error) throw new Error(error.message);
+
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({ error: 'failed to send reset email' }));
+			throw new Error(body.error || 'failed to send reset email');
+		}
 	}
 
 	async function refreshUser(): Promise<void> {
-		await fetchDenUser();
+		await fetchUser();
 	}
 
 	async function logout(): Promise<void> {
@@ -149,14 +243,20 @@ function createAuth() {
 		voiceStore.leave(true);
 		websocket.disconnect();
 
-		const supabase = await ensureSupabase();
-		await supabase.auth.signOut();
+		if (refreshToken) {
+			fetch('/api/auth/logout', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ refresh_token: refreshToken }),
+			}).catch(() => {});
+		}
+
 		clear();
 	}
 
 	return {
 		get accessToken() {
-			return session?.access_token ?? null;
+			return accessToken;
 		},
 		get user() {
 			return user;
@@ -165,17 +265,14 @@ function createAuth() {
 			return initialized;
 		},
 		get isLoggedIn() {
-			return !!session;
-		},
-		get session() {
-			return session;
+			return !!accessToken;
 		},
 		clear,
 		getToken,
 		init,
 		login,
+		verify2FA,
 		register,
-		loginWithOAuth,
 		refreshUser,
 		resetPassword,
 		logout,

@@ -100,15 +100,17 @@ docker compose down             # Stop everything
 
 ## Authentication
 
-- **Supabase Auth** handles all authentication (email/password, OAuth, 2FA, password resets)
-- Backend validates Supabase JWTs via JWKS endpoint (`{SUPABASE_URL}/auth/v1/jwks`), supporting RS256 and other algorithms
-- On first authenticated request, a local Den user is auto-created from Supabase claims (`supabase_id` → `users` table)
-- Frontend uses `@supabase/supabase-js` SDK for login/register/OAuth flows
-- Supabase tokens are sent in `Authorization: Bearer <token>` header to Den backend
-- User cache (sync.Map with 2-min TTL) avoids DB lookup on every request
-- No refresh tokens or invite codes — Supabase handles session management
-- **Banning**: Admin sets local `banned` flag + calls Supabase admin API to ban. Banned users are kicked from WebSocket immediately and rejected at middleware (403) on subsequent requests.
-- Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
+- **Custom in-house auth** — no external auth providers
+- Backend issues HS256 JWTs (15-min access tokens) with DB-backed refresh tokens (30-day)
+- Registration: email/password with bcrypt hashing, optional email verification (when SMTP configured)
+- TOTP-based 2FA with recovery codes (Google Authenticator compatible)
+- SMTP-based password reset (optional — features disabled when SMTP not configured)
+- Username validation: `a-zA-Z0-9._-`, 1-32 characters
+- Tokens sent in `Authorization: Bearer <token>` header
+- User cache (sync.Map with UUID keys, 2-min TTL) avoids DB lookup on every request
+- **Banning**: Admin sets `banned` flag, revokes all refresh tokens, kicks from WebSocket
+- Required env var: `JWT_SECRET`
+- Optional env vars: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `FRONTEND_URL`
 
 ## Architecture Caveats
 

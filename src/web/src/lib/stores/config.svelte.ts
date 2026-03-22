@@ -6,6 +6,7 @@ function createConfig() {
 	let iceServers = $state<RTCIceServer[]>([]);
 	let maxMessageChars = $state(2000);
 	let openRegistration = $state(true);
+	let smtpEnabled = $state(false);
 
 	async function fetch() {
 		const res = await globalThis.fetch('/api/config');
@@ -16,6 +17,7 @@ function createConfig() {
 			iceServers = data.ice_servers ?? [];
 			maxMessageChars = data.max_message_chars ?? 2000;
 			openRegistration = data.open_registration ?? true;
+			smtpEnabled = data.smtp_enabled ?? false;
 		}
 	}
 
@@ -34,6 +36,9 @@ function createConfig() {
 		},
 		get openRegistration() {
 			return openRegistration;
+		},
+		get smtpEnabled() {
+			return smtpEnabled;
 		},
 		fetch,
 	};

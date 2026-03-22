@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -15,13 +14,13 @@ import (
 type contextKey string
 
 const (
-	ctxUserID   contextKey = "user_id"
+	ctxUserID  contextKey = "user_id"
 	ctxUsername contextKey = "username"
-	ctxIsAdmin  contextKey = "is_admin"
+	ctxIsAdmin contextKey = "is_admin"
 )
 
-// RequireAuth validates a Supabase JWT from the Authorization header,
-// syncs/looks up the Den user, and populates request context with user info.
+// RequireAuth validates an HS256 JWT from the Authorization header,
+// looks up the Den user, and populates request context with user info.
 func RequireAuth(authSvc *service.AuthService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -32,25 +31,23 @@ func RequireAuth(authSvc *service.AuthService) func(http.Handler) http.Handler {
 			}
 			tokenString := strings.TrimPrefix(header, "Bearer ")
 
-			claims, validationError := authSvc.ValidateSupabaseToken(tokenString)
+			claims, validationError := authSvc.ValidateAccessToken(tokenString)
 			if validationError != nil {
-				if errors.Is(validationError, service.ErrUserBanned) {
-					httputil.WriteError(writer, http.StatusForbidden, "account is banned")
-					return
-				}
 				httputil.WriteError(writer, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 
-			// Look up or create the Den user from Supabase claims
-			user, _, syncError := authSvc.SyncUser(request.Context(), claims)
-			if syncError != nil {
-				if errors.Is(syncError, service.ErrUserBanned) {
+			userIDStr, _ := claims["sub"].(string)
+			userID, parseError := uuid.Parse(userIDStr)
+			if parseError != nil {
+				httputil.WriteError(writer, http.StatusUnauthorized, "invalid token claims")
+				return
+			}
+
+			user, lookupError := authSvc.LookupUser(request.Context(), userID)
+			if lookupError != nil {
+				if lookupError == service.ErrUserBanned {
 					httputil.WriteError(writer, http.StatusForbidden, "account is banned")
-					return
-				}
-				if errors.Is(syncError, service.ErrInviteRequired) {
-					httputil.WriteError(writer, http.StatusForbidden, "valid invite code required")
 					return
 				}
 				httputil.WriteError(writer, http.StatusUnauthorized, "failed to resolve user")

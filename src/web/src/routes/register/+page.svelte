@@ -11,7 +11,8 @@ let username = $state('');
 let inviteCode = $state('');
 let error = $state('');
 let loading = $state(false);
-let registrationSent = $state(false);
+let registrationComplete = $state(false);
+let emailVerificationRequired = $state(false);
 
 onMount(async () => {
 	if (auth.isLoggedIn) goto('/');
@@ -53,10 +54,10 @@ async function handleSubmit(event: Event) {
 	loading = true;
 	try {
 		const code = !configStore.openRegistration ? inviteCode.trim() : undefined;
-		await auth.register(email, password, username, code);
-		// If email confirmation is required, Supabase won't return a session
-		if (!auth.isLoggedIn) {
-			registrationSent = true;
+		const result = await auth.register(email, password, username, code);
+		if ('emailVerificationRequired' in result) {
+			emailVerificationRequired = true;
+			registrationComplete = true;
 		} else {
 			goto('/');
 		}
@@ -64,15 +65,6 @@ async function handleSubmit(event: Event) {
 		error = registrationError instanceof Error ? registrationError.message : 'registration failed';
 	} finally {
 		loading = false;
-	}
-}
-
-async function handleOAuth(provider: 'google') {
-	error = '';
-	try {
-		await auth.loginWithOAuth(provider);
-	} catch (oauthError) {
-		error = oauthError instanceof Error ? oauthError.message : 'OAuth login failed';
 	}
 }
 </script>
@@ -84,12 +76,17 @@ async function handleOAuth(provider: 'google') {
 			<p class="mt-2 text-muted-foreground">Create your account</p>
 		</div>
 
-		{#if registrationSent}
-			<div class="rounded-md bg-green-500/10 px-4 py-3 text-sm text-green-400">
-				Check your email to confirm your account, then sign in.
-			</div>
+		{#if registrationComplete}
+			{#if emailVerificationRequired}
+				<div class="rounded-md bg-green-500/10 px-4 py-3 text-sm text-green-400">
+					Check your email to verify your account, then sign in.
+				</div>
+			{:else}
+				<div class="rounded-md bg-green-500/10 px-4 py-3 text-sm text-green-400">
+					Account created successfully!
+				</div>
+			{/if}
 			<p class="mt-4 text-center text-sm text-muted-foreground">
-				Already confirmed?
 				<a href="/login" class="text-primary hover:underline">Sign in</a>
 			</p>
 		{:else}
@@ -121,7 +118,7 @@ async function handleOAuth(provider: 'google') {
 						bind:value={username}
 						required
 						maxlength={32}
-						pattern="[a-zA-Z0-9_\-]+"
+						pattern="[a-zA-Z0-9._\-]+"
 						autocomplete="username"
 						class="w-full rounded-md border border-input bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						placeholder="Choose a username"

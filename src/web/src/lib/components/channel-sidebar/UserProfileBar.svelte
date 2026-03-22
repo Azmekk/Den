@@ -28,6 +28,67 @@ let avatarCropOpen = $state(false);
 let avatarFile: File | null = $state(null);
 let avatarInputEl: HTMLInputElement | undefined = $state();
 
+// 2FA state
+let twoFASetupSecret = $state<string | null>(null);
+let twoFASetupURL = $state<string | null>(null);
+let twoFAVerifyCode = $state('');
+let twoFARecoveryCodes = $state<string[] | null>(null);
+let twoFADisablePassword = $state('');
+let twoFAError = $state('');
+let twoFALoading = $state(false);
+let showTwoFASetup = $state(false);
+let showTwoFADisable = $state(false);
+
+async function startTwoFASetup() {
+	twoFAError = '';
+	twoFALoading = true;
+	try {
+		const data = await api.post<{ secret: string; otpauth_url: string }>('/auth/2fa/setup');
+		twoFASetupSecret = data.secret;
+		twoFASetupURL = data.otpauth_url;
+		showTwoFASetup = true;
+	} catch (setupError) {
+		twoFAError = setupError instanceof Error ? setupError.message : '2FA setup failed';
+	} finally {
+		twoFALoading = false;
+	}
+}
+
+async function confirmTwoFASetup() {
+	twoFAError = '';
+	twoFALoading = true;
+	try {
+		const data = await api.post<{ recovery_codes: string[] }>('/auth/2fa/enable', { code: twoFAVerifyCode });
+		twoFARecoveryCodes = data.recovery_codes;
+		showTwoFASetup = false;
+		twoFAVerifyCode = '';
+		await auth.refreshUser();
+	} catch (enableError) {
+		twoFAError = enableError instanceof Error ? enableError.message : 'failed to enable 2FA';
+	} finally {
+		twoFALoading = false;
+	}
+}
+
+async function disableTwoFA() {
+	twoFAError = '';
+	twoFALoading = true;
+	try {
+		await api.post('/auth/2fa/disable', { password: twoFADisablePassword });
+		showTwoFADisable = false;
+		twoFADisablePassword = '';
+		await auth.refreshUser();
+	} catch (disableError) {
+		twoFAError = disableError instanceof Error ? disableError.message : 'failed to disable 2FA';
+	} finally {
+		twoFALoading = false;
+	}
+}
+
+function closeTwoFARecoveryCodes() {
+	twoFARecoveryCodes = null;
+}
+
 function handleAvatarFileSelect(event: Event) {
 	const input = event.target as HTMLInputElement;
 	const file = input.files?.[0];
@@ -189,6 +250,84 @@ async function pickColor(color: string) {
 						</div>
 
 						<div class="border-t border-border pt-3">
+							<!-- svelte-ignore a11y_label_has_associated_control -->
+							<label class="mb-1.5 block text-xs font-medium text-muted-foreground">Two-Factor Authentication</label>
+							{#if twoFAError}
+								<p class="mb-2 text-xs text-destructive">{twoFAError}</p>
+							{/if}
+							{#if showTwoFASetup && twoFASetupSecret}
+								<div class="space-y-2">
+									<p class="text-xs text-muted-foreground">Enter this secret in your authenticator app:</p>
+									<code class="block break-all rounded bg-secondary px-2 py-1 text-xs text-foreground select-all">{twoFASetupSecret}</code>
+									<input
+										type="text"
+										bind:value={twoFAVerifyCode}
+										placeholder="6-digit code"
+										inputmode="numeric"
+										class="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground focus:border-primary focus:outline-none"
+									/>
+									<div class="flex gap-2">
+										<button
+											onclick={confirmTwoFASetup}
+											disabled={twoFALoading || twoFAVerifyCode.length < 6}
+											class="flex-1 rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+										>
+											{twoFALoading ? 'Enabling...' : 'Enable'}
+										</button>
+										<button
+											onclick={() => { showTwoFASetup = false; twoFAError = ''; }}
+											class="flex-1 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-secondary"
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							{:else if showTwoFADisable}
+								<div class="space-y-2">
+									<p class="text-xs text-muted-foreground">Enter your password to disable 2FA:</p>
+									<input
+										type="password"
+										bind:value={twoFADisablePassword}
+										placeholder="Password"
+										autocomplete="current-password"
+										class="w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground focus:border-primary focus:outline-none"
+									/>
+									<div class="flex gap-2">
+										<button
+											onclick={disableTwoFA}
+											disabled={twoFALoading || !twoFADisablePassword}
+											class="flex-1 rounded bg-destructive px-2 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+										>
+											{twoFALoading ? 'Disabling...' : 'Disable'}
+										</button>
+										<button
+											onclick={() => { showTwoFADisable = false; twoFAError = ''; }}
+											class="flex-1 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-secondary"
+										>
+											Cancel
+										</button>
+									</div>
+								</div>
+							{:else if auth.user?.totp_enabled}
+								<button
+									onclick={() => { showTwoFADisable = true; twoFAError = ''; }}
+									class="w-full rounded border border-border bg-secondary px-3 py-1.5 text-sm text-foreground hover:bg-secondary/80 transition-colors"
+								>
+									Disable 2FA
+								</button>
+								<p class="mt-1 text-xs text-green-400">2FA is enabled</p>
+							{:else}
+								<button
+									onclick={startTwoFASetup}
+									disabled={twoFALoading}
+									class="w-full rounded border border-border bg-secondary px-3 py-1.5 text-sm text-foreground hover:bg-secondary/80 transition-colors"
+								>
+									{twoFALoading ? 'Setting up...' : 'Enable 2FA'}
+								</button>
+							{/if}
+						</div>
+
+						<div class="border-t border-border pt-3">
 							<button
 								onclick={async () => {
 									try {
@@ -236,3 +375,35 @@ async function pickColor(color: string) {
 </div>
 
 <AvatarCropModal bind:open={avatarCropOpen} file={avatarFile} onClose={handleAvatarCropClose} />
+
+{#if twoFARecoveryCodes}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+		onclick={closeTwoFARecoveryCodes}
+		onkeydown={(event) => { if (event.key === 'Escape') closeTwoFARecoveryCodes(); }}
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl"
+			onclick={(event) => event.stopPropagation()}
+			onkeydown={() => {}}
+		>
+			<h3 class="mb-2 text-lg font-semibold text-foreground">Recovery Codes</h3>
+			<p class="mb-4 text-sm text-muted-foreground">
+				Save these codes somewhere safe. Each code can only be used once to sign in if you lose access to your authenticator.
+			</p>
+			<div class="grid grid-cols-2 gap-2 rounded-md bg-secondary p-3">
+				{#each twoFARecoveryCodes as code}
+					<code class="text-center text-sm font-mono text-foreground">{code}</code>
+				{/each}
+			</div>
+			<button
+				onclick={closeTwoFARecoveryCodes}
+				class="mt-4 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+			>
+				I've saved these codes
+			</button>
+		</div>
+	</div>
+{/if}

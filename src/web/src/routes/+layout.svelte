@@ -13,9 +13,6 @@
 
   onMount(() => {
     // Register global listeners FIRST, before any connection can happen.
-    // This prevents a race where the $effect safety net connects the WebSocket
-    // during auth.init() before listeners are registered, causing presence_initial
-    // and voice_state_initial messages to be silently dropped.
     websocket.on("voice_state_initial", voiceStore.handleVoiceStateInitial);
     websocket.on("voice_state_update", voiceStore.handleVoiceStateUpdate);
     websocket.on("presence_initial", presence.handlePresenceInitial);
@@ -25,12 +22,6 @@
       ready = true;
 
       if (!auth.isLoggedIn) return;
-
-      // Redirect OAuth users who haven't chosen a username yet
-      if (auth.user?.needs_username && window.location.pathname !== "/setup-username") {
-        goto("/setup-username");
-        return;
-      }
 
       // Connect WebSocket
       auth.getToken().then((token) => {

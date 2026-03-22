@@ -13,19 +13,17 @@ type ConfigHandler struct {
 	voiceManager        *voice.Manager
 	getMaxChars         func() int
 	getOpenRegistration func() bool
-	supabaseURL         string
-	supabaseAnonKey     string
+	smtpEnabled         bool
 }
 
-func NewConfigHandler(uploadsEnabled, voiceEnabled bool, voiceManager *voice.Manager, getMaxChars func() int, getOpenRegistration func() bool, supabaseURL, supabaseAnonKey string) *ConfigHandler {
+func NewConfigHandler(uploadsEnabled, voiceEnabled bool, voiceManager *voice.Manager, getMaxChars func() int, getOpenRegistration func() bool, smtpEnabled bool) *ConfigHandler {
 	return &ConfigHandler{
 		uploadsEnabled:      uploadsEnabled,
 		voiceEnabled:        voiceEnabled,
 		voiceManager:        voiceManager,
 		getMaxChars:         getMaxChars,
 		getOpenRegistration: getOpenRegistration,
-		supabaseURL:         supabaseURL,
-		supabaseAnonKey:     supabaseAnonKey,
+		smtpEnabled:         smtpEnabled,
 	}
 }
 
@@ -35,8 +33,7 @@ func (handler *ConfigHandler) GetConfig(writer http.ResponseWriter, request *htt
 		"voice_enabled":     handler.voiceEnabled,
 		"max_message_chars": handler.getMaxChars(),
 		"open_registration": handler.getOpenRegistration(),
-		"supabase_url":      handler.supabaseURL,
-		"supabase_anon_key": handler.supabaseAnonKey,
+		"smtp_enabled":      handler.smtpEnabled,
 	}
 
 	if handler.voiceManager != nil {

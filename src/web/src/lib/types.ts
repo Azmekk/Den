@@ -80,8 +80,7 @@ export interface AppConfig {
 	ice_servers?: RTCIceServer[];
 	max_message_chars: number;
 	open_registration?: boolean;
-	supabase_url: string;
-	supabase_anon_key: string;
+	smtp_enabled?: boolean;
 }
 
 export interface SearchResult {
