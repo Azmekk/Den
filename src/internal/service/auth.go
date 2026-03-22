@@ -585,6 +585,42 @@ func (service *AuthService) ResetPassword(ctx context.Context, token, newPasswor
 	return nil
 }
 
+// ChangePassword validates the current password and updates to a new one.
+func (service *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	if len(newPassword) < 8 {
+		return ErrWeakPassword
+	}
+
+	user, lookupError := service.Queries.GetUserByID(ctx, userID)
+	if lookupError != nil {
+		return lookupError
+	}
+
+	if compareError := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); compareError != nil {
+		return ErrInvalidCredentials
+	}
+
+	passwordHash, hashError := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if hashError != nil {
+		return fmt.Errorf("hashing password: %w", hashError)
+	}
+
+	if setError := service.Queries.SetUserPasswordHash(ctx, db.SetUserPasswordHashParams{
+		ID:           user.ID,
+		PasswordHash: string(passwordHash),
+	}); setError != nil {
+		return setError
+	}
+
+	// Revoke all refresh tokens (force re-login on all devices)
+	if revokeError := service.Queries.DeleteRefreshTokensByUserID(ctx, user.ID); revokeError != nil {
+		log.Printf("warning: failed to revoke refresh tokens after password change: %v", revokeError)
+	}
+
+	service.InvalidateUserCache(user.ID)
+	return nil
+}
+
 // VerifyEmail validates an email verification token.
 func (service *AuthService) VerifyEmail(ctx context.Context, token string) error {
 	tokenHash := hashToken(token)

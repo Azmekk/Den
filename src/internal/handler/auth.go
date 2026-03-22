@@ -236,6 +236,35 @@ func (handler *AuthHandler) ResetPassword(writer http.ResponseWriter, request *h
 	httputil.WriteJSON(writer, http.StatusOK, map[string]string{"message": "password reset successful"})
 }
 
+// ChangePassword changes the authenticated user's password.
+func (handler *AuthHandler) ChangePassword(writer http.ResponseWriter, request *http.Request) {
+	userID := middleware.UserIDFromContext(request.Context())
+
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if decodeError := httputil.DecodeJSON(request, &body); decodeError != nil {
+		httputil.WriteError(writer, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	changeError := handler.authService.ChangePassword(request.Context(), userID, body.CurrentPassword, body.NewPassword)
+	if changeError != nil {
+		switch {
+		case errors.Is(changeError, service.ErrInvalidCredentials):
+			httputil.WriteError(writer, http.StatusUnauthorized, "current password is incorrect")
+		case errors.Is(changeError, service.ErrWeakPassword):
+			httputil.WriteError(writer, http.StatusBadRequest, "password must be at least 8 characters")
+		default:
+			httputil.WriteInternalError(writer, "password change failed", changeError)
+		}
+		return
+	}
+
+	httputil.WriteJSON(writer, http.StatusOK, map[string]string{"message": "password changed successfully"})
+}
+
 // VerifyEmail validates an email verification token.
 func (handler *AuthHandler) VerifyEmail(writer http.ResponseWriter, request *http.Request) {
 	token := request.URL.Query().Get("token")

@@ -87,7 +87,8 @@ func New(authSvc *service.AuthService, channelSvc *service.ChannelService, messa
 				router.Post("/upload/video", mediaHandler.UploadVideo)
 			}
 
-			// 2FA management (authenticated)
+			// Auth management (authenticated)
+			router.Put("/auth/change-password", authHandler.ChangePassword)
 			router.Post("/auth/2fa/setup", authHandler.Setup2FA)
 			router.Post("/auth/2fa/enable", authHandler.Enable2FA)
 			router.Post("/auth/2fa/disable", authHandler.Disable2FA)
