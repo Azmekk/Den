@@ -83,7 +83,9 @@ $effect(() => {
 									</div>
 								{/if}
 								<span class="text-xs text-muted-foreground truncate">{user.display_name || user.username}</span>
-								{#if voiceStore.isUserMuted(uid)}
+								{#if voiceStore.isUserDeafened(uid)}
+									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+								{:else if voiceStore.isUserMuted(uid)}
 									<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-red-400"><line x1="1" x2="23" y1="1" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/><line x1="12" x2="12" y1="19" y2="24"/><line x1="8" x2="16" y1="24" y2="24"/></svg>
 								{/if}
 								{#if voiceStore.isUserScreenSharing(uid)}

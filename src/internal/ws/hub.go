@@ -47,11 +47,30 @@ type voiceAction struct {
 	channelID uuid.UUID
 }
 
+// VoiceUserState tracks per-user state within a voice channel.
+type VoiceUserState struct {
+	Muted     bool `json:"muted"`
+	Deafened  bool `json:"deafened"`
+	Streaming bool `json:"streaming"`
+}
+
+type voiceStateChange struct {
+	userID    uuid.UUID
+	muted     *bool
+	deafened  *bool
+	streaming *bool
+}
+
+type voiceBroadcastMsg struct {
+	channelID uuid.UUID
+	data      []byte
+}
+
 type Hub struct {
 	clients         map[*Client]bool
 	channels        map[uuid.UUID]map[*Client]bool
 	onlineUsers     map[uuid.UUID]map[*Client]bool
-	voiceUsers      map[uuid.UUID]map[uuid.UUID]bool // channelID → set of userIDs
+	voiceUsers      map[uuid.UUID]map[uuid.UUID]*VoiceUserState // channelID → userID → state
 	register        chan *Client
 	unregister      chan *Client
 	subscribe       chan subRequest
@@ -63,6 +82,8 @@ type Hub struct {
 	userSend        chan userMsg
 	voiceJoin       chan voiceAction
 	voiceLeave      chan voiceAction
+	voiceState      chan voiceStateChange
+	voiceBroadcast  chan voiceBroadcastMsg
 	kickUser        chan uuid.UUID
 	VoiceManager    *voice.Manager
 }
@@ -77,7 +98,7 @@ func NewHub() *Hub {
 		clients:         make(map[*Client]bool),
 		channels:        make(map[uuid.UUID]map[*Client]bool),
 		onlineUsers:     make(map[uuid.UUID]map[*Client]bool),
-		voiceUsers:      make(map[uuid.UUID]map[uuid.UUID]bool),
+		voiceUsers:      make(map[uuid.UUID]map[uuid.UUID]*VoiceUserState),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		subscribe:       make(chan subRequest),
@@ -89,6 +110,8 @@ func NewHub() *Hub {
 		userSend:        make(chan userMsg, 256),
 		voiceJoin:       make(chan voiceAction),
 		voiceLeave:      make(chan voiceAction),
+		voiceState:      make(chan voiceStateChange),
+		voiceBroadcast:  make(chan voiceBroadcastMsg, 256),
 		kickUser:        make(chan uuid.UUID),
 	}
 }
@@ -144,14 +167,14 @@ func (h *Hub) removeClient(client *Client) bool {
 }
 
 func (h *Hub) removeUserFromVoice(userID uuid.UUID) {
-	for chID, users := range h.voiceUsers {
-		if users[userID] {
+	for channelID, users := range h.voiceUsers {
+		if _, ok := users[userID]; ok {
 			if h.VoiceManager != nil {
-				h.VoiceManager.LeaveRoom(chID, userID)
+				h.VoiceManager.LeaveRoom(channelID, userID)
 			}
 			delete(users, userID)
 			if len(users) == 0 {
-				delete(h.voiceUsers, chID)
+				delete(h.voiceUsers, channelID)
 			}
 			h.broadcastVoiceState()
 			return
@@ -160,11 +183,11 @@ func (h *Hub) removeUserFromVoice(userID uuid.UUID) {
 }
 
 func (h *Hub) removeUserFromVoiceNoNotify(userID uuid.UUID) {
-	for chID, users := range h.voiceUsers {
-		if users[userID] {
+	for channelID, users := range h.voiceUsers {
+		if _, ok := users[userID]; ok {
 			delete(users, userID)
 			if len(users) == 0 {
-				delete(h.voiceUsers, chID)
+				delete(h.voiceUsers, channelID)
 			}
 			return
 		}
@@ -180,14 +203,19 @@ func (h *Hub) broadcastVoiceState() {
 	h.broadcastAll(data)
 }
 
-func (h *Hub) buildVoiceStates() map[string][]string {
-	result := make(map[string][]string)
-	for chID, users := range h.voiceUsers {
-		ids := make([]string, 0, len(users))
-		for uid := range users {
-			ids = append(ids, uid.String())
+func (h *Hub) buildVoiceStates() map[string][]map[string]any {
+	result := make(map[string][]map[string]any)
+	for channelID, users := range h.voiceUsers {
+		participants := make([]map[string]any, 0, len(users))
+		for userID, state := range users {
+			participants = append(participants, map[string]any{
+				"user_id":   userID.String(),
+				"muted":     state.Muted,
+				"deafened":  state.Deafened,
+				"streaming": state.Streaming,
+			})
 		}
-		result[chID.String()] = ids
+		result[channelID.String()] = participants
 	}
 	return result
 }
@@ -382,8 +410,8 @@ func (h *Hub) Run() {
 		case action := <-h.voiceJoin:
 			userID := action.client.UserID
 			// Remove from any existing voice channel first (both state and WebRTC)
-			for channelID := range h.voiceUsers {
-				if h.voiceUsers[channelID][userID] {
+			for channelID, users := range h.voiceUsers {
+				if _, ok := users[userID]; ok {
 					if h.VoiceManager != nil {
 						h.VoiceManager.LeaveRoom(channelID, userID)
 					}
@@ -393,9 +421,9 @@ func (h *Hub) Run() {
 			h.removeUserFromVoiceNoNotify(userID)
 			// Add to new channel
 			if _, ok := h.voiceUsers[action.channelID]; !ok {
-				h.voiceUsers[action.channelID] = make(map[uuid.UUID]bool)
+				h.voiceUsers[action.channelID] = make(map[uuid.UUID]*VoiceUserState)
 			}
-			h.voiceUsers[action.channelID][userID] = true
+			h.voiceUsers[action.channelID][userID] = &VoiceUserState{}
 
 			// Create WebRTC PeerConnection via the voice manager
 			if h.VoiceManager != nil {
@@ -413,6 +441,39 @@ func (h *Hub) Run() {
 			userID := action.client.UserID
 			h.removeUserFromVoice(userID)
 			_ = action // channelID not needed, we remove from whichever channel they're in
+
+		case change := <-h.voiceState:
+			// Find the user in any voice channel and update their state
+			for _, users := range h.voiceUsers {
+				if state, ok := users[change.userID]; ok {
+					if change.muted != nil {
+						state.Muted = *change.muted
+					}
+					if change.deafened != nil {
+						state.Deafened = *change.deafened
+					}
+					if change.streaming != nil {
+						state.Streaming = *change.streaming
+					}
+					h.broadcastVoiceState()
+					break
+				}
+			}
+
+		case msg := <-h.voiceBroadcast:
+			// Broadcast to all users in a specific voice channel
+			if users, ok := h.voiceUsers[msg.channelID]; ok {
+				for userID := range users {
+					if conns, connOk := h.onlineUsers[userID]; connOk {
+						for client := range conns {
+							select {
+							case client.send <- msg.data:
+							default:
+							}
+						}
+					}
+				}
+			}
 
 		case userID := <-h.kickUser:
 			if conns, ok := h.onlineUsers[userID]; ok {
@@ -471,4 +532,17 @@ func (h *Hub) VoiceLeave(client *Client) {
 
 func (h *Hub) KickUser(userID uuid.UUID) {
 	h.kickUser <- userID
+}
+
+func (h *Hub) UpdateVoiceState(userID uuid.UUID, muted, deafened, streaming *bool) {
+	h.voiceState <- voiceStateChange{
+		userID:    userID,
+		muted:     muted,
+		deafened:  deafened,
+		streaming: streaming,
+	}
+}
+
+func (h *Hub) BroadcastToVoiceChannel(channelID uuid.UUID, data []byte) {
+	h.voiceBroadcast <- voiceBroadcastMsg{channelID: channelID, data: data}
 }

@@ -107,6 +107,43 @@
         {/if}
       </button>
 
+      <!-- Deafen toggle -->
+      <button
+        onclick={() => voiceStore.toggleDeafen()}
+        class="rounded p-1.5 transition-colors {voiceStore.isDeafened
+          ? 'text-destructive hover:bg-destructive/10'
+          : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}"
+        title={voiceStore.isDeafened ? "Undeafen" : "Deafen"}
+      >
+        {#if voiceStore.isDeafened}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" /><line x1="2" x2="22" y1="2" y2="22" /></svg
+          >
+        {:else}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" /></svg
+          >
+        {/if}
+      </button>
+
       <!-- Screen share toggle with quality picker -->
       {#if voiceStore.isScreenSharing}
         <!-- Stop sharing (direct button) -->

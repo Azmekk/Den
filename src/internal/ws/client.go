@@ -72,6 +72,8 @@ type incomingMessage struct {
 	Candidate json.RawMessage `json:"candidate,omitempty"`
 	Muted     *bool           `json:"muted,omitempty"`
 	Speaking  *bool           `json:"speaking,omitempty"`
+	Deafened  *bool           `json:"deafened,omitempty"`
+	Streaming *bool           `json:"streaming,omitempty"`
 }
 
 func (c *Client) ReadPump() {
@@ -278,13 +280,25 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		if msg.Muted == nil {
 			return
 		}
-		envelope, _ := json.Marshal(map[string]any{
-			"type":       "voice_mute_state",
-			"channel_id": msg.ChannelID,
-			"user_id":    c.UserID,
-			"muted":      *msg.Muted,
-		})
-		c.hub.Broadcast(msg.ChannelID, envelope)
+		c.hub.UpdateVoiceState(c.UserID, msg.Muted, nil, nil)
+
+	case "voice_deafen_state":
+		if msg.Deafened == nil {
+			return
+		}
+		if *msg.Deafened {
+			// Deafening auto-mutes
+			muted := true
+			c.hub.UpdateVoiceState(c.UserID, &muted, msg.Deafened, nil)
+		} else {
+			c.hub.UpdateVoiceState(c.UserID, nil, msg.Deafened, nil)
+		}
+
+	case "voice_streaming_state":
+		if msg.Streaming == nil {
+			return
+		}
+		c.hub.UpdateVoiceState(c.UserID, nil, nil, msg.Streaming)
 
 	case "voice_speaking":
 		if msg.Speaking == nil {
@@ -296,7 +310,7 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			"user_id":    c.UserID,
 			"speaking":   *msg.Speaking,
 		})
-		c.hub.Broadcast(msg.ChannelID, envelope)
+		c.hub.BroadcastToVoiceChannel(msg.ChannelID, envelope)
 
 	case "typing_start":
 		envelope, _ := json.Marshal(map[string]any{

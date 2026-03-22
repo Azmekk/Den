@@ -11,11 +11,19 @@ import { startBrowserScreenShare, startDesktopScreenShare } from '$lib/voice/scr
 
 export { SCREEN_SHARE_PRESETS } from '$lib/voice/types';
 
+interface VoiceParticipantState {
+	user_id: string;
+	muted: boolean;
+	deafened: boolean;
+	streaming: boolean;
+}
+
 function createVoiceStore() {
 	// ── Reactive state ───────────────────────────────────────────────────
-	let voiceStates = $state<Map<string, string[]>>(new Map());
+	let voiceStates = $state<Map<string, VoiceParticipantState[]>>(new Map());
 	let currentChannelId = $state<string | null>(null);
 	let isMuted = $state(false);
+	let isDeafened = $state(false);
 	let isConnecting = $state(false);
 	let isReconnecting = $state(false);
 	let microphoneError = $state<string | null>(null);
@@ -27,7 +35,6 @@ function createVoiceStore() {
 	let screenSharePresetIndex = $state(initialSettings.screenSharePresetIndex);
 	let screenPickerOpen = $state(false);
 	let screenPickerSources = $state<{ id: string; name: string; thumbnailDataUrl: string; isScreen: boolean }[]>([]);
-	let mutedUserIds = $state<Set<string>>(new Set());
 	let screenSharerIdentity = $state<string | null>(null);
 	let screenShareTrack = $state<MediaStreamTrack | null>(null);
 
@@ -84,14 +91,20 @@ function createVoiceStore() {
 
 	// ── Voice state sync (WebSocket) ─────────────────────────────────────
 
+	function parseVoiceStates(raw: Record<string, VoiceParticipantState[]> | undefined): Map<string, VoiceParticipantState[]> {
+		return new Map(Object.entries(raw ?? {}));
+	}
+
+	function getParticipantIds(states: Map<string, VoiceParticipantState[]>, channelId: string): Set<string> {
+		return new Set((states.get(channelId) ?? []).map((participant) => participant.user_id));
+	}
+
 	function handleVoiceStateInitial(data: any) {
-		const states = data.voice_states as Record<string, string[]> | undefined;
-		voiceStates = new Map(Object.entries(states ?? {}));
+		voiceStates = parseVoiceStates(data.voice_states);
 	}
 
 	function handleVoiceStateUpdate(data: any) {
-		const states = data.voice_states as Record<string, string[]> | undefined;
-		const newStates = new Map(Object.entries(states ?? {}));
+		const newStates = parseVoiceStates(data.voice_states);
 
 		if (!currentChannelId) {
 			voiceStates = newStates;
@@ -100,8 +113,8 @@ function createVoiceStore() {
 
 		// Play sounds when other users join/leave the same channel
 		const localUserId = auth.user?.id;
-		const previousUsersInChannel = new Set(voiceStates.get(currentChannelId) ?? []);
-		const currentUsersInChannel = new Set(newStates.get(currentChannelId) ?? []);
+		const previousUsersInChannel = getParticipantIds(voiceStates, currentChannelId);
+		const currentUsersInChannel = getParticipantIds(newStates, currentChannelId);
 
 		for (const userId of currentUsersInChannel) {
 			if (userId !== localUserId && !previousUsersInChannel.has(userId)) {
@@ -187,20 +200,6 @@ function createVoiceStore() {
 		});
 	}
 
-	function handleVoiceMuteState(data: any) {
-		const userId = data.user_id;
-		const muted = data.muted;
-		if (!userId || muted === undefined) return;
-
-		if (muted) {
-			mutedUserIds = new Set([...mutedUserIds, userId]);
-		} else {
-			const next = new Set(mutedUserIds);
-			next.delete(userId);
-			mutedUserIds = next;
-		}
-	}
-
 	function handleVoiceSpeaking(data: any) {
 		const userId = data.user_id;
 		const speaking = data.speaking;
@@ -222,7 +221,6 @@ function createVoiceStore() {
 	websocket.on('voice_answer', handleVoiceAnswer);
 	websocket.on('voice_offer', handleVoiceOffer);
 	websocket.on('voice_ice_candidate', handleVoiceIceCandidate);
-	websocket.on('voice_mute_state', handleVoiceMuteState);
 	websocket.on('voice_speaking', handleVoiceSpeaking);
 
 	// ── Settings persistence ─────────────────────────────────────────────
@@ -580,6 +578,25 @@ function createVoiceStore() {
 		});
 	}
 
+	async function renegotiate(): Promise<void> {
+		if (!peerConnection || !currentChannelId) return;
+
+		remoteDescriptionSet = false;
+		const offer = await peerConnection.createOffer();
+		await peerConnection.setLocalDescription(offer);
+
+		websocket.send({
+			type: 'voice_offer',
+			channel_id: currentChannelId,
+			sdp: {
+				type: offer.type,
+				sdp: offer.sdp,
+			},
+		});
+
+		await waitForRemoteDescription(5000);
+	}
+
 	function handleRemoteTrack(event: RTCTrackEvent): void {
 		const track = event.track;
 		const stream = event.streams[0];
@@ -649,7 +666,6 @@ function createVoiceStore() {
 		const channelToReconnect = currentChannelId;
 
 		speakingUserIds = new Set();
-		mutedUserIds = new Set();
 		isScreenSharing = false;
 		isWatchingStream = false;
 		isReconnecting = false;
@@ -713,7 +729,6 @@ function createVoiceStore() {
 		connectionAbortController = null;
 
 		speakingUserIds = new Set();
-		mutedUserIds = new Set();
 		isScreenSharing = false;
 		isWatchingStream = false;
 		isConnecting = false;
@@ -743,6 +758,7 @@ function createVoiceStore() {
 		currentChannelId = null;
 		pendingChannelId = null;
 		isMuted = false;
+		isDeafened = false;
 	}
 
 	// ── Mute ─────────────────────────────────────────────────────────────
@@ -776,6 +792,71 @@ function createVoiceStore() {
 			channel_id: currentChannelId,
 			muted: isMuted,
 		});
+
+		// If unmuting while deafened, undeafen too
+		if (!isMuted && isDeafened) {
+			isDeafened = false;
+			setRemoteAudioMuted(false);
+			websocket.send({
+				type: 'voice_deafen_state',
+				channel_id: currentChannelId,
+				deafened: false,
+			});
+		}
+	}
+
+	// ── Deafen ───────────────────────────────────────────────────────────
+
+	function setRemoteAudioMuted(muted: boolean): void {
+		if (!audioContainer) return;
+		const audioElements = audioContainer.querySelectorAll('audio');
+		for (const element of audioElements) {
+			(element as HTMLAudioElement).muted = muted;
+		}
+	}
+
+	async function toggleDeafen(): Promise<void> {
+		isDeafened = !isDeafened;
+
+		if (isDeafened) {
+			// Deafening: mute all incoming audio and auto-mute outgoing
+			setRemoteAudioMuted(true);
+
+			if (!isMuted) {
+				isMuted = true;
+				const localUserId = auth.user?.id;
+				if (localUserId) {
+					const next = new Set(speakingUserIds);
+					next.delete(localUserId);
+					speakingUserIds = next;
+				}
+
+				// Disable outgoing audio track
+				if (peerConnection) {
+					const sender = peerConnection.getSenders().find((sender) => sender.track?.kind === 'audio');
+					if (sender?.track) sender.track.enabled = false;
+				}
+				if (localStream) {
+					const audioTrack = localStream.getAudioTracks()[0];
+					if (audioTrack) audioTrack.enabled = false;
+				}
+
+				websocket.send({
+					type: 'voice_mute_state',
+					channel_id: currentChannelId,
+					muted: true,
+				});
+			}
+		} else {
+			// Undeafening: restore incoming audio but stay muted (user must manually unmute)
+			setRemoteAudioMuted(false);
+		}
+
+		websocket.send({
+			type: 'voice_deafen_state',
+			channel_id: currentChannelId,
+			deafened: isDeafened,
+		});
 	}
 
 	// ── Screen sharing ───────────────────────────────────────────────────
@@ -784,7 +865,7 @@ function createVoiceStore() {
 		if (!peerConnection) return;
 
 		if (isScreenSharing) {
-			stopScreenSharing();
+			await stopScreenSharing();
 			return;
 		}
 
@@ -828,7 +909,7 @@ function createVoiceStore() {
 		}
 	}
 
-	function addScreenShareTracks(stream: MediaStream): void {
+	async function addScreenShareTracks(stream: MediaStream): Promise<void> {
 		if (!peerConnection) return;
 
 		isScreenSharing = true;
@@ -853,9 +934,15 @@ function createVoiceStore() {
 			const sender = peerConnection.addTrack(audioTrack, audioStream);
 			screenShareSenders.push(sender);
 		}
+
+		// Trigger renegotiation so the server and other participants receive the new tracks
+		await renegotiate();
+
+		// Notify server of streaming state
+		websocket.send({ type: 'voice_streaming_state', channel_id: currentChannelId, streaming: true });
 	}
 
-	function stopScreenSharing(): void {
+	async function stopScreenSharing(): Promise<void> {
 		if (!peerConnection) return;
 
 		for (const sender of screenShareSenders) {
@@ -868,6 +955,12 @@ function createVoiceStore() {
 		}
 		screenShareSenders = [];
 		isScreenSharing = false;
+
+		// Trigger renegotiation so other participants are notified tracks are removed
+		await renegotiate();
+
+		// Notify server of streaming state
+		websocket.send({ type: 'voice_streaming_state', channel_id: currentChannelId, streaming: false });
 	}
 
 	function cancelScreenPicker(): void {
@@ -923,7 +1016,15 @@ function createVoiceStore() {
 	// ── Public API ───────────────────────────────────────────────────────
 
 	function getParticipants(channelId: string): string[] {
-		return voiceStates.get(channelId) ?? [];
+		return (voiceStates.get(channelId) ?? []).map((participant) => participant.user_id);
+	}
+
+	function findParticipantState(userId: string): VoiceParticipantState | undefined {
+		for (const participants of voiceStates.values()) {
+			const found = participants.find((participant) => participant.user_id === userId);
+			if (found) return found;
+		}
+		return undefined;
 	}
 
 	return {
@@ -931,11 +1032,19 @@ function createVoiceStore() {
 		get currentChannelId() { return currentChannelId; },
 		get pendingChannelId() { return pendingChannelId; },
 		get isMuted() { return isMuted; },
+		get isDeafened() { return isDeafened; },
 		get isConnecting() { return isConnecting; },
 		get isReconnecting() { return isReconnecting; },
 		get microphoneError() { return microphoneError; },
 		isSpeaking(userId: string) { return speakingUserIds.has(userId); },
-		isUserMuted(userId: string) { return userId === auth.user?.id ? isMuted : mutedUserIds.has(userId); },
+		isUserMuted(userId: string) {
+			if (userId === auth.user?.id) return isMuted;
+			return findParticipantState(userId)?.muted ?? false;
+		},
+		isUserDeafened(userId: string) {
+			if (userId === auth.user?.id) return isDeafened;
+			return findParticipantState(userId)?.deafened ?? false;
+		},
 		get isScreenSharing() { return isScreenSharing; },
 		get isWatchingStream() { return isWatchingStream; },
 		get screenSharerIdentity() { return screenSharerIdentity; },
@@ -944,7 +1053,11 @@ function createVoiceStore() {
 		get screenPickerOpen() { return screenPickerOpen; },
 		get screenPickerSources() { return screenPickerSources; },
 		isUserScreenSharing(userId: string) {
-			return screenSharerIdentity === userId || (userId === auth.user?.id && isScreenSharing);
+			if (userId === auth.user?.id) return isScreenSharing;
+			// Check voice state first (server-authoritative), fall back to WebRTC track identity
+			const state = findParticipantState(userId);
+			if (state) return state.streaming;
+			return screenSharerIdentity === userId;
 		},
 		get noiseGateEnabled() { return noiseGateEnabled; },
 		get noiseGateThreshold() { return noiseGateThreshold; },
@@ -961,6 +1074,7 @@ function createVoiceStore() {
 		join,
 		leave,
 		toggleMute,
+		toggleDeafen,
 		toggleScreenShare,
 		selectScreenSource,
 		cancelScreenPicker,
