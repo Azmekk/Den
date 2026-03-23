@@ -17,6 +17,8 @@ export function attachRemoteAudioTrack(
 	audioContainer: HTMLDivElement,
 	audioContext: AudioContext,
 ): HTMLAudioElement {
+	console.log(`[voice] attaching remote audio track: id=${track.id} label=${track.label} readyState=${track.readyState}`);
+
 	const audioElement = document.createElement('audio') as AudioElementWithNodes;
 	audioElement.autoplay = true;
 	audioContainer.appendChild(audioElement);
@@ -33,7 +35,17 @@ export function attachRemoteAudioTrack(
 
 	// Replace the element's source with the stereo-upmixed stream
 	audioElement.srcObject = streamDestination.stream;
-	audioElement.play();
+	const playPromise = audioElement.play();
+
+	if (playPromise) {
+		playPromise
+			.then(() => {
+				console.log(`[voice] audio element playing for track ${track.id}`);
+			})
+			.catch((error) => {
+				console.warn(`[voice] audio element play() failed for track ${track.id}:`, error);
+			});
+	}
 
 	// Store Web Audio nodes on the element for cleanup
 	audioElement[SOURCE_NODE_KEY] = source;
@@ -47,6 +59,7 @@ export function attachRemoteAudioTrack(
  * removing the <audio> element from the DOM.
  */
 export function detachRemoteAudioTrack(element: HTMLAudioElement): void {
+	console.log('[voice] detaching remote audio track');
 	const audioElement = element as AudioElementWithNodes;
 	audioElement[SOURCE_NODE_KEY]?.disconnect();
 	audioElement[DESTINATION_NODE_KEY]?.disconnect();

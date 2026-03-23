@@ -239,9 +239,11 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		}
 
 	case "voice_join":
+		log.Printf("ws: voice_join from user %s for channel %s", c.UserID, msg.ChannelID)
 		c.hub.VoiceJoin(c, msg.ChannelID)
 
 	case "voice_leave":
+		log.Printf("ws: voice_leave from user %s", c.UserID)
 		c.hub.VoiceLeave(c)
 
 	case "voice_offer":
@@ -249,6 +251,7 @@ func (c *Client) handleMessage(msg incomingMessage) {
 			c.sendError("voice not enabled")
 			return
 		}
+		log.Printf("ws: voice_offer from user %s for channel %s", c.UserID, msg.ChannelID)
 		answerData, err := c.voiceManager.HandleOffer(msg.ChannelID, c.UserID, msg.SDP)
 		if err != nil {
 			log.Printf("ws: voice_offer error for user %s: %v", c.UserID, err)
@@ -258,12 +261,14 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		select {
 		case c.send <- answerData:
 		default:
+			log.Printf("ws: voice_answer send buffer full for user %s, dropping answer", c.UserID)
 		}
 
 	case "voice_answer":
 		if c.voiceManager == nil {
 			return
 		}
+		log.Printf("ws: voice_answer from user %s for channel %s", c.UserID, msg.ChannelID)
 		if err := c.voiceManager.HandleAnswer(msg.ChannelID, c.UserID, msg.SDP); err != nil {
 			log.Printf("ws: voice_answer error for user %s: %v", c.UserID, err)
 		}
@@ -272,6 +277,7 @@ func (c *Client) handleMessage(msg incomingMessage) {
 		if c.voiceManager == nil {
 			return
 		}
+		log.Printf("ws: voice_ice_candidate from user %s for channel %s", c.UserID, msg.ChannelID)
 		if err := c.voiceManager.HandleICECandidate(msg.ChannelID, c.UserID, msg.Candidate); err != nil {
 			log.Printf("ws: voice_ice_candidate error for user %s: %v", c.UserID, err)
 		}

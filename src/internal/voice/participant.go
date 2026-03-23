@@ -31,11 +31,21 @@ type Participant struct {
 
 // NewParticipant creates a PeerConnection for the given user and wires up
 // the OnTrack, OnICECandidate, and OnICEConnectionStateChange callbacks.
-func NewParticipant(userID uuid.UUID, username string, room *Room, config webrtc.Configuration, sendMessage func(data []byte)) (*Participant, error) {
-	peerConn, err := webrtc.NewPeerConnection(config)
+// The api parameter may be nil, in which case the default Pion API is used.
+func NewParticipant(userID uuid.UUID, username string, room *Room, config webrtc.Configuration, api *webrtc.API, sendMessage func(data []byte)) (*Participant, error) {
+	var peerConn *webrtc.PeerConnection
+	var err error
+	if api != nil {
+		peerConn, err = api.NewPeerConnection(config)
+	} else {
+		peerConn, err = webrtc.NewPeerConnection(config)
+	}
 	if err != nil {
+		log.Printf("voice: failed to create PeerConnection for %s (%s): %v", userID, username, err)
 		return nil, err
 	}
+
+	log.Printf("voice: created PeerConnection for %s (%s) in room %s", userID, username, room.ChannelID)
 
 	participant := &Participant{
 		UserID:      userID,
@@ -51,8 +61,11 @@ func NewParticipant(userID uuid.UUID, username string, room *Room, config webrtc
 
 	peerConn.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
+			log.Printf("voice: [%s] ICE candidate gathering complete (nil sentinel)", userID)
 			return
 		}
+		log.Printf("voice: [%s] server ICE candidate: type=%s addr=%s:%d protocol=%s",
+			userID, candidate.Typ.String(), candidate.Address, candidate.Port, candidate.Protocol.String())
 		candidateJSON := candidate.ToJSON()
 		data, marshalErr := json.Marshal(map[string]any{
 			"type":       "voice_ice_candidate",
@@ -60,16 +73,26 @@ func NewParticipant(userID uuid.UUID, username string, room *Room, config webrtc
 			"candidate":  candidateJSON,
 		})
 		if marshalErr != nil {
+			log.Printf("voice: [%s] failed to marshal ICE candidate: %v", userID, marshalErr)
 			return
 		}
 		sendMessage(data)
 	})
 
 	peerConn.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("voice: participant %s ICE state: %s", userID, state.String())
-		if state == webrtc.ICEConnectionStateFailed || state == webrtc.ICEConnectionStateDisconnected {
-			// Client will detect this and reconnect
-		}
+		log.Printf("voice: [%s] ICE connection state: %s", userID, state.String())
+	})
+
+	peerConn.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("voice: [%s] peer connection state: %s", userID, state.String())
+	})
+
+	peerConn.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		log.Printf("voice: [%s] ICE gathering state: %s", userID, state.String())
+	})
+
+	peerConn.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		log.Printf("voice: [%s] signaling state: %s", userID, state.String())
 	})
 
 	return participant, nil
@@ -85,19 +108,25 @@ func (participant *Participant) HandleOffer(offer webrtc.SessionDescription) (*w
 		return nil, ErrParticipantClosed
 	}
 
+	log.Printf("voice: [%s] handling client offer (type=%s)", participant.UserID, offer.Type.String())
+
 	if err := participant.peerConn.SetRemoteDescription(offer); err != nil {
+		log.Printf("voice: [%s] failed to set remote description (offer): %v", participant.UserID, err)
 		return nil, err
 	}
 
 	answer, err := participant.peerConn.CreateAnswer(nil)
 	if err != nil {
+		log.Printf("voice: [%s] failed to create answer: %v", participant.UserID, err)
 		return nil, err
 	}
 
 	if err := participant.peerConn.SetLocalDescription(answer); err != nil {
+		log.Printf("voice: [%s] failed to set local description (answer): %v", participant.UserID, err)
 		return nil, err
 	}
 
+	log.Printf("voice: [%s] sending answer (type=%s)", participant.UserID, answer.Type.String())
 	return &answer, nil
 }
 
@@ -111,7 +140,14 @@ func (participant *Participant) HandleAnswer(answer webrtc.SessionDescription) e
 		return ErrParticipantClosed
 	}
 
-	return participant.peerConn.SetRemoteDescription(answer)
+	log.Printf("voice: [%s] handling client answer (type=%s)", participant.UserID, answer.Type.String())
+
+	if err := participant.peerConn.SetRemoteDescription(answer); err != nil {
+		log.Printf("voice: [%s] failed to set remote description (answer): %v", participant.UserID, err)
+		return err
+	}
+
+	return nil
 }
 
 // AddICECandidate adds a trickle ICE candidate from the client.
@@ -123,7 +159,18 @@ func (participant *Participant) AddICECandidate(candidate webrtc.ICECandidateIni
 		return ErrParticipantClosed
 	}
 
-	return participant.peerConn.AddICECandidate(candidate)
+	candidateStr := ""
+	if candidate.Candidate != "" {
+		candidateStr = candidate.Candidate
+	}
+	log.Printf("voice: [%s] adding client ICE candidate: %s", participant.UserID, candidateStr)
+
+	if err := participant.peerConn.AddICECandidate(candidate); err != nil {
+		log.Printf("voice: [%s] failed to add ICE candidate: %v", participant.UserID, err)
+		return err
+	}
+
+	return nil
 }
 
 // AddSubscription adds a remote participant's track to this participant's
@@ -137,8 +184,11 @@ func (participant *Participant) AddSubscription(localTrack *webrtc.TrackLocalSta
 		return ErrParticipantClosed
 	}
 
+	log.Printf("voice: [%s] adding subscription track %s (stream=%s)", participant.UserID, localTrack.ID(), localTrack.StreamID())
+
 	sender, err := participant.peerConn.AddTrack(localTrack)
 	if err != nil {
+		log.Printf("voice: [%s] failed to add track: %v", participant.UserID, err)
 		return err
 	}
 
@@ -171,7 +221,10 @@ func (participant *Participant) RemoveSubscription(trackID string) error {
 		return nil
 	}
 
+	log.Printf("voice: [%s] removing subscription track %s", participant.UserID, trackID)
+
 	if err := participant.peerConn.RemoveTrack(sender); err != nil {
+		log.Printf("voice: [%s] failed to remove track %s: %v", participant.UserID, trackID, err)
 		return err
 	}
 	delete(participant.senders, trackID)
@@ -188,18 +241,23 @@ func (participant *Participant) Close() {
 		return
 	}
 	participant.closed = true
+	log.Printf("voice: [%s] closing PeerConnection", participant.UserID)
 	participant.peerConn.Close()
 }
 
 // negotiate creates a new SDP offer and sends it to the client for renegotiation.
 // Must be called with participant.mu held.
 func (participant *Participant) negotiate() error {
+	log.Printf("voice: [%s] initiating server-side renegotiation", participant.UserID)
+
 	offer, err := participant.peerConn.CreateOffer(nil)
 	if err != nil {
+		log.Printf("voice: [%s] failed to create renegotiation offer: %v", participant.UserID, err)
 		return err
 	}
 
 	if err := participant.peerConn.SetLocalDescription(offer); err != nil {
+		log.Printf("voice: [%s] failed to set local description (renegotiation offer): %v", participant.UserID, err)
 		return err
 	}
 
@@ -215,6 +273,7 @@ func (participant *Participant) negotiate() error {
 		return err
 	}
 
+	log.Printf("voice: [%s] sending renegotiation offer to client", participant.UserID)
 	participant.sendMessage(data)
 	return nil
 }
@@ -222,8 +281,8 @@ func (participant *Participant) negotiate() error {
 // onTrack is called when the client publishes a new media track (audio or video).
 func (participant *Participant) onTrack(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 	source := classifyTrack(remote)
-	log.Printf("voice: participant %s published track %s (kind=%s, source=%s)",
-		participant.UserID, remote.ID(), remote.Kind().String(), source)
+	log.Printf("voice: [%s] published track %s (kind=%s, source=%s, streamID=%s, codec=%s)",
+		participant.UserID, remote.ID(), remote.Kind().String(), source, remote.StreamID(), remote.Codec().MimeType)
 
 	forwarded := &ForwardedTrack{
 		UserID: participant.UserID,
@@ -295,4 +354,3 @@ func containsIgnoreCase(haystack, needle string) bool {
 	}
 	return false
 }
-

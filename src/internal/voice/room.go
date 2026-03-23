@@ -19,6 +19,7 @@ type Room struct {
 	participants map[uuid.UUID]*Participant
 	mu           sync.RWMutex
 	webrtcConfig webrtc.Configuration
+	webrtcAPI    *webrtc.API
 
 	// forwarders tracks active RTP forwarding goroutines.
 	// Key: "{publisherID}:{remoteTrackID}". Closing the channel stops the forwarder.
@@ -26,11 +27,12 @@ type Room struct {
 }
 
 // NewRoom creates an empty voice room for the given channel.
-func NewRoom(channelID uuid.UUID, config webrtc.Configuration) *Room {
+func NewRoom(channelID uuid.UUID, config webrtc.Configuration, api *webrtc.API) *Room {
 	return &Room{
 		ChannelID:    channelID,
 		participants: make(map[uuid.UUID]*Participant),
 		webrtcConfig: config,
+		webrtcAPI:    api,
 		forwarders:   make(map[string]chan struct{}),
 	}
 }
@@ -43,16 +45,18 @@ func (room *Room) AddParticipant(userID uuid.UUID, username string, sendMessage 
 
 	// Close existing participant if rejoining
 	if existing, ok := room.participants[userID]; ok {
+		log.Printf("voice: [room %s] closing existing participant %s (rejoin)", room.ChannelID, userID)
 		existing.Close()
 		delete(room.participants, userID)
 	}
 
-	participant, err := NewParticipant(userID, username, room, room.webrtcConfig, sendMessage)
+	participant, err := NewParticipant(userID, username, room, room.webrtcConfig, room.webrtcAPI, sendMessage)
 	if err != nil {
 		return nil, err
 	}
 
 	room.participants[userID] = participant
+	log.Printf("voice: [room %s] participant count: %d", room.ChannelID, len(room.participants))
 	return participant, nil
 }
 
@@ -70,6 +74,7 @@ func (room *Room) RemoveParticipant(userID uuid.UUID) {
 	// Stop all forwarders for this publisher's tracks
 	for forwarderKey, stopChan := range room.forwarders {
 		if isForwarderForPublisher(forwarderKey, userID) {
+			log.Printf("voice: [room %s] stopping forwarder %s", room.ChannelID, forwarderKey)
 			close(stopChan)
 			delete(room.forwarders, forwarderKey)
 		}
@@ -89,13 +94,14 @@ func (room *Room) RemoveParticipant(userID uuid.UUID) {
 				continue
 			}
 			if err := other.RemoveSubscription(trackID); err != nil {
-				log.Printf("voice: failed to remove subscription from %s: %v", otherID, err)
+				log.Printf("voice: [room %s] failed to remove subscription from %s: %v", room.ChannelID, otherID, err)
 			}
 		}
 	}
 
 	participant.Close()
 	delete(room.participants, userID)
+	log.Printf("voice: [room %s] participant count after remove: %d", room.ChannelID, len(room.participants))
 }
 
 // OnTrackPublished is called when a participant publishes a new media track.
@@ -104,6 +110,9 @@ func (room *Room) RemoveParticipant(userID uuid.UUID) {
 func (room *Room) OnTrackPublished(publisherID uuid.UUID, forwarded *ForwardedTrack) {
 	room.mu.RLock()
 	defer room.mu.RUnlock()
+
+	log.Printf("voice: [room %s] track published by %s: kind=%s source=%s, distributing to %d other participant(s)",
+		room.ChannelID, publisherID, forwarded.Remote.Kind().String(), forwarded.Source, len(room.participants)-1)
 
 	// Collect subscribers and their local tracks
 	var localTracks []*webrtc.TrackLocalStaticRTP
@@ -115,12 +124,15 @@ func (room *Room) OnTrackPublished(publisherID uuid.UUID, forwarded *ForwardedTr
 
 		localTrack, err := newLocalTrackFromRemote(forwarded.Remote, forwarded.UserID, forwarded.Source)
 		if err != nil {
-			log.Printf("voice: failed to create local track for subscriber %s: %v", subscriberID, err)
+			log.Printf("voice: [room %s] failed to create local track for subscriber %s: %v", room.ChannelID, subscriberID, err)
 			continue
 		}
 
+		log.Printf("voice: [room %s] adding subscription: %s -> subscriber %s (track=%s stream=%s)",
+			room.ChannelID, publisherID, subscriberID, localTrack.ID(), localTrack.StreamID())
+
 		if err := subscriber.AddSubscription(localTrack); err != nil {
-			log.Printf("voice: failed to add subscription to %s: %v", subscriberID, err)
+			log.Printf("voice: [room %s] failed to add subscription to %s: %v", room.ChannelID, subscriberID, err)
 			continue
 		}
 
@@ -128,6 +140,7 @@ func (room *Room) OnTrackPublished(publisherID uuid.UUID, forwarded *ForwardedTr
 	}
 
 	if len(localTracks) == 0 {
+		log.Printf("voice: [room %s] no subscribers for track from %s, consuming track to avoid blocking", room.ChannelID, publisherID)
 		// Still need to consume the track to avoid blocking
 		go func() {
 			buf := make([]byte, 1500)
@@ -145,7 +158,8 @@ func (room *Room) OnTrackPublished(publisherID uuid.UUID, forwarded *ForwardedTr
 	stopChan := make(chan struct{})
 	room.forwarders[forwarderKey] = stopChan
 
-	go forwardRTP(forwarded.Remote, localTracks, stopChan)
+	log.Printf("voice: [room %s] starting RTP forwarder %s -> %d subscriber(s)", room.ChannelID, forwarderKey, len(localTracks))
+	go forwardRTP(forwarded.Remote, localTracks, stopChan, room.ChannelID, forwarderKey)
 }
 
 // IsEmpty returns true if there are no participants in the room.
@@ -167,6 +181,8 @@ func (room *Room) Close() {
 	room.mu.Lock()
 	defer room.mu.Unlock()
 
+	log.Printf("voice: [room %s] closing room (%d forwarders, %d participants)", room.ChannelID, len(room.forwarders), len(room.participants))
+
 	for _, stopChan := range room.forwarders {
 		close(stopChan)
 	}
@@ -180,11 +196,13 @@ func (room *Room) Close() {
 
 // forwardRTP reads RTP packets from the remote track and writes them to all
 // local tracks until the remote track ends or the stop channel is closed.
-func forwardRTP(remote *webrtc.TrackRemote, localTracks []*webrtc.TrackLocalStaticRTP, stop chan struct{}) {
+func forwardRTP(remote *webrtc.TrackRemote, localTracks []*webrtc.TrackLocalStaticRTP, stop chan struct{}, channelID uuid.UUID, forwarderKey string) {
 	buf := make([]byte, 1500)
+	packetsForwarded := 0
 	for {
 		select {
 		case <-stop:
+			log.Printf("voice: [room %s] RTP forwarder %s stopped (signal), forwarded %d packets", channelID, forwarderKey, packetsForwarded)
 			return
 		default:
 		}
@@ -192,16 +210,19 @@ func forwardRTP(remote *webrtc.TrackRemote, localTracks []*webrtc.TrackLocalStat
 		readCount, _, readErr := remote.Read(buf)
 		if readErr != nil {
 			if readErr == io.EOF {
-				return
+				log.Printf("voice: [room %s] RTP forwarder %s ended (EOF), forwarded %d packets", channelID, forwarderKey, packetsForwarded)
+			} else {
+				log.Printf("voice: [room %s] RTP forwarder %s read error: %v (forwarded %d packets)", channelID, forwarderKey, readErr, packetsForwarded)
 			}
 			return
 		}
 
 		for _, localTrack := range localTracks {
 			if _, writeErr := localTrack.Write(buf[:readCount]); writeErr != nil && writeErr != io.ErrClosedPipe {
-				// Track was removed, ignore
+				log.Printf("voice: [room %s] RTP forwarder %s write error to track %s: %v", channelID, forwarderKey, localTrack.ID(), writeErr)
 			}
 		}
+		packetsForwarded++
 	}
 }
 

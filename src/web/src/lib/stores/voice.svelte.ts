@@ -139,6 +139,8 @@ function createVoiceStore() {
 		const sdp = data.sdp;
 		if (!sdp) return;
 
+		console.log('[voice] received answer from server');
+
 		const answer = new RTCSessionDescription({
 			type: sdp.type,
 			sdp: sdp.sdp,
@@ -146,13 +148,17 @@ function createVoiceStore() {
 
 		peerConnection.setRemoteDescription(answer).then(() => {
 			remoteDescriptionSet = true;
+			console.log('[voice] remote description set (answer)');
 			// Flush any pending ICE candidates
+			if (pendingIceCandidates.length > 0) {
+				console.log(`[voice] flushing ${pendingIceCandidates.length} pending ICE candidate(s)`);
+			}
 			for (const candidate of pendingIceCandidates) {
 				peerConnection?.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
 			}
 			pendingIceCandidates = [];
 		}).catch((error) => {
-			console.error('Failed to set remote description (answer):', error);
+			console.error('[voice] failed to set remote description (answer):', error);
 		});
 	}
 
@@ -161,6 +167,8 @@ function createVoiceStore() {
 		const sdp = data.sdp;
 		if (!sdp) return;
 
+		console.log('[voice] received server renegotiation offer');
+
 		// Server-initiated renegotiation (new tracks added/removed)
 		const offer = new RTCSessionDescription({
 			type: sdp.type,
@@ -168,9 +176,13 @@ function createVoiceStore() {
 		});
 
 		peerConnection.setRemoteDescription(offer)
-			.then(() => peerConnection!.createAnswer())
+			.then(() => {
+				console.log('[voice] remote description set (server offer), creating answer');
+				return peerConnection!.createAnswer();
+			})
 			.then((answer) => peerConnection!.setLocalDescription(answer))
 			.then(() => {
+				console.log('[voice] sending answer for renegotiation');
 				websocket.send({
 					type: 'voice_answer',
 					channel_id: currentChannelId ?? pendingChannelId,
@@ -181,7 +193,7 @@ function createVoiceStore() {
 				});
 			})
 			.catch((error) => {
-				console.error('Failed to handle server renegotiation:', error);
+				console.error('[voice] failed to handle server renegotiation:', error);
 			});
 	}
 
@@ -190,13 +202,17 @@ function createVoiceStore() {
 		const candidate = data.candidate;
 		if (!candidate) return;
 
+		const parsed = new RTCIceCandidate(candidate);
+		console.log(`[voice] received server ICE candidate: type=${parsed.type ?? 'unknown'} addr=${parsed.address ?? 'unknown'}:${parsed.port ?? '?'} protocol=${parsed.protocol ?? 'unknown'}`);
+
 		if (!remoteDescriptionSet) {
+			console.log('[voice] remote description not set yet, queuing ICE candidate');
 			pendingIceCandidates.push(candidate);
 			return;
 		}
 
-		peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch((error) => {
-			console.warn('Failed to add ICE candidate:', error);
+		peerConnection.addIceCandidate(parsed).catch((error) => {
+			console.warn('[voice] failed to add server ICE candidate:', error);
 		});
 	}
 
@@ -451,6 +467,8 @@ function createVoiceStore() {
 	}
 
 	async function connectToChannel(channelId: string): Promise<void> {
+		console.log(`[voice] connecting to channel ${channelId}`);
+
 		// Notify the server we're joining (updates voiceUsers state)
 		websocket.send({ type: 'voice_join', channel_id: channelId });
 
@@ -464,9 +482,10 @@ function createVoiceStore() {
 				},
 			});
 			microphoneError = null;
+			console.log('[voice] microphone acquired');
 		} catch (error) {
 			microphoneError = error instanceof Error ? error.message : 'Failed to access microphone';
-			console.error('Microphone access failed:', error);
+			console.error('[voice] microphone access failed:', error);
 			// Continue without mic — user can still listen
 		}
 
@@ -475,6 +494,7 @@ function createVoiceStore() {
 		pendingIceCandidates = [];
 
 		// Create PeerConnection
+		console.log('[voice] creating PeerConnection with ICE servers:', JSON.stringify(configStore.iceServers));
 		peerConnection = new RTCPeerConnection({
 			iceServers: configStore.iceServers,
 		});
@@ -482,11 +502,14 @@ function createVoiceStore() {
 		// Handle ICE candidates
 		peerConnection.onicecandidate = (event) => {
 			if (event.candidate) {
+				console.log(`[voice] local ICE candidate: type=${event.candidate.type ?? 'unknown'} addr=${event.candidate.address ?? 'unknown'}:${event.candidate.port ?? '?'} protocol=${event.candidate.protocol ?? 'unknown'}`);
 				websocket.send({
 					type: 'voice_ice_candidate',
 					channel_id: channelId,
 					candidate: event.candidate.toJSON(),
 				});
+			} else {
+				console.log('[voice] ICE candidate gathering complete');
 			}
 		};
 
@@ -494,12 +517,31 @@ function createVoiceStore() {
 		peerConnection.oniceconnectionstatechange = () => {
 			if (!peerConnection) return;
 			const state = peerConnection.iceConnectionState;
+			console.log(`[voice] ICE connection state: ${state}`);
 			if (state === 'failed' || state === 'disconnected') {
 				handleConnectionFailure();
 			}
 			if (state === 'connected' || state === 'completed') {
 				isReconnecting = false;
 			}
+		};
+
+		// Handle ICE gathering state
+		peerConnection.onicegatheringstatechange = () => {
+			if (!peerConnection) return;
+			console.log(`[voice] ICE gathering state: ${peerConnection.iceGatheringState}`);
+		};
+
+		// Handle connection state
+		peerConnection.onconnectionstatechange = () => {
+			if (!peerConnection) return;
+			console.log(`[voice] connection state: ${peerConnection.connectionState}`);
+		};
+
+		// Handle signaling state
+		peerConnection.onsignalingstatechange = () => {
+			if (!peerConnection) return;
+			console.log(`[voice] signaling state: ${peerConnection.signalingState}`);
 		};
 
 		// Handle remote tracks
@@ -540,9 +582,11 @@ function createVoiceStore() {
 		}
 
 		// Create and send SDP offer
+		console.log('[voice] creating SDP offer');
 		const offer = await peerConnection.createOffer();
 		await peerConnection.setLocalDescription(offer);
 
+		console.log('[voice] sending SDP offer to server');
 		websocket.send({
 			type: 'voice_offer',
 			channel_id: channelId,
@@ -553,7 +597,9 @@ function createVoiceStore() {
 		});
 
 		// Wait for the answer (with timeout)
+		console.log('[voice] waiting for server answer...');
 		await waitForRemoteDescription(5000);
+		console.log('[voice] connection established');
 	}
 
 	function waitForRemoteDescription(timeoutMs: number): Promise<void> {
@@ -601,7 +647,10 @@ function createVoiceStore() {
 		const track = event.track;
 		const stream = event.streams[0];
 
-		if (!stream) return;
+		if (!stream) {
+			console.warn('[voice] received remote track with no stream, ignoring');
+			return;
+		}
 
 		// Parse stream ID to identify the user and source
 		// Format: "{userID}:{source}" e.g. "uuid:microphone" or "uuid:screen"
@@ -610,8 +659,11 @@ function createVoiceStore() {
 		const userId = colonIndex > 0 ? streamId.substring(0, colonIndex) : streamId;
 		const source = colonIndex > 0 ? streamId.substring(colonIndex + 1) : 'microphone';
 
+		console.log(`[voice] remote track received: kind=${track.kind} source=${source} userId=${userId} streamId=${streamId} trackId=${track.id}`);
+
 		// Skip own audio
 		if (userId === auth.user?.id && track.kind === 'audio' && source === 'microphone') {
+			console.log('[voice] skipping own audio track');
 			return;
 		}
 
@@ -663,6 +715,7 @@ function createVoiceStore() {
 	}
 
 	function handleConnectionFailure(): void {
+		console.warn('[voice] connection failure detected, attempting reconnect');
 		const channelToReconnect = currentChannelId;
 
 		speakingUserIds = new Set();

@@ -132,6 +132,7 @@ func main() {
 		iceServers = append(iceServers, webrtc.ICEServer{
 			URLs: strings.Split(stunServers, ","),
 		})
+		log.Printf("voice: STUN servers: %v", strings.Split(stunServers, ","))
 
 		turnURL := os.Getenv("TURN_URL")
 		turnUsername := os.Getenv("TURN_USERNAME")
@@ -142,9 +143,54 @@ func main() {
 				Username:   turnUsername,
 				Credential: turnCredential,
 			})
+			log.Printf("voice: TURN server configured: %s", turnURL)
+		} else {
+			log.Println("voice: no TURN server configured (only STUN)")
 		}
 
-		voiceManager = voice.NewManager(iceServers)
+		// Build a custom webrtc.API when PUBLIC_IP or UDP_PORT_RANGE is set.
+		// PUBLIC_IP tells Pion to advertise the server's public IP in ICE candidates
+		// instead of the Docker-internal IP. Without this, remote clients cannot reach
+		// the server's media ports.
+		var webrtcAPI *webrtc.API
+		publicIP := os.Getenv("PUBLIC_IP")
+		udpPortRange := os.Getenv("UDP_PORT_RANGE")
+
+		if publicIP != "" || udpPortRange != "" {
+			settingEngine := webrtc.SettingEngine{}
+
+			if publicIP != "" {
+				rewriteErr := settingEngine.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+					External:        []string{publicIP},
+					AsCandidateType: webrtc.ICECandidateTypeHost,
+					Mode:            webrtc.ICEAddressRewriteReplace,
+				})
+				if rewriteErr != nil {
+					log.Fatalf("voice: failed to set ICE address rewrite rules: %v", rewriteErr)
+				}
+				log.Printf("voice: PUBLIC_IP set to %s (ICE address rewrite enabled)", publicIP)
+			}
+
+			if udpPortRange != "" {
+				parts := strings.SplitN(udpPortRange, "-", 2)
+				if len(parts) == 2 {
+					lowPort, lowErr := strconv.ParseUint(parts[0], 10, 16)
+					highPort, highErr := strconv.ParseUint(parts[1], 10, 16)
+					if lowErr == nil && highErr == nil && lowPort < highPort {
+						settingEngine.SetEphemeralUDPPortRange(uint16(lowPort), uint16(highPort))
+						log.Printf("voice: UDP port range set to %d-%d", lowPort, highPort)
+					} else {
+						log.Printf("voice: WARNING invalid UDP_PORT_RANGE %q, ignoring", udpPortRange)
+					}
+				} else {
+					log.Printf("voice: WARNING invalid UDP_PORT_RANGE format %q (expected 'low-high'), ignoring", udpPortRange)
+				}
+			}
+
+			webrtcAPI = webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+		}
+
+		voiceManager = voice.NewManager(iceServers, webrtcAPI)
 		hub.VoiceManager = voiceManager
 		log.Println("voice channels enabled (Pion WebRTC SFU)")
 	}
