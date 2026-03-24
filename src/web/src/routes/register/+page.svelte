@@ -14,9 +14,8 @@ let loading = $state(false);
 let registrationComplete = $state(false);
 let emailVerificationRequired = $state(false);
 
-onMount(async () => {
+onMount(() => {
 	if (auth.isLoggedIn) goto('/');
-	await configStore.fetch();
 });
 
 async function handleSubmit(event: Event) {

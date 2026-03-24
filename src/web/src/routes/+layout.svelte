@@ -3,6 +3,7 @@
   import { onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { auth } from "$lib/stores/auth.svelte";
+  import { configStore } from "$lib/stores/config.svelte";
   import { presence } from "$lib/stores/presence.svelte";
   import { voiceStore } from "$lib/stores/voice.svelte";
   import { websocket } from "$lib/stores/websocket.svelte";
@@ -18,7 +19,8 @@
     websocket.on("presence_initial", presence.handlePresenceInitial);
     websocket.on("presence_update", presence.handlePresenceUpdate);
 
-    auth.init().then(() => {
+    auth.init().then(async () => {
+      await configStore.fetch();
       ready = true;
 
       if (!auth.isLoggedIn) return;

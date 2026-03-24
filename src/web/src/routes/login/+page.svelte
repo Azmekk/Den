@@ -14,9 +14,8 @@ let showResetForm = $state(false);
 let resetSent = $state(false);
 let twoFAToken = $state<string | null>(null);
 
-onMount(async () => {
+onMount(() => {
 	if (auth.isLoggedIn) goto('/');
-	await configStore.fetch();
 });
 
 async function handleSubmit(event: Event) {
