@@ -804,8 +804,9 @@ function createVoiceStore() {
 
 		micLevel = 0;
 
-		if (currentChannelId) {
-			websocket.send({ type: 'voice_leave', channel_id: currentChannelId });
+		const channelToLeave = currentChannelId || pendingChannelId;
+		if (channelToLeave) {
+			websocket.send({ type: 'voice_leave', channel_id: channelToLeave });
 		}
 
 		currentChannelId = null;

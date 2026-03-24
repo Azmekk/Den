@@ -184,6 +184,18 @@ func (participant *Participant) AddSubscription(localTrack *webrtc.TrackLocalSta
 		return ErrParticipantClosed
 	}
 
+	if err := participant.addTrackWithoutNegotiation(localTrack); err != nil {
+		return err
+	}
+
+	return participant.negotiate()
+}
+
+// addTrackWithoutNegotiation adds a track to the PeerConnection without
+// triggering a renegotiation. Used when pre-loading existing tracks for a
+// late joiner — the tracks will be included in the answer to the client's
+// first offer. Must be called with participant.mu held.
+func (participant *Participant) addTrackWithoutNegotiation(localTrack *webrtc.TrackLocalStaticRTP) error {
 	log.Printf("voice: [%s] adding subscription track %s (stream=%s)", participant.UserID, localTrack.ID(), localTrack.StreamID())
 
 	sender, err := participant.peerConn.AddTrack(localTrack)
@@ -204,7 +216,7 @@ func (participant *Participant) AddSubscription(localTrack *webrtc.TrackLocalSta
 		}
 	}()
 
-	return participant.negotiate()
+	return nil
 }
 
 // RemoveSubscription removes a previously added subscription track.

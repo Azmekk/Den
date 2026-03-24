@@ -86,6 +86,11 @@ func (room *Room) AddParticipant(userID uuid.UUID, username string, sendMessage 
 		}
 		publisher.mu.Unlock()
 
+		// Pre-add tracks without triggering renegotiation. The tracks will be
+		// included in the server's answer to the client's first offer, avoiding
+		// a signaling collision where the server sends a renegotiation offer
+		// before the client has completed its initial SDP exchange.
+		participant.mu.Lock()
 		for _, forwarded := range publishedTracks {
 			localTrack, trackErr := newLocalTrackFromRemote(forwarded.Remote, forwarded.UserID, forwarded.Source)
 			if trackErr != nil {
@@ -93,11 +98,11 @@ func (room *Room) AddParticipant(userID uuid.UUID, username string, sendMessage 
 				continue
 			}
 
-			log.Printf("voice: [room %s] subscribing late joiner %s to existing track from %s (track=%s stream=%s)",
+			log.Printf("voice: [room %s] pre-adding track for late joiner %s from %s (track=%s stream=%s)",
 				room.ChannelID, userID, publisherID, localTrack.ID(), localTrack.StreamID())
 
-			if subErr := participant.AddSubscription(localTrack); subErr != nil {
-				log.Printf("voice: [room %s] failed to add late subscription to %s: %v", room.ChannelID, userID, subErr)
+			if subErr := participant.addTrackWithoutNegotiation(localTrack); subErr != nil {
+				log.Printf("voice: [room %s] failed to pre-add track for late joiner %s: %v", room.ChannelID, userID, subErr)
 				continue
 			}
 
@@ -108,6 +113,7 @@ func (room *Room) AddParticipant(userID uuid.UUID, username string, sendMessage 
 				log.Printf("voice: [room %s] added late joiner %s to forwarder %s", room.ChannelID, userID, forwarderKey)
 			}
 		}
+		participant.mu.Unlock()
 	}
 
 	log.Printf("voice: [room %s] participant count: %d", room.ChannelID, len(room.participants))
