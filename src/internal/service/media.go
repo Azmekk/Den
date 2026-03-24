@@ -219,7 +219,7 @@ func (s *MediaService) UpdateAvatar(ctx context.Context, userID uuid.UUID, fileD
 		}
 	}
 
-	key := "avatars/" + userID.String() + ext
+	key := "avatars/" + uuid.New().String() + ext
 	if err := s.bucket.Upload(ctx, key, fileData, contentType); err != nil {
 		return PublicUserInfo{}, fmt.Errorf("upload failed: %w", err)
 	}
