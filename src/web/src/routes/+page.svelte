@@ -117,9 +117,10 @@ onMount(() => {
 	function handleNewDM(data: any) {
 		dmStore.handleNewDM(data);
 
-		// Track unread + play sound if not viewing this DM
+		// Track unread + play sound if not viewing this DM and not our own message
 		const dmId = data.dm_pair_id as string;
-		if (dmId !== dmStore.selectedDMId) {
+		const isOwnMessage = auth.user && data.user_id === auth.user.id;
+		if (dmId !== dmStore.selectedDMId && !isOwnMessage) {
 			dmStore.incrementUnread(dmId);
 			playMentionSound();
 			sendDesktopNotification(data, 'dm');
