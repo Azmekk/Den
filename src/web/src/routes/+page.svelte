@@ -194,15 +194,56 @@ onMount(() => {
 	websocket.on('typing_stop', typing.handleTypingStop);
 	websocket.on('emote_list_update', emoteStore.refresh);
 
+	function refreshAllData() {
+		channelStore.fetch();
+		channelStore.fetchVoice();
+		usersStore.fetch();
+		configStore.fetch();
+		emoteStore.fetch();
+		unreadStore.fetch();
+		dmStore.fetchConversations();
+
+		// Invalidate message caches so history re-fetches
+		messageStore.invalidateAll();
+		dmStore.invalidateLoadedDMs();
+
+		// Re-fetch history for currently active channel/DM
+		const channelId = channelStore.selectedChannelId;
+		if (channelId) {
+			messageStore.fetchHistory(channelId);
+		}
+		const dmId = dmStore.selectedDMId;
+		if (dmId) {
+			dmStore.fetchHistory(dmId);
+		}
+	}
+
 	function handleWsOpen() {
 		const id = channelStore.selectedChannelId;
 		if (id) {
 			websocket.send({ type: 'subscribe', channel_id: id });
 		}
-		// Sync unread state on reconnect
-		unreadStore.fetch();
+		// Re-fetch all data on reconnect
+		refreshAllData();
 	}
 	websocket.on('open', handleWsOpen);
+
+	// Track when tab was last visible to detect long absences
+	let lastVisibleAt = Date.now();
+	const STALE_THRESHOLD_MS = 60_000;
+
+	function handleVisibilityChange() {
+		if (document.visibilityState === 'visible') {
+			const elapsed = Date.now() - lastVisibleAt;
+			if (elapsed >= STALE_THRESHOLD_MS && websocket.connected) {
+				refreshAllData();
+			}
+			lastVisibleAt = Date.now();
+		} else {
+			lastVisibleAt = Date.now();
+		}
+	}
+	document.addEventListener('visibilitychange', handleVisibilityChange);
 
 	// Fetch initial data
 	channelStore.fetch().then(() => {
@@ -261,6 +302,7 @@ onMount(() => {
 	}
 
 	return () => {
+		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('keydown', handleKeydown);
 		window.removeEventListener('focus', handleWindowFocus);
 		if (window.visualViewport) {

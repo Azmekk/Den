@@ -270,6 +270,10 @@ function createMessages() {
 		websocket.send(payload);
 	}
 
+	function invalidateAll() {
+		loadedChannels.clear();
+	}
+
 	return {
 		getMessages,
 		hasMore,
@@ -287,6 +291,7 @@ function createMessages() {
 		set scrollTarget(v: { channelId: string; messageId: string } | null) {
 			scrollTarget = v;
 		},
+		invalidateAll,
 		fetchHistory,
 		fetchOlder,
 		fetchAround,

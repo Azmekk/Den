@@ -202,6 +202,10 @@ function createDMs() {
 		websocket.send(payload);
 	}
 
+	function invalidateLoadedDMs() {
+		loadedDMs.clear();
+	}
+
 	return {
 		get conversations() {
 			return conversations;
@@ -212,6 +216,7 @@ function createDMs() {
 		get loadingOlder() {
 			return loadingOlder;
 		},
+		invalidateLoadedDMs,
 		fetchConversations,
 		createOrGetDM,
 		findByUserId,
