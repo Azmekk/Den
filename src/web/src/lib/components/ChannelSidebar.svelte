@@ -23,7 +23,35 @@ const sortedChannels = $derived(
 
 const tab = $derived(layoutStore.sidebarTab);
 
+let lastChannelId: string | null = null;
+let lastDMId: string | null = null;
+
+function switchToServerTab() {
+	if (tab === 'server') return;
+	lastDMId = dmStore.selectedDMId;
+	if (lastChannelId) {
+		dmStore.deselect();
+		channelStore.select(lastChannelId);
+	} else if (channelStore.channels.length > 0) {
+		dmStore.deselect();
+		channelStore.select(channelStore.channels[0].id);
+	}
+	layoutStore.sidebarTab = 'server';
+}
+
+function switchToMessagesTab() {
+	if (tab === 'messages') return;
+	lastChannelId = channelStore.selectedChannelId;
+	if (lastDMId) {
+		dmStore.select(lastDMId);
+	} else {
+		channelStore.deselect();
+	}
+	layoutStore.sidebarTab = 'messages';
+}
+
 function selectChannel(id: string) {
+	lastChannelId = null;
 	dmStore.deselect();
 	channelStore.select(id);
 	layoutStore.sidebarTab = 'server';
@@ -31,6 +59,7 @@ function selectChannel(id: string) {
 }
 
 function selectDM(dmId: string) {
+	lastDMId = null;
 	dmStore.select(dmId);
 	layoutStore.sidebarTab = 'messages';
 	onNavigate?.();
@@ -41,7 +70,7 @@ function selectDM(dmId: string) {
 	<!-- Tab bar -->
 	<div class="flex h-12 items-center border-b border-border shrink-0">
 		<button
-			onclick={() => layoutStore.sidebarTab = 'server'}
+			onclick={switchToServerTab}
 			class="relative flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'server'
 				? 'border-primary text-foreground'
 				: 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -55,7 +84,7 @@ function selectDM(dmId: string) {
 			{/if}
 		</button>
 		<button
-			onclick={() => layoutStore.sidebarTab = 'messages'}
+			onclick={switchToMessagesTab}
 			class="relative flex-1 flex items-center justify-center gap-1.5 h-full text-sm font-medium transition-colors border-b-2 {tab === 'messages'
 				? 'border-primary text-foreground'
 				: 'border-transparent text-muted-foreground hover:text-foreground'}"
