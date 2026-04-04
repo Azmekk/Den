@@ -20,6 +20,7 @@ interface Props {
 	onScrollToReplyTarget: (msg: MessageInfo) => void;
 	onOpenDM: (userId: string) => void;
 	formatTimestamp: (iso: string) => string;
+	formatTime: (iso: string) => string;
 	hasSelfMention: boolean;
 	index: number;
 }
@@ -37,6 +38,7 @@ const {
 	onScrollToReplyTarget,
 	onOpenDM,
 	formatTimestamp,
+	formatTime,
 	hasSelfMention,
 	index,
 }: Props = $props();
@@ -112,7 +114,7 @@ $effect(() => {
 {#if grouped}
 	<div data-message-id={message.id} class="flex gap-3 py-0 group hover:bg-secondary/30 -mx-2 px-2 rounded {hasSelfMention ? 'bg-amber-500/10' : ''}">
 		<div class="w-8 flex items-center justify-center shrink-0">
-			<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTimestamp(message.created_at)}</span>
+			<span class="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">{formatTime(message.created_at)}</span>
 		</div>
 		<div class="flex-1 min-w-0">
 			{@render replyIndicator()}

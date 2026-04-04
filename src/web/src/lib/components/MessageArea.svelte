@@ -104,12 +104,17 @@ let dragOver = $state(false);
 let dragCounter = 0;
 
 // Helper functions
+function formatTime(iso: string): string {
+	const date = new Date(iso);
+	const hours = date.getHours().toString().padStart(2, '0');
+	const minutes = date.getMinutes().toString().padStart(2, '0');
+	return `${hours}:${minutes}`;
+}
+
 function formatTimestamp(iso: string): string {
+	const time = formatTime(iso);
 	const date = new Date(iso);
 	const now = new Date();
-	const hh = date.getHours().toString().padStart(2, '0');
-	const mm = date.getMinutes().toString().padStart(2, '0');
-	const time = `${hh}:${mm}`;
 
 	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 	const yesterday = new Date(today.getTime() - 86400000);
@@ -509,6 +514,7 @@ async function uploadDroppedFile(file: File) {
 							onScrollToReplyTarget={scrollToReplyTarget}
 							onOpenDM={openDM}
 							{formatTimestamp}
+							{formatTime}
 							hasSelfMention={hasSelfMention(msg)}
 							index={msgIndex}
 						/>
