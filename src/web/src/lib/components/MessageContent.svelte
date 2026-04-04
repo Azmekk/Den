@@ -1,5 +1,6 @@
 <script lang="ts">
 import { auth } from '$lib/stores/auth.svelte';
+import { configStore } from '$lib/stores/config.svelte';
 import { emoteStore } from '$lib/stores/emotes.svelte';
 import { usersStore } from '$lib/stores/users.svelte';
 interface Props {
@@ -117,9 +118,11 @@ const youtubeEmbeds = $derived.by(() => {
 		.filter((e) => e.embedUrl !== null) as { url: string; embedUrl: string }[];
 });
 
-// Hide URL text for direct image embeds (not videos — those show URL + embed)
+// Hide URL text for direct media embeds (images always, videos only if from our bucket)
 const embedUrls = $derived(new Set(
-	directEmbeds.filter((e) => !isVideoUrl(e.value)).map((e) => e.value)
+	directEmbeds
+		.filter((e) => !isVideoUrl(e.value) || (configStore.bucketPublicUrl && e.value.startsWith(configStore.bucketPublicUrl)))
+		.map((e) => e.value)
 ));
 
 </script>

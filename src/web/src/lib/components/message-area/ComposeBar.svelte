@@ -24,6 +24,7 @@ interface Props {
 	placeholderText: string;
 	mentionFilterIds?: string[];
 	messages: MessageInfo[];
+	onUploadReady?: (upload: (file: File) => void) => void;
 }
 
 const {
@@ -36,6 +37,7 @@ const {
 	placeholderText,
 	mentionFilterIds,
 	messages,
+	onUploadReady,
 }: Props = $props();
 
 let messageInput = $state('');
@@ -174,6 +176,8 @@ async function uploadFile(file: File) {
 		if (fileInputEl) fileInputEl.value = '';
 	}
 }
+
+onUploadReady?.(uploadFile);
 
 function handleFileSelect(event: Event) {
 	const input = event.target as HTMLInputElement;

@@ -76,6 +76,10 @@ func (b *BucketService) KeyFromURL(url string) string {
 	return strings.TrimPrefix(url, "/")
 }
 
+func (b *BucketService) PublicURLBase() string {
+	return b.publicURL
+}
+
 func (b *BucketService) PublicURL(key string) string {
 	if b.publicURL != "" {
 		return fmt.Sprintf("%s/%s", b.publicURL, key)

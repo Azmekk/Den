@@ -76,6 +76,7 @@ export interface InviteCodeInfo {
 
 export interface AppConfig {
 	uploads_enabled: boolean;
+	bucket_public_url?: string;
 	voice_enabled?: boolean;
 	ice_servers?: RTCIceServer[];
 	max_message_chars: number;

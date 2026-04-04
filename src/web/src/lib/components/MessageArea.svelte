@@ -13,8 +13,7 @@ import { websocket } from '$lib/stores/websocket.svelte';
 import { layoutStore } from '$lib/stores/layout.svelte';
 import type { MessageInfo } from '$lib/types';
 import { unresolveContent } from '$lib/utils';
-import { convertToWebP, isImageFile, isVideoFile } from '$lib/media';
-import { api } from '$lib/api';
+import { isImageFile, isVideoFile } from '$lib/media';
 import MessageContextMenu from './MessageContextMenu.svelte';
 import MessageHeader from './message-area/MessageHeader.svelte';
 import MessageBubble from './message-area/MessageBubble.svelte';
@@ -102,6 +101,7 @@ let replyingTo = $state<MessageInfo | null>(null);
 // Drag state
 let dragOver = $state(false);
 let dragCounter = 0;
+let composeUpload: ((file: File) => void) | undefined;
 
 // Helper functions
 function formatTime(iso: string): string {
@@ -389,45 +389,11 @@ function handleDrop(event: DragEvent) {
 	event.preventDefault();
 	dragCounter = 0;
 	dragOver = false;
-	if (!configStore.uploadsEnabled) return;
+	if (!configStore.uploadsEnabled || !composeUpload) return;
 	const file = event.dataTransfer?.files[0];
 	if (file && (isImageFile(file) || isVideoFile(file))) {
-		// File will be handled by ComposeBar's upload mechanism via drag-drop on main area
-		// For now we trigger the upload directly
-		uploadDroppedFile(file);
+		composeUpload(file);
 	}
-}
-
-async function uploadDroppedFile(file: File) {
-	let body: FormData;
-	let endpoint: string;
-
-	if (isImageFile(file)) {
-		const webp = await convertToWebP(file);
-		body = new FormData();
-		body.append('file', webp, 'image.webp');
-		endpoint = '/upload/image';
-	} else if (isVideoFile(file)) {
-		body = new FormData();
-		body.append('file', file, file.name);
-		endpoint = '/upload/video';
-	} else {
-		return;
-	}
-
-	try {
-		const data = await api.upload<{ url?: string }>(endpoint, body);
-		if (data.url) {
-			const content = data.url;
-			const replyId = replyingTo?.id;
-			if (isDM && dmId) {
-				dmStore.sendMessage(dmId, content, replyId);
-			} else if (channelId) {
-				messageStore.sendMessage(channelId, content, replyId);
-			}
-			replyingTo = null;
-		}
-	} catch {}
 }
 </script>
 
@@ -553,6 +519,7 @@ async function uploadDroppedFile(file: File) {
 			{placeholderText}
 			{mentionFilterIds}
 			{messages}
+			onUploadReady={(upload) => composeUpload = upload}
 		/>
 
 		{#if deletingMessage}

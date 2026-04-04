@@ -214,7 +214,12 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", fsError)
 	}
 
-	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceManager, hub, staticFS, bucketSvc != nil, allowedOrigins)
+	bucketPublicURL := ""
+	if bucketSvc != nil {
+		bucketPublicURL = bucketSvc.PublicURLBase()
+	}
+
+	appRouter := router.New(authSvc, channelSvc, messageSvc, userSvc, adminSvc, emoteSvc, dmSvc, mediaSvc, voiceManager, hub, staticFS, bucketSvc != nil, bucketPublicURL, allowedOrigins)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

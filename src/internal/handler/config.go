@@ -9,6 +9,7 @@ import (
 
 type ConfigHandler struct {
 	uploadsEnabled      bool
+	bucketPublicURL     string
 	voiceEnabled        bool
 	voiceManager        *voice.Manager
 	getMaxChars         func() int
@@ -16,9 +17,10 @@ type ConfigHandler struct {
 	smtpEnabled         bool
 }
 
-func NewConfigHandler(uploadsEnabled, voiceEnabled bool, voiceManager *voice.Manager, getMaxChars func() int, getOpenRegistration func() bool, smtpEnabled bool) *ConfigHandler {
+func NewConfigHandler(uploadsEnabled, voiceEnabled bool, bucketPublicURL string, voiceManager *voice.Manager, getMaxChars func() int, getOpenRegistration func() bool, smtpEnabled bool) *ConfigHandler {
 	return &ConfigHandler{
 		uploadsEnabled:      uploadsEnabled,
+		bucketPublicURL:     bucketPublicURL,
 		voiceEnabled:        voiceEnabled,
 		voiceManager:        voiceManager,
 		getMaxChars:         getMaxChars,
@@ -34,6 +36,10 @@ func (handler *ConfigHandler) GetConfig(writer http.ResponseWriter, request *htt
 		"max_message_chars": handler.getMaxChars(),
 		"open_registration": handler.getOpenRegistration(),
 		"smtp_enabled":      handler.smtpEnabled,
+	}
+
+	if handler.bucketPublicURL != "" {
+		config["bucket_public_url"] = handler.bucketPublicURL
 	}
 
 	if handler.voiceManager != nil {
